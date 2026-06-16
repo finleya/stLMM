@@ -42,10 +42,29 @@ jobs:
           needs: website
 
       - name: Build site
+        shell: bash
         run: |
-          options(pkgdown.internet = FALSE)
-          pkgdown::build_site(".", install = TRUE, preview = FALSE)
-        shell: Rscript {0}
+          set +e
+          set -o pipefail
+          Rscript -e 'options(pkgdown.internet = FALSE); pkgdown::build_site(".", install = TRUE, preview = FALSE)' 2>&1 | tee pkgdown-build.log
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "### pkgdown build failed"
+              echo
+              echo '```'
+              tail -n 120 pkgdown-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pkgdown-build-log
+          path: pkgdown-build.log
+          if-no-files-found: ignore
 
       - uses: actions/upload-pages-artifact@v3
         with:
