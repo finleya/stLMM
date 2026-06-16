@@ -46,7 +46,7 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          Rscript -e 'options(pkgdown.internet = FALSE); pkgdown::build_site(".", install = TRUE, preview = FALSE)' 2>&1 | tee pkgdown-build.log
+          Rscript -e 'options(pkgdown.internet = FALSE); status <- 0L; tryCatch(pkgdown::build_site(".", install = TRUE, preview = FALSE), error = function(e) { message(conditionMessage(e)); status <<- 1L }); if (status != 0L) { message("Rerunning article build with quiet = FALSE"); try(pkgdown::build_articles(".", quiet = FALSE, lazy = FALSE, preview = FALSE), silent = FALSE) }; quit(status = status)' 2>&1 | tee pkgdown-build.log
           status=$?
           if [ "$status" -ne 0 ]; then
             {
