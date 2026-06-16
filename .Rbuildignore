@@ -3,6 +3,8 @@
 ^\.agents$
 ^\.codex$
 ^\.git$
+^\.github$
+^\.github/
 ^\.gitignore$
 ^vignettes/\.gitignore$
 ^\.\.Rcheck$
