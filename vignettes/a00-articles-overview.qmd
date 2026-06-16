@@ -1,0 +1,24 @@
+---
+title: "stLMM article overview"
+subtitle: "Package vignettes and extended site resources"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+---
+
+## Purpose
+
+The package ships with a small number of fast vignettes.
+
+The package website at <https://finleya.github.io/stLMM/> provides the broader article set. Those articles include longer model examples, likelihood extensions, diagnostics, runtime notes, applied workflows, and the modeling and software details reference that are useful for learning the package but too heavy for routine package builds.
+
+For real analyses, use the website articles as templates rather than as final settings. Longer chains, multiple-chain diagnostics, prior sensitivity checks, posterior predictive checks, and application-specific validation remain part of the user's analysis workflow.

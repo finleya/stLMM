@@ -1,0 +1,9 @@
+The Polya-Gamma sampler source files with names beginning stLMM_pg_ are
+adapted from BayesLogit.
+
+BayesLogit copyright:
+
+  (C) Nicholas Polson, James Scott, Jesse Windle, 2012-2019
+
+BayesLogit is distributed under the GNU General Public License, version 3 or
+later. stLMM is also distributed under GPL-3-or-later.

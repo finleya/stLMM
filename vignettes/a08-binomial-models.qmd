@@ -1,0 +1,360 @@
+---
+title: "Binomial models with stLMM"
+subtitle: "Logistic mixed models, Pólya-Gamma updates, and prediction"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+```{r setup}
+#| code-fold: true
+#| code-summary: "Show preliminaries"
+library(stLMM)
+library(ggplot2)
+
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
+
+set.seed(1)
+```
+
+```{r plot-theme, include=FALSE}
+theme_set(theme_bw(base_size = 12))
+```
+
+## Overview
+
+This vignette introduces binomial models in `stLMM`. The example uses a logistic mixed model with binomial trial counts, a structured AR(1) latent time effect, fitted probabilities, retained time-effect draws, and holdout prediction. The same binomial likelihood can be combined with other structured process terms such as `nngp()`, `car()`, and `car_time()`.
+
+## Logistic model
+
+For binomial responses, `stLMM` uses a logistic mixed model. Let $y_i$ be the number of successes out of $n_i$ trials. The model is
+
+$$
+y_i \mid p_i \sim \operatorname{Binomial}(n_i, p_i),
+$$
+
+with linear predictor
+
+$$
+\eta_i = \log\left(\frac{p_i}{1-p_i}\right).
+$$
+
+For the time-structured example below,
+
+$$
+\eta_i = \beta_0 + x_i\beta_1 + w_{t_i},
+\qquad
+\mathbf{w} = \{w_1,\ldots,w_T\}^\top \sim N\{\mathbf{0}, \sigma_w^2\mathbf{R}(\phi)\}.
+$$
+
+The probability is
+
+$$
+p_i = \operatorname{logit}^{-1}(\eta_i).
+$$
+
+This notation maps directly to the package outputs. For binomial models, `fitted(..., scale = "link")` returns posterior summaries of $\eta_i$, while the default `scale = "response"` returns posterior summaries of $p_i$. Similarly, `predict(..., scale = "link")` returns prediction samples on the linear predictor scale, and the default response scale returns predicted probabilities. If `y_samples = TRUE`, prediction also simulates binomial counts using the prediction-row trial counts.
+
+## Pólya-Gamma updates
+
+The binomial sampler uses Pólya-Gamma latent variables [@PolsonScottWindle2013]. Conditional on these latent variables, the logistic likelihood can be written as a Gaussian working likelihood for the linear predictor. This lets `stLMM` use the same fixed-effect and random-effect Gaussian updating machinery used by the Gaussian models. The Pólya-Gamma random variates are generated through the C/C++ API provided by the `BayesLogit` R package [@BayesLogitPackage].
+
+There is no residual variance parameter `tau_sq` in a binomial model. The binomial likelihood supplies the observation-level variance through $n_i$ and $p_i$, and the Pólya-Gamma variables provide the working precisions used inside the sampler. Therefore `tau_sq` priors, starting values, tuning values, and the Gaussian `resid()` term are not used with `family = "binomial"`.
+
+For structured process terms such as `ar1()`, `nngp()`, `car()`, or `car_time()`, the process is collapsed during parameter updates. In binomial structured-process models, `stLMM()` saves the in-chain process draws by default as `save_process = list(start = 1, thin = 1)` because those draws are already needed for the Pólya-Gamma augmentation. Calling `recover()` selects from these saved draws for fitted values and prediction. Users can thin the retained process grid with `save_process = list(start = ..., thin = ...)`, or set `save_process = FALSE` when only parameter samples are needed.
+
+## Simulated binomial time series
+
+We simulate repeated binomial observations over a shared time index. Each row has its own number of trials. The latent AR(1) process creates temporal dependence in the probability of success after accounting for the fixed effect. We hold out a subset of rows throughout the time range by setting `y = NA`; these rows do not contribute to the likelihood, but their covariates, time values, and trial counts are retained for prediction.
+
+```{r simulate-data}
+n_time <- 34
+n_per_time <- 9
+
+time <- rep(seq_len(n_time), each = n_per_time)
+x <- rnorm(n_time * n_per_time)
+trials <- sample(8:26, n_time * n_per_time, replace = TRUE)
+
+beta <- c("(Intercept)" = -0.25, x = 0.85)
+sigma_w_sq <- 0.65^2
+phi <- 0.75
+time_support <- seq_len(n_time)
+w <- rmvnorm(
+  mean = rep(0, n_time),
+  Sigma = sigma_w_sq * ar1_cor(time_support, phi = phi)
+)
+
+eta <- beta["(Intercept)"] + beta["x"] * x + w[time]
+prob <- plogis(eta)
+y <- rbinom(length(prob), size = trials, prob = prob)
+
+holdout <- logical(length(y))
+holdout_id <- unlist(tapply(seq_along(y), time, function(z) sample(z, 2)))
+holdout[holdout_id] <- TRUE
+
+dat <- data.frame(
+  y = y,
+  x = x,
+  time = time,
+  trials = trials,
+  prob_true = prob
+)
+dat$y[holdout] <- NA
+```
+
+The exploratory plot shows the complete simulated binomial dataset before the holdout values are hidden from the model. Point size is the number of binomial trials for each row, and the filled color is the observed success proportion. Holdout rows are taken from this complete set of observations before fitting.
+
+```{r data-plot, fig.width=7, fig.height=4.5}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+plot_dat <- dat
+plot_dat$response_rate <- y / plot_dat$trials
+
+ggplot(plot_dat, aes(time, response_rate)) +
+  geom_point(
+    aes(size = trials, fill = response_rate),
+    shape = 21,
+    color = "grey25",
+    alpha = 0.75,
+    stroke = 0.25
+  ) +
+  scale_fill_gradientn(
+    colors = stlmm_palette(),
+    limits = c(0, 1)
+  ) +
+  scale_size_continuous(
+    range = c(1.5, 4)
+  ) +
+  labs(
+    x = "time",
+    y = "observed success proportion",
+    fill = "success\nproportion",
+    size = "trials"
+  )
+```
+
+## Fit
+
+The `family = "binomial"` argument selects the binomial logistic likelihood. The `trials = "trials"` argument tells the model to read the number of trials from the `trials` column. If `trials` is omitted, the model defaults to one trial per row, which gives Bernoulli observations.
+
+```{r fit-binomial}
+fit <- stLMM(
+  y ~ x + ar1(time),
+  data = dat,
+  family = "binomial",
+  trials = "trials",
+  priors = list(
+    beta = normal(mean = 0, sd = 3),
+    ar1_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      phi = uniform(0.05, 0.95)
+    )
+  ),
+  starting = list(ar1_1 = list(sigma_sq = 0.4, phi = 0.6)),
+  tuning = list(ar1_1 = list(sigma_sq = 0.05, phi = 0.15)),
+  n_samples = 900,
+  verbose = FALSE
+)
+
+summary(fit)
+```
+
+The fixed effects use a weakly informative normal prior. The AR(1) term has a prior on its process variance and temporal association parameter. Notice that no `tau_sq` prior is supplied.
+
+## Latent process recovery
+
+Structured process terms are integrated out during parameter updates. For this Pólya-Gamma model, the sampler has already saved the in-chain AR(1) process draws needed for augmentation. Calling `recover()` selects and labels the retained latent time effects; it does not run a separate post-fit Pólya-Gamma reconstruction. The recovered AR(1) effects line up with the sorted fitted time support.
+
+The process mean and the fixed intercept can trade a nearly constant shift in a finite MCMC run. For that reason, the plot below compares the intercept-plus-process contribution, $\beta_0 + w_t$, rather than $w_t$ alone.
+
+```{r recover-process}
+rec <- recover(fit, sub_sample = list(start = 301, thin = 2))
+rec_draws <- as_samples(rec, include_w = TRUE, metadata = FALSE)
+w_cols <- paste0("w_ar1_1_", seq_along(time_support))
+intercept_w_samples <- sweep(
+  as.matrix(rec_draws[, w_cols, drop = FALSE]),
+  1,
+  rec_draws[["(Intercept)"]],
+  "+"
+)
+
+w_summary <- data.frame(
+  time = time_support,
+  truth = beta["(Intercept)"] + w,
+  posterior_mean = colMeans(intercept_w_samples)
+)
+
+head(w_summary)
+```
+
+In the plot, the orange line is the true simulated intercept-plus-process contribution and the blue line is the posterior mean estimate.
+
+```{r process-plot, fig.width=7, fig.height=4.2}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(w_summary, aes(time)) +
+  geom_line(
+    aes(y = truth),
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  geom_line(
+    aes(y = posterior_mean),
+    color = stlmm_color("primary"),
+    linewidth = 0.8
+  ) +
+  geom_point(
+    aes(y = posterior_mean),
+    color = stlmm_color("primary"),
+    size = 1.6
+  ) +
+  labs(
+    x = "time",
+    y = "intercept plus latent time effect"
+  )
+```
+
+## Fitted probabilities
+
+By default, `fitted()` returns posterior fitted probabilities for binomial models. Because this model has a structured AR(1) term, fitted values need latent process draws. For this Pólya-Gamma fit those draws were saved during MCMC; here we use the recovered object so the fitted values line up with the same selected draw grid used above.
+
+```{r fitted-values}
+fitted_prob <- fitted(rec)
+
+fitted_link <- fitted(
+  rec,
+  scale = "link"
+)
+
+head(data.frame(probability = fitted_prob, link = fitted_link))
+```
+
+The two scales are related by the inverse-logit transformation. For example, `plogis(fitted_link)` is on the probability scale, up to the difference between transforming posterior means and averaging transformed posterior draws.
+
+```{r fitted-plot, fig.width=5.5, fig.height=4.8}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+fitted_dat <- data.frame(
+  truth = dat$prob_true[!holdout],
+  fitted = fitted_prob[!holdout]
+)
+fitted_lim <- range(fitted_dat$truth, fitted_dat$fitted)
+
+ggplot(fitted_dat, aes(truth, fitted)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    alpha = 0.75,
+    size = 1.8
+  ) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  coord_equal(
+    xlim = fitted_lim,
+    ylim = fitted_lim
+  ) +
+  labs(
+    x = "true probability",
+    y = "posterior fitted probability"
+  )
+```
+
+## Holdout prediction
+
+Prediction rows for this model need the fixed-effect covariates, the fitted time value, and the trial count. Here all prediction rows are held-out observations on the fitted time support. The call below uses the fitted object directly to show that Pólya-Gamma process predictions can use the saved in-chain process draws without first creating a recovery object.
+
+```{r predict-holdout}
+holdout_new <- dat[holdout, setdiff(names(dat), "y"), drop = FALSE]
+
+pred <- predict(
+  fit,
+  newdata = holdout_new,
+  y_samples = TRUE,
+  sub_sample = list(start = 301, thin = 2)
+)
+
+print(pred)
+```
+
+The `mu_samples` matrix contains predicted probabilities by default. The `y_samples` matrix contains posterior predictive binomial counts out of the supplied `trials`. The full prediction summary has one row for each prediction row, so here we print only the first few rows.
+
+```{r prediction-summary}
+pred_summary <- summary(pred)
+pred_draws <- as_samples(pred, sample = "all", metadata = FALSE)
+mu_cols <- paste0("mu_", seq_len(nrow(holdout_new)))
+y_cols <- paste0("y_", seq_len(nrow(holdout_new)))
+pred_prob <- colMeans(pred_draws[, mu_cols, drop = FALSE])
+pred_count <- colMeans(pred_draws[, y_cols, drop = FALSE])
+
+prediction_summary <- data.frame(
+  time = holdout_new$time,
+  trials = holdout_new$trials,
+  truth_prob = dat$prob_true[holdout],
+  predicted_prob = pred_prob,
+  observed_count = y[holdout],
+  predicted_count = pred_count
+)
+
+head(prediction_summary)
+head(pred_summary$mu)
+head(pred_summary$y)
+```
+
+The holdout plot compares the true simulated probabilities, which are known here because this is a simulation, with the posterior predicted probabilities. The blue points are posterior means, the vertical lines are 95% credible intervals for $p_i$, and the orange crosses are the true simulated probabilities.
+
+```{r prediction-plot, fig.width=7, fig.height=4.8}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+plot_pred <- prediction_summary
+plot_pred$mean <- pred_summary$mu[, "mean"]
+plot_pred$q2.5 <- pred_summary$mu[, "q2.5"]
+plot_pred$q97.5 <- pred_summary$mu[, "q97.5"]
+plot_pred$row <- seq_len(nrow(plot_pred))
+plot_pred <- plot_pred[order(plot_pred$truth_prob), ]
+plot_pred$row <- seq_len(nrow(plot_pred))
+interval_color <- stlmm_discrete_colors(4)[4]
+
+ggplot(plot_pred, aes(row, mean)) +
+  geom_linerange(
+    aes(ymin = q2.5, ymax = q97.5),
+    color = interval_color,
+    alpha = 0.85,
+    linewidth = 0.7
+  ) +
+  geom_point(
+    color = stlmm_color("primary"),
+    size = 2,
+    alpha = 0.8
+  ) +
+  geom_point(
+    aes(y = truth_prob),
+    color = stlmm_color("secondary"),
+    shape = 4,
+    stroke = 1
+  ) +
+  labs(
+    x = "holdout row, ordered by true probability",
+    y = "predicted probability"
+  )
+```
+
+## What this example illustrates
+
+Binomial `stLMM` models use the same formula grammar as Gaussian models, but the likelihood is logistic and there is no `tau_sq`. Trial counts are supplied with `trials`; if omitted, the model assumes one trial per row.
+
+For binomial models, fitted and predicted means are probabilities on the response scale by default. Use `scale = "link"` to work with the linear predictor. If `y_samples = TRUE`, prediction simulates binomial count outcomes, not Gaussian residual noise.
+
+The AR(1) effects in this example are retained during fitting and then selected by `recover()`. For Pólya-Gamma structured-process models, `predict(fit, ...)` can also use the saved process draws directly; `recover()` is useful when you want the usual recovery object or a narrower retained draw grid. This differs from Gaussian process and CAR examples, where `recover()` draws the process values post hoc.

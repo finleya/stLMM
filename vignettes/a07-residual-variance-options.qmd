@@ -1,0 +1,516 @@
+---
+title: "Residual variance options with stLMM"
+subtitle: "From constant variance to heteroskedastic and direct-estimate models"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+```{r setup}
+#| code-fold: true
+#| code-summary: "Show preliminaries"
+library(stLMM)
+library(ggplot2)
+library(sf)
+
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
+
+set.seed(1)
+```
+
+```{r plot-theme, include=FALSE}
+theme_set(theme_bw(base_size = 12))
+```
+
+## Overview
+
+This vignette introduces residual variance options in Gaussian models. We start with the constant residual variance model used in earlier vignettes, then generalize to group-specific residual variances for grouped heteroskedasticity. The final examples move to a small-area estimation setting where the response is a direct estimate and the dataset includes externally supplied sampling variance estimates.
+
+## Constant residual variance
+
+The default Gaussian residual model estimates a single residual variance
+
+$$
+y_i = \beta_0 + x_i\beta_1 + \epsilon_i,\qquad
+\epsilon_i \sim N(0,\tau^2).
+$$
+
+This is the residual model used in the earlier introductory examples. The simulation builds the mean `theta`, then adds independent Gaussian residual error.
+
+```{r constant-data}
+n <- 80
+
+constant_dat <- data.frame(
+  x = runif(n, -1, 1)
+)
+
+beta <- c(0.5, 1)
+tau_sq <- 0.25^2
+
+mu <- beta[1] + beta[2] * constant_dat$x
+epsilon <- rnorm(n, sd = sqrt(tau_sq))
+
+constant_dat$theta <- mu
+constant_dat$y <- mu + epsilon
+```
+
+```{r constant-plot, fig.width=6.5, fig.height=4.5}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(constant_dat, aes(x, y)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    alpha = 0.75,
+    size = 1.8
+  ) +
+  geom_line(
+    aes(y = theta),
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  labs(
+    x = "covariate",
+    y = "response"
+  )
+```
+
+```{r fit-constant}
+fit_constant <- stLMM(
+  y ~ x,
+  data = constant_dat,
+  priors = list(resid = list(tau_sq = half_t(df = 3, scale = 0.5))),
+  n_samples = 400,
+  verbose = FALSE
+)
+
+summary(fit_constant)
+```
+
+Recall that the prior is associated with the variance parameter `tau_sq`, but `half_t(df = 3, scale = 0.5)` is placed on the residual standard deviation, $\tau = \sqrt{\tau^2}$, and transformed internally to the variance scale.
+
+## Group-specific residual variances
+
+A common generalization is to let the residual variance differ by group. The grouping variable could indicate sampling strata, measurement protocols, ownership classes, forest types, or any other known classification where residual variation is expected to differ.
+
+$$
+y_i = \beta_0 + x_i\beta_1 + \epsilon_i,\qquad
+\epsilon_i \sim N(0,\tau_{g_i}^2).
+$$
+
+The simulated dataset has three groups with the same mean model and different residual standard deviations.
+
+```{r group-data}
+n_group <- 3
+n_per_group <- 45
+group_name <- c("low", "medium", "high")
+group_sd <- c(low = 0.10, medium = 0.25, high = 0.50)
+
+group_dat <- data.frame(
+  group = factor(rep(group_name, each = n_per_group), levels = group_name),
+  x = runif(n_group * n_per_group, -1, 1)
+)
+
+beta <- c(0.5, 1)
+mu <- beta[1] + beta[2] * group_dat$x
+
+group_dat$theta <- mu
+group_dat$tau_sq_true <- group_sd[as.character(group_dat$group)]^2
+group_dat$y <- mu + rnorm(nrow(group_dat), sd = sqrt(group_dat$tau_sq_true))
+```
+
+```{r group-plot, fig.width=6.5, fig.height=4.5}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(group_dat, aes(x, y)) +
+  geom_point(
+    aes(color = group),
+    alpha = 0.7,
+    size = 1.8
+  ) +
+  geom_line(
+    aes(y = theta),
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  scale_color_manual(
+    values = stlmm_discrete_colors(3)
+  ) +
+  labs(
+    x = "covariate",
+    y = "response",
+    color = "group"
+  )
+```
+
+For comparison, first fit the constant residual variance model to the grouped data.
+
+```{r fit-group-constant}
+fit_group_constant <- stLMM(
+  y ~ x,
+  data = group_dat,
+  priors = list(resid = list(tau_sq = half_t(df = 3, scale = 0.5))),
+  n_samples = 400,
+  verbose = FALSE
+)
+
+summary(fit_group_constant)
+```
+
+Now fit the group-specific residual variance model. A single prior can be recycled over all groups using `priors$resid`, or group-specific priors can be supplied with names matching the observed groups. Here we use one weakly informative half-$t$ prior for all three residual standard deviations.
+
+```{r fit-group-variance}
+fit_group_variance <- stLMM(
+  y ~ x + resid(model = "group", group = group),
+  data = group_dat,
+  priors = list(
+    resid = list(tau_sq = half_t(df = 3, scale = 1))
+  ),
+  n_samples = 500,
+  verbose = FALSE
+)
+
+summary(fit_group_variance)
+```
+
+```{r group-variance-summary}
+variance_cols <- group_name
+variance_draws <- as_samples(fit_group_variance, metadata = FALSE)[, variance_cols, drop = FALSE]
+group_variance_summary <- data.frame(
+  group = variance_cols,
+  truth = group_sd[variance_cols]^2,
+  posterior_mean = colMeans(variance_draws),
+  posterior_lower = NA_real_,
+  posterior_upper = NA_real_
+)
+
+for(j in seq_len(nrow(group_variance_summary))){
+  q <- quantile(
+    variance_draws[, j],
+    probs = c(0.025, 0.975)
+  )
+  group_variance_summary$posterior_lower[j] <- q[1]
+  group_variance_summary$posterior_upper[j] <- q[2]
+}
+
+group_variance_summary
+```
+
+```{r group-variance-plot, fig.width=6.5, fig.height=4.2}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(group_variance_summary, aes(group, posterior_mean)) +
+  geom_pointrange(
+    aes(ymin = posterior_lower, ymax = posterior_upper),
+    color = stlmm_color("primary"),
+    linewidth = 0.6
+  ) +
+  geom_point(
+    aes(y = truth),
+    color = stlmm_color("secondary"),
+    size = 2
+  ) +
+  labs(
+    x = "group",
+    y = "residual variance"
+  )
+```
+
+## Direct-estimate setting
+
+Suppose area $i$ has a direct estimate $\hat{y}_i$ for an underlying area-level target $\theta_i$. A simple working model is
+
+$$
+\hat{y}_i = \theta_i + e_i,\qquad e_i \sim N(0, v_i),
+$$
+
+where $v_i$ is the direct-estimate sampling variance. The mean model is
+
+$$
+\theta_i = \beta_0 + x_i\beta_1.
+$$
+
+In many small-area applications, $v_i$ is supplied by a design-based estimator or another external procedure. The residual variance model controls how that variance information enters `stLMM`. The simulation below makes direct estimates more precise when the effective sample size is larger.
+
+```{r direct-estimate-data}
+n_area <- 100
+
+direct_dat <- data.frame(
+  area = sprintf("area_%02d", seq_len(n_area)),
+  x = runif(n_area, -1, 1),
+  n_eff = sample(10:100, n_area, replace = TRUE)
+)
+
+beta <- c(0.5, 1)
+mu <- beta[1] + beta[2] * direct_dat$x
+direct_dat$theta <- mu
+
+reference_se <- 0.5
+reference_n <- 30
+
+direct_dat$vhat <- reference_se^2 * reference_n / direct_dat$n_eff
+
+direct_dat$yhat <- mu + rnorm(n_area, sd = sqrt(direct_dat$vhat))
+```
+
+```{r direct-estimate-plot, fig.width=6.5, fig.height=4.5}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(direct_dat, aes(x, yhat)) +
+  geom_point(
+    aes(size = 1 / vhat),
+    color = stlmm_color("primary"),
+    alpha = 0.7
+  ) +
+  geom_line(
+    aes(y = theta),
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  scale_size_continuous(
+    range = c(1.5, 4)
+  ) +
+  labs(
+    x = "area covariate",
+    y = "direct estimate",
+    size = "precision"
+  )
+```
+
+The plot shows the direct estimates around the latent area-level mean. Point size is proportional to the supplied direct-estimate precision, $1/v_i$. Larger points have smaller supplied sampling variances and therefore carry more information about the corresponding latent area mean.
+
+### Fixed direct-estimate variances
+
+When the direct-estimate variances are treated as known sampling variances, use `resid(model = "fixed", variance = vhat)`. In this model, `tau_sq` is not estimated; instead, the observation-level precision is fixed at $1/v_i$.
+
+```{r fit-fixed}
+fit_fixed <- stLMM(
+  yhat ~ x + resid(model = "fixed", variance = vhat),
+  data = direct_dat,
+  n_samples = 400,
+  verbose = FALSE
+)
+
+summary(fit_fixed)
+```
+
+The fitted object reports that fixed row-specific residual variances are being used. Because `tau_sq` is replaced by the supplied `vhat` column, no `tau_sq` prior is included.
+
+### Fay-Herriot models
+
+The fixed direct-estimate variance model above is the sampling model used in Fay-Herriot small-area models [@FayHerriot1979]. A basic Fay-Herriot model adds an area-level random effect to the latent mean
+
+$$
+\hat{\theta}_i = \theta_i + e_i,\qquad e_i \sim N(0, v_i),
+$$
+
+$$
+\theta_i = \mathbf{x}_i^\top\boldsymbol{\beta} + \alpha_i,\qquad
+\alpha_i \sim N(0,\sigma_\alpha^2).
+$$
+
+In `stLMM`, the sampling model is specified with `resid(model = "fixed", variance = vhat)`, and the independent area effects are specified with `iid(area)`.
+
+```{r fit-fh}
+fit_fh <- stLMM(
+  yhat ~ x + iid(area) + resid(model = "fixed", variance = vhat),
+  data = direct_dat,
+  priors = list(
+    iid_1 = list(sigma_sq = ig(shape = 2, scale = 0.1))
+  ),
+  n_samples = 400,
+  verbose = FALSE
+)
+
+fit_fh
+```
+
+Here the response rows are area-level direct estimates. The `iid(area)` term is the Fay-Herriot area random effect: it models residual variation in the latent area means $\theta_i$ after accounting for the covariate. The direct-estimate sampling variances enter separately through `resid(model = "fixed", variance = vhat)`.
+
+### Prior-informed sampling variances
+
+The classical Fay-Herriot model treats $v_i$ as known. In practice, direct-estimate variances are often estimated from the same sparse survey data that produce the direct estimates. Shannon et al. [-@Shannon2025] motivate using the direct variance estimate and effective sample size to define an inverse-gamma prior for the sampling-error variance rather than fixing it.
+
+In `stLMM`, `resid(model = "group", group = area, variance = vhat, prior = "ig")` estimates one sampling-error variance per group and uses `vhat` to construct its prior. With this prior, the same inverse-gamma shape is used for every group. If `center = "mode"`, the supplied `vhat_g` is the most likely prior value for the group-specific sampling variance $\tau_g^2$:
+
+$$
+\tau_g^2 \sim IG(a, b_g),\qquad b_g = (a + 1)\hat{v}_g.
+$$
+
+The `shape` value $a$ controls how strongly the prior is concentrated around `vhat_g`. Smaller values allow the sampled variance to move farther from `vhat_g`; larger values place more prior mass near `vhat_g`. This is useful when `vhat_g` is informative but should not be treated as exact.
+
+```{r fit-fh-ig}
+fit_fh_ig <- stLMM(
+  yhat ~ x + iid(area) +
+    resid(
+      model = "group",
+      group = area,
+      variance = vhat,
+      prior = "ig",
+      shape = 10,
+      center = "mode"
+    ),
+  data = direct_dat,
+  priors = list(
+    iid_1 = list(sigma_sq = ig(shape = 2, scale = 0.1))
+  ),
+  n_samples = 400,
+  verbose = FALSE
+)
+
+fit_fh_ig
+```
+
+This model keeps the Fay-Herriot sampling and linking structure, but the observation variance is sampled. The supplied `vhat` anchors the prior for each area-level sampling-error variance. The Shannon construction is also available with `method = "shannon"`, which sets the inverse-gamma shape and scale from both `vhat` and `n_eff`.
+
+## Spatial Fay-Herriot models
+
+A spatial Fay-Herriot model keeps the same direct-estimate sampling model but replaces the independent area effects with spatially structured area effects. With a CAR model,
+
+$$
+\theta_i = \mathbf{x}_i^\top\boldsymbol{\beta} + w_i,\qquad
+\mathbf{w} \sim N(\mathbf{0}, \mathbf{Q}_{\mathrm{car}}^{-1}).
+$$
+
+We use Washington counties to simulate a spatial Fay-Herriot example. The county graph is the same graph construction used in the areal CAR vignette.
+
+```{r wa-fh-data}
+data(stunitco, package = "stLMM")
+
+wa_counties <- stunitco[stunitco$STATECD == 53, ]
+g <- car_graph(wa_counties, id = "COUNTYFIPS", island = "nearest")
+
+centroid_x <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(wa_counties)))[, "X"]
+centroid_x_mean <- mean(centroid_x)
+centroid_x_sd <- stats::sd(centroid_x)
+
+wa_dat <- data.frame(
+  area = as.character(wa_counties$COUNTYFIPS),
+  county = wa_counties$COUNTYNM,
+  x = (centroid_x - centroid_x_mean) / centroid_x_sd,
+  n_eff = sample(10:100, nrow(wa_counties), replace = TRUE)
+)
+
+beta_wa <- c(0.5, -1)
+sigma_sq_wa <- 0.25
+rho_wa <- 0.75
+
+Q_wa <- car_prec(g, sigma_sq = sigma_sq_wa, rho = rho_wa)
+w_wa <- rmvnorm(mean = rep(0, nrow(Q_wa)), Sigma = solve(Q_wa))
+names(w_wa) <- rownames(Q_wa)
+
+wa_dat$w_true <- w_wa[wa_dat$area]
+mu <- beta_wa[1] + beta_wa[2] * wa_dat$x + wa_dat$w_true
+wa_dat$theta <- mu
+wa_reference_se <- 0.25
+wa_reference_n <- 30
+
+wa_dat$vhat <- wa_reference_se^2 * wa_reference_n / wa_dat$n_eff
+wa_dat$yhat <- mu + rnorm(nrow(wa_dat), sd = sqrt(wa_dat$vhat))
+```
+
+```{r wa-direct-map, fig.width=6.4, fig.height=2.4}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+wa_plot <- wa_counties
+wa_plot$area <- as.character(wa_plot$COUNTYFIPS)
+wa_plot$theta <- wa_dat$theta[match(wa_plot$area, wa_dat$area)]
+wa_plot$yhat <- wa_dat$yhat[match(wa_plot$area, wa_dat$area)]
+
+wa_map <- rbind(
+  transform(wa_plot, value = theta, quantity = "latent area mean"),
+  transform(wa_plot, value = yhat, quantity = "direct estimate")
+)
+
+ggplot(wa_map) +
+  geom_sf(
+    aes(fill = value),
+    color = "white",
+    linewidth = 0.15
+  ) +
+  facet_wrap(~ quantity) +
+  scale_fill_gradientn(colors = stlmm_palette()) +
+  labs(
+    fill = "value"
+  )
+```
+
+The direct estimates are noisier than the latent area means, especially for counties with smaller effective sample sizes. Because the simulation treats `vhat` as the data-generating sampling variance, the spatial Fay-Herriot fit below uses `resid(model = "fixed", variance = vhat)`. The model uses the supplied sampling variances and county graph to smooth the direct estimates.
+
+```{r fit-spatial-fh}
+fit_spatial_fh <- stLMM(
+  yhat ~ x + car(area, graph = g) + resid(model = "fixed", variance = vhat),
+  data = wa_dat,
+  priors = list(
+    car_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      rho = uniform(0.05, 0.95)
+    )
+  ),
+  n_samples = 500,
+  verbose = FALSE
+)
+
+fit_spatial_fh
+```
+
+This example shows the spatial Fay-Herriot workflow and the role of the residual variance model. With one simulated areal field over 39 counties, the CAR variance and dependence parameters can be weakly identified. Longer runs, stronger prior information, repeated time points, or more areas are needed before interpreting the covariance parameter estimates closely.
+
+```{r spatial-fh-summary}
+spatial_fh_recovery <- recover(fit_spatial_fh)
+wa_dat$fitted_mean <- fitted(spatial_fh_recovery)
+
+direct_rmse <- sqrt(mean((wa_dat$yhat - wa_dat$theta)^2))
+fitted_rmse <- sqrt(mean((wa_dat$fitted_mean - wa_dat$theta)^2))
+
+spatial_fh_summary <- data.frame(
+  quantity = c("direct estimate", "spatial FH fitted"),
+  rmse = c(direct_rmse, fitted_rmse)
+)
+
+spatial_fh_summary
+```
+
+In this simulation, the spatial Fay-Herriot fitted means have a smaller RMSE than the direct estimates. The improvement is modest, which is what we should expect from a small example: the direct estimates already contain useful information, and the spatial model mainly borrows strength from neighboring counties while accounting for the supplied sampling-variance information.
+
+```{r spatial-fh-map, fig.width=7.2, fig.height=2.7}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+wa_plot$fitted_mean <- wa_dat$fitted_mean[match(wa_plot$area, wa_dat$area)]
+
+wa_fit_map <- rbind(
+  transform(wa_plot, value = yhat, quantity = "direct estimate"),
+  transform(wa_plot, value = fitted_mean, quantity = "spatial FH fitted")
+)
+
+ggplot(wa_fit_map) +
+  geom_sf(
+    aes(fill = value),
+    color = "white",
+    linewidth = 0.15
+  ) +
+  facet_wrap(~ quantity) +
+  scale_fill_gradientn(colors = stlmm_palette()) +
+  labs(
+    fill = "value"
+  )
+```
+
+## What this example illustrates
+
+The default Gaussian residual model estimates one `tau_sq`. Use `resid(model = "group", group = group)` when residual variance is expected to differ across a modest number of groups. This is a heteroskedastic residual model, not a direct-estimate row-specific variance model. Use `priors$resid` to give one prior for all group-specific residual variances or a named prior for each group.
+
+Use `resid(model = "fixed", variance = vhat)` when row-specific variances are treated as known sampling variances for direct estimates. Use `resid(model = "group", group = area, variance = vhat, prior = "ig", shape = ..., center = ...)` when direct variance estimates should anchor, rather than fix, sampled observation variances. With `center = "mode"`, `vhat` is the most likely prior value and `shape` controls concentration. Use `resid(model = "group", group = area, variance = vhat, n = n_eff, prior = "shannon")` when an effective sample size should determine the inverse-gamma prior shape and scale. Adding `iid(area)` gives a basic Fay-Herriot model with independent area effects. Replacing `iid(area)` with `car(area, graph)` gives a spatial Fay-Herriot-style model that borrows strength across neighboring areas.
+
+Prediction with `y_samples = TRUE` requires the corresponding residual variance information in `newdata`, such as `vhat`, `n_eff`, or `group`. Models with many sampled residual variance groups can mix slowly because those variance parameters are part of the Metropolis updates.
+
+## References

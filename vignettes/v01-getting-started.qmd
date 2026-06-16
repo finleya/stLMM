@@ -1,0 +1,221 @@
+---
+title: "Getting started with stLMM"
+subtitle: "Fixed effects, iid random effects, fitted values, and prediction"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+vignette: >
+  %\VignetteIndexEntry{01. Getting started with stLMM}
+  %\VignetteEngine{quarto::html}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup}
+#| code-fold: true
+#| code-summary: "Show preliminaries"
+library(stLMM)
+library(ggplot2)
+
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
+
+set.seed(1)
+```
+
+```{r plot-theme, include=FALSE}
+theme_set(theme_bw(base_size = 12))
+```
+
+## Overview
+
+This vignette introduces the basic `stLMM` workflow using small simulated Gaussian response examples. The first model has fixed effects only. The second adds independent and identically distributed (iid) grouped random effects.
+
+The package ships with only a small set of fast vignettes so package checks remain lightweight. Additional model examples, applied workflows, computing notes, and the modeling and software details reference are available on the package website at <https://finleya.github.io/stLMM/>. The development repository is <https://github.com/finleya/stLMM>.
+
+## Fixed-effect model
+
+We start with a simple Gaussian linear model,
+
+$$
+y_i = \beta_0 + x_i\beta_1 + \epsilon_i,\qquad
+\epsilon_i \sim N(0,\tau^2).
+$$
+
+```{r fixed-data}
+n <- 50
+dat <- data.frame(x = seq(-1, 1, length.out = n))
+
+beta <- c(0.5, -0.5)
+tau_sq <- 0.2^2
+
+mu <- beta[1] + beta[2] * dat$x
+epsilon <- rnorm(n, sd = sqrt(tau_sq))
+dat$y <- mu + epsilon
+```
+
+```{r fixed-data-plot, fig.width=6, fig.height=4}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+ggplot(dat, aes(x, y)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    size = 2
+  ) +
+  labs(x = "x", y = "response")
+```
+
+Prior definitions in `stLMM` state both the parameter they're associated with and the scale on which the prior distribution is defined. Here the model parameter is the residual variance `tau_sq`, but `half_t(df = 3, scale = 0.5)` defines a weakly informative half-$t$ prior on the residual standard deviation, `sqrt(tau_sq)`, and then transforms that prior internally to the variance scale. In contrast, `ig(shape, scale)` is placed directly on the variance. See `?stLMM_priors` for the parameterization of each prior constructor.
+
+```{r fixed-fit}
+fit <- stLMM(
+  y ~ x,
+  data = dat,
+  priors = list(resid = list(tau_sq = half_t(df = 3, scale = 0.5))),
+  n_samples = 250,
+  verbose = FALSE
+)
+
+summary(fit)
+```
+
+For models without structured process terms, `fitted()` can be called directly on the fit object.
+
+```{r fixed-fitted}
+mu_hat <- fitted(fit)
+
+head(mu_hat)
+```
+
+```{r fixed-fitted-plot, fig.width=6, fig.height=4}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+plot_dat <- data.frame(
+  x = dat$x,
+  y = dat$y,
+  fitted = as.numeric(mu_hat)
+)
+
+ggplot(plot_dat, aes(x, y)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    size = 2
+  ) +
+  geom_line(
+    aes(y = fitted),
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  labs(x = "x", y = "response")
+```
+
+Prediction uses a `newdata` data frame with the variables needed to rebuild the fixed-effect design matrix.
+
+```{r fixed-predict}
+new_dat <- data.frame(x = c(-0.75, 0, 0.75))
+
+pred <- predict(fit, newdata = new_dat, y_samples = TRUE)
+
+summary(pred)
+```
+
+## Grouped random effects
+
+The `iid()` term adds exchangeable group-level effects. A random-intercept model is
+
+$$
+y_i = \beta_0 + x_i\beta_1 + \alpha_{g_i} + \epsilon_i,\qquad
+\alpha_g \sim N(0,\sigma_\alpha^2),\quad g=1,\ldots,q.
+$$
+
+The effects are independent across groups and share a common variance parameter, so `iid()` is meant literally here: independent and identically distributed group-level effects. Here $g_i$ is the group level for observation $i$; in the data, this is the value of the `group` column for row `i`.
+
+The residual variance again uses a half-$t$ prior on the residual standard deviation. In this example, the iid random-effect variance uses an inverse-gamma prior, parameterized by shape and scale.
+
+```{r grouped-data}
+n_group <- 5
+n_per_group <- 10
+group_dat <- data.frame(
+  group = factor(rep(letters[1:n_group], each = n_per_group)),
+  x = rep(seq(-1, 1, length.out = n_per_group), n_group)
+)
+
+sigma_sq_alpha <- 0.5^2
+alpha_true <- rnorm(n_group, sd = sqrt(sigma_sq_alpha))
+names(alpha_true) <- levels(group_dat$group)
+
+beta <- c(0.5, -0.5)
+mu <- beta[1] + beta[2] * group_dat$x +
+  alpha_true[as.character(group_dat$group)]
+
+tau_sq <- 0.25^2
+epsilon <- rnorm(nrow(group_dat), sd = sqrt(tau_sq))
+group_dat$y <- mu + epsilon
+```
+
+The call to `stLMM()` below fits the same model used to generate the data. Parameters associated with model terms are labeled using generated term names. The names combine the term type and an index, where the index gives the order among terms of that same type. For example, this model has one `iid()` term, so its variance parameter is labeled with `iid_1`. If the formula had two `iid()` terms, they would be labeled `iid_1` and `iid_2` from left to right in the model formula. Structured process terms use the same convention, with names such as `nngp_1`, `car_1`, or `car_time_1`.
+
+```{r grouped-fit}
+group_fit <- stLMM(
+  y ~ x + iid(group),
+  data = group_dat,
+  priors = list(
+    resid = list(tau_sq = half_t(df = 3, scale = 0.5)),
+    iid_1 = list(sigma_sq = ig(shape = 3, scale = 0.25))
+  ),
+  n_samples = 250,
+  verbose = FALSE
+)
+
+summary(group_fit)
+```
+
+Prediction for grouped random effects requires levels that were present during fitting; unseen grouped levels currently produce an error.
+
+```{r grouped-predict}
+group_new <- data.frame(
+  group = factor(c("a", "c", "e"), levels = levels(group_dat$group)),
+  x = c(-0.5, 0, 0.5)
+)
+
+group_pred <- predict(group_fit, newdata = group_new)
+
+summary(group_pred)
+```
+
+## Classical SAE model connection
+
+The grouped random-intercept model above connects to a classical unit-level small area estimation (SAE) model. When the response vector holds sampled units and the grouping variable identifies small areas, `y ~ x + iid(group)` is a Bayesian version of the nested-error regression model used by Battese, Harter, and Fuller (BHF) [@BatteseHarterFuller1988]. In that setting, `iid(group)` is the area random effect, $\sigma_\alpha^2$ is the between-area variance, and the Gaussian residual variance is the unit-level error variance.
+
+The classical BHF model uses independent area effects. Spatial or space-time unit-level extensions keep the same unit-level response structure but replace `iid(group)` with structured terms such as `car(area, graph = g)` or `car_time(area, time, graph = g)`. Area-level estimates are obtained by predicting over the target population support and averaging or summing those predictions.
+
+## Structured process terms
+
+Structured process terms such as `ar1()`, `gp()`, `nngp()`, `car()`, and `car_time()` are handled differently than the `iid()` term. During fitting, those latent process values are integrated out. After fitting, use `recover()` to recover the latent random effects for summary or subsequent prediction. That progression looks as follows.
+
+```r
+fit <- stLMM(y ~ x + nngp(lon, lat), data = dat, ...)
+rec <- recover(fit, sub_sample = list(start = 1001, thin = 5))
+fitted(rec)
+predict(rec, newdata = new_dat)
+```
+
+Recovered objects can be converted to `coda` objects just like fitted objects.
+Use `include_w = TRUE` when diagnostics or summaries should include recovered
+latent process draws. For recovered objects, `as_mcmc()` aligns fixed-effect,
+variance, covariance, and recovered process columns to the same posterior
+iterations selected by `recover()`.
+
+```r
+rec_mcmc <- as_mcmc(rec, include_w = TRUE)
+```
+
+Later vignettes cover point-referenced, areal, space-time, binomial, residual variance, and sampler-diagnostic workflows.

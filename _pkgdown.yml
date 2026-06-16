@@ -1,0 +1,43 @@
+url: https://finleya.github.io/stLMM/
+destination: docs
+
+template:
+  bootstrap: 5
+  bslib:
+    primary: "#2f5f7f"
+    base_font: "system-ui"
+    heading_font: "system-ui"
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, github]
+
+home:
+  sidebar: true
+
+articles:
+- title: "Package vignettes"
+  contents:
+  - v01-getting-started
+  - v02-spatial-nngp
+- title: "Technical reference"
+  contents:
+  - a12-modeling-software-details
+- title: "Extended package vignettes"
+  contents:
+  - a00-articles-overview
+  - a01-areal-car
+  - a02-areal-dagar
+  - a03-space-time-car
+  - a04-point-observations-car-time
+  - a05-space-time-nngp
+  - a06-spatial-varying-coefficients
+  - a07-residual-variance-options
+  - a08-binomial-models
+  - a09-negative-binomial-counts
+  - a10-metropolis-blocking-diagnostics
+  - a11-runtime-performance
+- title: "Additional articles"
+  contents:
+  - a13-scottish-lip-cancer-nimble-comparison

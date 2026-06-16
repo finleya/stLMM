@@ -1,0 +1,6 @@
+*.html
+*_files/
+.Rhistory
+
+/.quarto/
+**/*.quarto_ipynb

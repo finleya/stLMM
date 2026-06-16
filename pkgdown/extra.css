@@ -1,0 +1,63 @@
+:root {
+  --stlmm-primary: #2f5f7f;
+  --stlmm-note-border: #6c8fb6;
+  --stlmm-note-background: #f7f9fb;
+}
+
+.navbar-brand img {
+  max-height: 48px;
+}
+
+.template-home main p:has(img[alt="stLMM package hex logo"]),
+.template-home main p:has(br[clear="left"]) {
+  display: none;
+}
+
+.stlmm-note {
+  border-left: 4px solid var(--stlmm-note-border);
+  padding: 0.6rem 0.9rem;
+  background: var(--stlmm-note-background);
+}
+
+.cell-output-display,
+.quarto-figure,
+figure {
+  margin-top: 0.2rem !important;
+  margin-bottom: 0.25rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell-output-display > div,
+.cell-output-display figure,
+.cell-output-display p,
+.cell-output-display img,
+.quarto-figure p,
+figure p,
+img.figure-img {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell > details.code-fold {
+  margin-bottom: 0.2rem !important;
+}
+
+.cell {
+  margin-bottom: 0.7rem !important;
+}
+
+.stlmm-table {
+  width: 100%;
+  table-layout: auto;
+  margin-top: 0.25rem;
+  margin-bottom: 0.65rem;
+}
+
+.stlmm-table th,
+.stlmm-table td {
+  vertical-align: top;
+  white-space: normal;
+}

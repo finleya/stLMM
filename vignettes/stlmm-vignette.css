@@ -1,0 +1,48 @@
+.stlmm-note {
+  border-left: 4px solid #6C8FB6;
+  padding: 0.6rem 0.9rem;
+  background: #f7f9fb;
+}
+
+.cell-output-display,
+.quarto-figure,
+figure {
+  margin-top: 0.2rem !important;
+  margin-bottom: 0.25rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell-output-display > div,
+.cell-output-display figure,
+.cell-output-display p,
+.cell-output-display img,
+.quarto-figure p,
+figure p,
+img.figure-img {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell > details.code-fold {
+  margin-bottom: 0.2rem !important;
+}
+
+.cell {
+  margin-bottom: 0.7rem !important;
+}
+
+.stlmm-table {
+  width: 100%;
+  table-layout: auto;
+  margin-top: 0.25rem;
+  margin-bottom: 0.65rem;
+}
+
+.stlmm-table th,
+.stlmm-table td {
+  vertical-align: top;
+  white-space: normal;
+}

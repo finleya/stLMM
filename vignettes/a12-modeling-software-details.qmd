@@ -1,0 +1,22 @@
+---
+title: "Modeling and software details"
+subtitle: "Technical reference for the stLMM model grammar and implementation"
+author: "Andrew O. Finley"
+description: "Technical reference for stLMM notation, model terms, likelihoods, collapsed sampling, sparse linear algebra, recovery, and prediction."
+format:
+  html:
+    toc: false
+    number-sections: false
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+---
+
+The package vignettes focus on runnable examples. The technical reference provides a more complete description of the model notation, likelihoods, structured process terms, collapsed sampler, sparse linear algebra, recovery, and prediction machinery used by `stLMM`.
+
+[Download the PDF technical reference](../stLMM-modeling-and-software-details.pdf).
+
+The document is intended for readers who want implementation-level detail beyond the user-facing examples. It is most useful when checking how a model formula maps to the latent process representation, how the collapsed sampler is constructed, or how recovery and prediction use the sampled parameters and retained process draws.

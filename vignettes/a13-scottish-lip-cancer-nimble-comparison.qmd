@@ -1,0 +1,782 @@
+---
+title: "Scottish lip cancer: NIMBLE ICAR versus stLMM CAR and DAGAR"
+subtitle: "Comparing smoothed SIR surfaces, graph choices, and areal priors"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    code-overflow: wrap
+    html-math-method: katex
+    css: stlmm-vignette.css
+    embed-resources: true
+    theme:
+      light: cosmo
+execute:
+  warning: false
+  message: false
+params:
+  run_nimble: true
+  n_chains: 3
+  n_keep_per_chain: 200
+  burnin_nimble: 5000
+  thin_nimble: 25
+  burnin_stlmm: 5000
+  thin_stlmm: 25
+  nb_size_poisson: 1000
+---
+
+```{r setup}
+#| include: false
+library(stLMM)
+library(sf)
+library(spdep)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(coda)
+library(knitr)
+
+vignette_dir <- dirname(knitr::current_input(dir = TRUE))
+source(file.path(vignette_dir, "utils.R"))
+
+# The GeoDa Scottish lip cancer polygons are planar legacy geometries with no
+# usable CRS for spherical topology. Use GEOS topology for neighborhood finding.
+sf::sf_use_s2(FALSE)
+set.seed(1)
+
+model_nimble <- "NIMBLE ICAR Poisson"
+model_car <- "stLMM proper CAR NB"
+model_leroux <- "stLMM Leroux CAR NB"
+model_dagar <- "stLMM DAGAR NB"
+
+n_chains <- as.integer(params$n_chains)
+n_keep_per_chain <- as.integer(params$n_keep_per_chain)
+burnin_nimble <- as.integer(params$burnin_nimble)
+thin_nimble <- as.integer(params$thin_nimble)
+burnin_stlmm <- as.integer(params$burnin_stlmm)
+thin_stlmm <- as.integer(params$thin_stlmm)
+
+niter_nimble <- burnin_nimble + n_keep_per_chain * thin_nimble
+niter_stlmm <- burnin_stlmm + n_keep_per_chain * thin_stlmm
+stlmm_sub_sample <- list(start = burnin_stlmm + 1L, thin = thin_stlmm)
+```
+
+```{r plot-theme, include=FALSE}
+theme_set(theme_bw(base_size = 12))
+```
+
+## Purpose
+
+This vignette compares the ICAR model used in the NIMBLE Scottish lip cancer case study with three stLMM count-model alternatives: large-size negative-binomial approximations with proper CAR, Leroux CAR, and DAGAR latent effects. The goal is to see how close the stLMM SIR estimates are to the NIMBLE ICAR estimates when the models target the same relative-risk surface but use related, nonidentical spatial priors.
+
+The NIMBLE reference model is
+
+$$
+\begin{aligned}
+O_i \mid \lambda_i &\sim \operatorname{Poisson}(\lambda_i E_i),\\
+\log(\lambda_i) &= \alpha + \phi_i,\\
+\boldsymbol{\phi} &\sim \operatorname{ICAR}(\mathbf{W}, 1/\tau_\phi).
+\end{aligned}
+$$
+
+The stLMM proper CAR model is
+
+$$
+\begin{aligned}
+O_i &\sim \operatorname{NB}(\mu_i, r),\\
+\log(\mu_i) &= \log(E_i) + \alpha + w_i,\\
+\mathbf{w} &\sim N\{0, \sigma^2(\mathbf{D}-\rho\mathbf{G})^{-1}\}.
+\end{aligned}
+$$
+
+The stLMM Leroux CAR model uses
+
+$$
+\begin{aligned}
+O_i &\sim \operatorname{NB}(\mu_i, r),\\
+\log(\mu_i) &= \log(E_i) + \alpha + w_i,\\
+\mathbf{w} &\sim N\{0, \sigma^2[(1-\rho)\mathbf{I}+\rho(\mathbf{D}-\mathbf{G})]^{-1}\}.
+\end{aligned}
+$$
+
+The stLMM DAGAR model uses the same likelihood and offset but replaces the CAR prior with a directed areal prior,
+
+$$
+\begin{aligned}
+O_i &\sim \operatorname{NB}(\mu_i, r),\\
+\log(\mu_i) &= \log(E_i) + \alpha + w_i,\\
+\mathbf{w} &\sim N\{0, \sigma^2\mathbf{Q}_{\operatorname{DAGAR}}(\rho; \mathbf{G}, \mathcal{O})^{-1}\},
+\end{aligned}
+$$
+
+where $\mathcal{O}$ is the ordering used to orient the graph.
+
+All fitted models estimate the same response-scale target,
+
+$$
+\lambda_i = \mu_i/E_i,
+$$
+
+the standardized incidence ratio (SIR). The main modeling differences to keep in mind are:
+
+- crude SIR, $O_i/E_i$, is very noisy where expected counts are small;
+- NIMBLE uses an exact Poisson likelihood and an intrinsic, sum-constrained CAR prior;
+- stLMM uses a large-size NB likelihood and proper CAR, Leroux CAR, or DAGAR priors;
+- the GeoDa graph has disconnected components and isolated regions, while the stLMM fits use a connected graph with nearest-neighbor bridge edges.
+
+These differences are enough that the fitted SIR surfaces should be expected to show similar broad smoothing behavior, not identical estimates.
+
+## Requirements
+
+The NIMBLE comparison requires `nimble` and the packages needed to compile and run NIMBLE models. Those packages are not `stLMM` requirements; they are needed only when `params$run_nimble` is `true`. Install `nimble` before rendering the full comparison:
+
+```r
+install.packages("nimble")
+```
+
+```{r dependency-check}
+#| include: false
+run_nimble <- isTRUE(params$run_nimble)
+if (run_nimble && !requireNamespace("nimble", quietly = TRUE))
+  stop("The nimble package is required to render this comparison vignette.")
+
+required_packages <- c("nimble", "coda", "sf", "spdep", "ggplot2", "dplyr", "tidyr", "stLMM")
+
+data.frame(
+  package = required_packages,
+  role = c("NIMBLE comparison only", "vignette diagnostics", "vignette data and maps", "vignette graph comparison", "vignette plotting", "vignette data wrangling", "vignette data wrangling", "model fitting"),
+  installed = vapply(
+    required_packages,
+    requireNamespace,
+    logical(1),
+    quietly = TRUE
+  )
+)
+```
+
+The two samplers use different implementations, but the comparison below uses the same number of chains, the same total chain length, and the same number of retained posterior draws per chain for each fitted model. Each chain runs for 10,000 total iterations, with the first 5,000 discarded and every 25th remaining draw retained for summaries.
+
+```{r mcmc-settings}
+data.frame(
+  sampler = c("NIMBLE ICAR", "stLMM CAR/DAGAR"),
+  chains = n_chains,
+  discard = c(burnin_nimble, burnin_stlmm),
+  thin = c(thin_nimble, thin_stlmm),
+  iter_per_chain = c(niter_nimble, niter_stlmm),
+  kept_per_chain = n_keep_per_chain,
+  kept_total = n_chains * n_keep_per_chain
+) |>
+  knitr::kable(caption = "MCMC settings used for posterior comparisons.")
+```
+
+## Data and Graph
+
+```{r data-download}
+#| include: false
+read_scotlip <- function() {
+  data_dir <- file.path(vignette_dir, "scotlip_data")
+  zip_file <- file.path(data_dir, "scotlip.zip")
+  gpkg_file <- file.path(data_dir, "scotlip", "scotlip.gpkg")
+
+  if (!file.exists(gpkg_file)) {
+    dir.create(data_dir, showWarnings = FALSE)
+    url <- "https://geodacenter.github.io/data-and-lab/data/scotlip.zip"
+    utils::download.file(url, zip_file, mode = "wb", quiet = TRUE)
+    utils::unzip(zip_file, exdir = data_dir)
+  }
+
+  sf::st_read(gpkg_file, quiet = TRUE)
+}
+
+ScotLip <- read_scotlip()
+ScotLip <- sf::st_make_valid(ScotLip)
+ScotLip$area <- as.character(ScotLip$CODENO)
+ScotLip$crudeSIR <- ScotLip$CANCER / ScotLip$CEXP
+
+lip_dat <- sf::st_drop_geometry(ScotLip)
+lip_dat$area <- as.character(lip_dat$CODENO)
+
+dplyr::select(lip_dat, area, NAME, CANCER, CEXP, AFF, crudeSIR) |>
+  head()
+```
+
+```{r graph}
+wards_nb <- spdep::poly2nb(ScotLip, queen = TRUE)
+nbWB_A <- spdep::nb2WB(wards_nb)
+nb_comp <- spdep::n.comp.nb(wards_nb)
+
+# stLMM proper areal priors use a connected precision on the areal support.
+g <- car_graph(ScotLip, id = "area", island = "nearest", island_k = 1)
+
+graph_summary <- data.frame(
+  graph = c("NIMBLE poly2nb graph", "stLMM bridged graph"),
+  n_area = nrow(ScotLip),
+  n_edges = c(length(nbWB_A$weights) / 2, sum(as.matrix(g$adjacency) != 0) / 2),
+  n_components = c(nb_comp$nc, 1),
+  n_isolated = c(sum(card(wards_nb) == 0), 0),
+  added_bridge_edges = c(0, nrow(g$island_added_edges))
+)
+
+graph_summary
+```
+
+```{r bridge-table}
+#| include: false
+bridge_table <- g$island_added_edges |>
+  mutate(
+    from_name = ScotLip$NAME[match(from, ScotLip$area)],
+    to_name = ScotLip$NAME[match(to, ScotLip$area)]
+  )
+
+bridge_table
+```
+
+This graph difference is not cosmetic. NIMBLE's ICAR fit uses the `poly2nb()` graph, which has four components and three isolated regions. The stLMM fits use a connected graph with bridge edges. Those bridge edges allow the stLMM spatial priors to borrow strength across areas that are disconnected in the NIMBLE ICAR graph.
+
+```{r crude-map, fig.width=7, fig.height=4.5}
+ggplot(ScotLip) +
+  geom_sf(aes(fill = crudeSIR), color = "white", linewidth = 0.15) +
+  scale_fill_gradientn(colors = stlmm_palette(), limits = c(0, 6.6), oob = scales::squish) +
+  labs(fill = "crude SIR")
+```
+
+## NIMBLE ICAR Fit
+
+The NIMBLE implementation uses `dcar_normal(..., zero_mean = 1)`, which imposes a zero-mean constraint on the ICAR field. That is necessary because the ICAR prior is improper and the model contains an intercept.
+
+```{r nimble-icar-code}
+#| include: false
+cat('
+ICARCode <- nimbleCode({
+  for (i in 1:N) {
+    O[i] ~ dpois(mu[i])
+    log(mu[i]) <- log(E[i]) + alpha + phi[i]
+    SIR[i] <- exp(alpha + phi[i])
+  }
+  phi[1:N] ~ dcar_normal(adj[1:L], weights[1:L], num[1:N],
+                         tau.phi, zero_mean = 1)
+  alpha ~ dflat()
+  overallSIR <- exp(alpha)
+  tau.phi ~ dgamma(1, 0.01)
+  sigma2.phi <- 1 / tau.phi
+})
+')
+```
+
+```{r nimble-icar-setup, eval=run_nimble}
+#| include: false
+library(nimble)
+
+N <- nrow(ScotLip)
+ScotLipdata <- list(O = ScotLip$CANCER)
+ScotLipConsts <- list(
+  N = N,
+  E = ScotLip$CEXP,
+  L = length(nbWB_A$weights),
+  adj = nbWB_A$adj,
+  num = nbWB_A$num,
+  weights = nbWB_A$weights
+)
+
+ICARCode <- nimbleCode({
+  for (i in 1:N) {
+    O[i] ~ dpois(mu[i])
+    log(mu[i]) <- log(E[i]) + alpha + phi[i]
+    SIR[i] <- exp(alpha + phi[i])
+  }
+  phi[1:N] ~ dcar_normal(adj[1:L], weights[1:L], num[1:N],
+                         tau.phi, zero_mean = 1)
+  alpha ~ dflat()
+  overallSIR <- exp(alpha)
+  tau.phi ~ dgamma(1, 0.01)
+  sigma2.phi <- 1 / tau.phi
+})
+
+nimble_inits <- list(
+  list(alpha = 0.01, tau.phi = 10, phi = rep(0.01, N)),
+  list(alpha = 0.5, tau.phi = 1, phi = rep(-0.01, N)),
+  list(alpha = -0.25, tau.phi = 3, phi = rep(0, N))
+)
+nimble_inits <- rep(nimble_inits, length.out = n_chains)
+```
+
+```{r nimble-icar-fit, eval=run_nimble}
+#| code-fold: false
+nimble_fit_time <- system.time({
+  ICARSamples <- nimbleMCMC(
+    code = ICARCode,
+    data = ScotLipdata,
+    constants = ScotLipConsts,
+    inits = nimble_inits,
+    monitors = c("sigma2.phi", "overallSIR", "SIR", "alpha", "phi"),
+    niter = niter_nimble,
+    nburnin = burnin_nimble,
+    thin = thin_nimble,
+    nchains = n_chains,
+    setSeed = seq.int(1, length.out = n_chains),
+    progressBar = FALSE,
+    samplesAsCodaMCMC = TRUE,
+    summary = TRUE
+  )
+})
+```
+
+## stLMM CAR and DAGAR Fits
+
+The stLMM fits use the same expected-count offset and SIR interpretation, but they are not the same model as the NIMBLE ICAR. The likelihood is large-size NB rather than Poisson, and the spatial priors are proper rather than intrinsic.
+
+Because these priors are proper, they do not use the ICAR sum-to-zero constraint. Because the graph has islands, the stLMM fits use the connected, bridged `car_graph()` object shown above. DAGAR adds one more modeling choice: the graph ordering used to form the directed parent structure.
+
+```{r fit-stlmm-proper-car}
+#| code-fold: false
+fit_proper_car <- stLMM(
+  CANCER ~ offset(log(CEXP)) + car(area, graph = g, car_model = "proper"),
+  data = lip_dat,
+  family = "negative_binomial",
+  size = params$nb_size_poisson,
+  priors = list(
+    beta = normal(mean = 0, sd = 3),
+    car_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      rho = uniform(0.05, 0.99)
+    )
+  ),
+  n_samples = niter_stlmm,
+  chains = n_chains,
+  chain_control = list(seed = 1, dispersion = 1.5),
+  verbose = FALSE
+)
+```
+
+```{r fit-stlmm-leroux-car}
+#| code-fold: false
+fit_leroux_car <- stLMM(
+  CANCER ~ offset(log(CEXP)) + car(area, graph = g, car_model = "leroux"),
+  data = lip_dat,
+  family = "negative_binomial",
+  size = params$nb_size_poisson,
+  priors = list(
+    beta = normal(mean = 0, sd = 3),
+    car_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      rho = uniform(0.05, 0.99)
+    )
+  ),
+  n_samples = niter_stlmm,
+  chains = n_chains,
+  chain_control = list(seed = 1, dispersion = 1.5),
+  verbose = FALSE
+)
+```
+
+```{r fit-stlmm-dagar}
+#| code-fold: false
+fit_dagar <- stLMM(
+  CANCER ~ offset(log(CEXP)) + dagar(area, graph = g, ordering = "coord"),
+  data = lip_dat,
+  family = "negative_binomial",
+  size = params$nb_size_poisson,
+  priors = list(
+    beta = normal(mean = 0, sd = 3),
+    dagar_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      rho = uniform(0.05, 0.99)
+    )
+  ),
+  n_samples = niter_stlmm,
+  chains = n_chains,
+  chain_control = list(seed = 1, dispersion = 1.5),
+  verbose = FALSE
+)
+```
+
+```{r recover-stlmm}
+#| include: false
+rec_proper_car <- recover(
+  fit_proper_car,
+  sub_sample = stlmm_sub_sample
+)
+
+rec_leroux_car <- recover(
+  fit_leroux_car,
+  sub_sample = stlmm_sub_sample
+)
+
+rec_dagar <- recover(
+  fit_dagar,
+  sub_sample = stlmm_sub_sample
+)
+```
+
+For Pólya-Gamma process models, `stLMM()` saves the in-chain process draws by default. Calling `recover()` selects from those retained draws, which allows fitted values and SIR summaries to use the same latent-process draws generated during model fitting.
+
+## SIR Summaries
+
+```{r comparison-helpers}
+#| include: false
+sir_summary_stlmm <- function(object, model, sub_sample = stlmm_sub_sample) {
+  mu_draw <- fitted_draw_matrix(object, sub_sample = sub_sample, scale = "response")
+  sir_draw <- sweep(mu_draw, 2, ScotLip$CEXP, `/`)
+  data.frame(
+    area = ScotLip$area,
+    NAME = ScotLip$NAME,
+    model = model,
+    sir_mean = colMeans(sir_draw),
+    sir_median = apply(sir_draw, 2, stats::median),
+    sir_q025 = apply(sir_draw, 2, stats::quantile, 0.025),
+    sir_q975 = apply(sir_draw, 2, stats::quantile, 0.975),
+    prob_sir_gt_1 = colMeans(sir_draw > 1)
+  )
+}
+
+scalar_summary_stlmm <- function(fit, model, burn = burnin_stlmm, thin = thin_stlmm) {
+  draws <- as_samples(fit, burn = burn, thin = thin, metadata = FALSE)
+  out <- data.frame(
+    model = model,
+    parameter = colnames(draws),
+    mean = colMeans(draws),
+    median = apply(draws, 2, stats::median),
+    q025 = apply(draws, 2, stats::quantile, 0.025),
+    q975 = apply(draws, 2, stats::quantile, 0.975),
+    row.names = NULL
+  )
+  out[grepl("^\\(Intercept\\)$|sigma_sq|rho", out$parameter), ]
+}
+
+car_sir <- sir_summary_stlmm(rec_proper_car, model_car)
+leroux_sir <- sir_summary_stlmm(rec_leroux_car, model_leroux)
+dagar_sir <- sir_summary_stlmm(rec_dagar, model_dagar)
+car_scalars <- scalar_summary_stlmm(fit_proper_car, model_car)
+leroux_scalars <- scalar_summary_stlmm(fit_leroux_car, model_leroux)
+dagar_scalars <- scalar_summary_stlmm(fit_dagar, model_dagar)
+```
+
+```{r nimble-comparison-helpers, eval=run_nimble}
+#| include: false
+nimble_draws <- do.call(rbind, ICARSamples$samples)
+sir_cols <- paste0("SIR[", seq_len(nrow(ScotLip)), "]")
+scalar_cols <- c("alpha", "sigma2.phi")
+
+nimble_sir <- data.frame(
+  area = ScotLip$area,
+  NAME = ScotLip$NAME,
+  model = model_nimble,
+  sir_mean = colMeans(nimble_draws[, sir_cols, drop = FALSE]),
+  sir_median = apply(nimble_draws[, sir_cols, drop = FALSE], 2, stats::median),
+  sir_q025 = apply(nimble_draws[, sir_cols, drop = FALSE], 2, stats::quantile, 0.025),
+  sir_q975 = apply(nimble_draws[, sir_cols, drop = FALSE], 2, stats::quantile, 0.975),
+  prob_sir_gt_1 = colMeans(nimble_draws[, sir_cols, drop = FALSE] > 1)
+)
+
+nimble_scalars <- data.frame(
+  model = model_nimble,
+  parameter = scalar_cols,
+  mean = colMeans(nimble_draws[, scalar_cols, drop = FALSE]),
+  median = apply(nimble_draws[, scalar_cols, drop = FALSE], 2, stats::median),
+  q025 = apply(nimble_draws[, scalar_cols, drop = FALSE], 2, stats::quantile, 0.025),
+  q975 = apply(nimble_draws[, scalar_cols, drop = FALSE], 2, stats::quantile, 0.975),
+  row.names = NULL
+)
+```
+
+```{r combine-comparisons}
+all_sir <- bind_rows(car_sir, leroux_sir, dagar_sir)
+all_scalars <- bind_rows(
+  car_scalars,
+  leroux_scalars,
+  dagar_scalars
+)
+
+if (exists("nimble_sir"))
+  all_sir <- bind_rows(nimble_sir, all_sir)
+if (exists("nimble_scalars"))
+  all_scalars <- bind_rows(nimble_scalars, all_scalars)
+
+all_scalars |>
+  mutate(across(where(is.numeric), ~ round(.x, 3))) |>
+  knitr::kable(caption = "Posterior summaries for comparable scalar parameters.")
+```
+
+The intercepts are broadly comparable because they are global log-risk terms. The spatial variance parameters are only rough analogues because ICAR, proper CAR, Leroux CAR, and DAGAR use different precision matrices and different graph structure. The stLMM `rho` parameters have no exact ICAR counterpart.
+
+## Runtime Summary
+
+The table below gives a simple runtime summary for the fitted models. These values are useful for checking the computational scale of the example, but they should not be read as a formal benchmark. Total elapsed time is measured around each high-level model fit call, so it is the wall-clock time for all three chains run by that call. Differences across NIMBLE and stLMM reflect both model implementation and what each timer includes; NIMBLE uses a general model compiler and samples the ICAR latent field directly, while stLMM uses package-specific compiled samplers for these model classes.
+
+```{r runtime-summary}
+elapsed_seconds <- function(x) {
+  if (is.null(x) || !"elapsed" %in% names(x))
+    return(NA_real_)
+
+  unname(as.numeric(x[["elapsed"]]))
+}
+
+stlmm_fit_time_proper_car <- fit_proper_car$timing$sampler_total
+stlmm_fit_time_leroux_car <- fit_leroux_car$timing$sampler_total
+stlmm_fit_time_dagar <- fit_dagar$timing$sampler_total
+
+runtime_rows <- bind_rows(
+  if (exists("nimble_fit_time")) {
+    data.frame(
+      Model = model_nimble,
+      Ch = n_chains,
+      Iter = niter_nimble,
+      Draws = n_chains * n_keep_per_chain,
+      Time_s = elapsed_seconds(nimble_fit_time)
+    )
+  },
+  data.frame(
+    Model = c(model_car, model_leroux, model_dagar),
+    Ch = n_chains,
+    Iter = niter_stlmm,
+    Draws = n_chains * n_keep_per_chain,
+    Time_s = c(
+      elapsed_seconds(stlmm_fit_time_proper_car),
+      elapsed_seconds(stlmm_fit_time_leroux_car),
+      elapsed_seconds(stlmm_fit_time_dagar)
+    )
+  )
+)
+
+runtime_rows |>
+  mutate(across(ends_with("_s"), ~ round(.x, 2))) |>
+  knitr::kable(caption = "Runtime summary for the fitted comparison models.")
+```
+
+## SIR Comparison
+
+```{r sir-diagnostics}
+#| include: false
+diagnostic_sir <- all_sir |>
+  left_join(
+    data.frame(
+      area = ScotLip$area,
+      crudeSIR = ScotLip$crudeSIR,
+      CANCER = ScotLip$CANCER,
+      CEXP = ScotLip$CEXP,
+      degree_nimble = spdep::card(wards_nb),
+      component = nb_comp$comp.id
+    ),
+    by = "area"
+  )
+```
+
+The table below compares posterior median SIR estimates from each stLMM fit against the NIMBLE ICAR posterior median SIR estimates. Values close to correlation one, RMSE near zero, and mean difference near zero indicate close agreement with the NIMBLE reference fit.
+
+```{r nimble-stlmm-pair, eval=exists("nimble_sir")}
+nimble_col <- paste0("sir_median_", model_nimble)
+stlmm_models <- c(model_car, model_leroux, model_dagar)
+stlmm_cols <- paste0("sir_median_", stlmm_models)
+
+sir_pair <- all_sir |>
+  select(area, NAME, model, sir_median, prob_sir_gt_1) |>
+  pivot_wider(names_from = model, values_from = c(sir_median, prob_sir_gt_1)) |>
+  left_join(
+    data.frame(
+      area = ScotLip$area,
+      crudeSIR = ScotLip$crudeSIR,
+      CANCER = ScotLip$CANCER,
+      CEXP = ScotLip$CEXP,
+      degree_nimble = spdep::card(wards_nb),
+      component = nb_comp$comp.id
+    ),
+    by = "area"
+  )
+
+pair_summary <- data.frame(
+  comparison = paste(stlmm_models, "minus", model_nimble),
+  correlation = unname(vapply(stlmm_cols, function(col)
+    cor(sir_pair[[nimble_col]], sir_pair[[col]]), numeric(1))),
+  rmse = unname(vapply(stlmm_cols, function(col)
+    sqrt(mean((sir_pair[[col]] - sir_pair[[nimble_col]])^2)), numeric(1))),
+  mean_difference = unname(vapply(stlmm_cols, function(col)
+    mean(sir_pair[[col]] - sir_pair[[nimble_col]]), numeric(1)))
+)
+
+pair_summary |>
+  mutate(across(where(is.numeric), ~ round(.x, 3))) |>
+  knitr::kable(caption = "Pairwise SIR comparison against the NIMBLE ICAR fit.")
+```
+
+## Maps and Scatter Plots
+
+```{r map-data}
+#| include: false
+plot_sir <- bind_rows(
+  data.frame(
+    area = ScotLip$area,
+    model = "crude SIR",
+    sir_median = ScotLip$crudeSIR,
+    prob_sir_gt_1 = as.numeric(ScotLip$crudeSIR > 1)
+  ),
+  all_sir[, c("area", "model", "sir_median", "prob_sir_gt_1")]
+)
+
+ScotLip_long <- ScotLip[match(plot_sir$area, ScotLip$area), ]
+ScotLip_long$model <- plot_sir$model
+ScotLip_long$sir_median <- plot_sir$sir_median
+ScotLip_long$prob_sir_gt_1 <- plot_sir$prob_sir_gt_1
+
+model_levels <- c("crude SIR", model_nimble, model_car, model_leroux, model_dagar)
+ScotLip_long$model <- factor(ScotLip_long$model, levels = model_levels)
+diagnostic_sir$model <- factor(diagnostic_sir$model, levels = model_levels[-1])
+
+panel_labels <- c(
+  "crude SIR" = "crude\nSIR",
+  "NIMBLE ICAR Poisson" = "NIMBLE ICAR\nPoisson",
+  "stLMM proper CAR NB" = "stLMM proper\nCAR NB",
+  "stLMM Leroux CAR NB" = "stLMM Leroux\nCAR NB",
+  "stLMM DAGAR NB" = "stLMM\nDAGAR NB"
+)
+```
+
+```{r sir-maps, fig.width=18, fig.height=6}
+#| out-width: "100%"
+#| column: page
+ggplot(ScotLip_long) +
+  geom_sf(aes(fill = sir_median), color = "white", linewidth = 0.12) +
+  facet_wrap(~ model, nrow = 1, labeller = as_labeller(panel_labels)) +
+  scale_fill_gradientn(colors = stlmm_palette(), limits = c(0, 6.6), oob = scales::squish) +
+  labs(fill = "SIR median") +
+  theme(strip.text = element_text(size = 11, lineheight = 0.95), legend.position = "bottom")
+```
+
+```{r prob-maps, fig.width=18, fig.height=6}
+#| out-width: "100%"
+#| column: page
+ggplot(ScotLip_long) +
+  geom_sf(aes(fill = prob_sir_gt_1), color = "white", linewidth = 0.12) +
+  facet_wrap(~ model, nrow = 1, labeller = as_labeller(panel_labels)) +
+  scale_fill_gradientn(colors = stlmm_palette(), limits = c(0, 1)) +
+  labs(fill = "Pr(SIR > 1)") +
+  theme(strip.text = element_text(size = 11, lineheight = 0.95), legend.position = "bottom")
+```
+
+```{r scatter-comparison, fig.width=18, fig.height=5.5}
+#| out-width: "100%"
+#| column: page
+ggplot(diagnostic_sir, aes(crudeSIR, sir_median)) +
+  geom_point(aes(size = CEXP, color = degree_nimble == 0), alpha = 0.8) +
+  geom_abline(intercept = 0, slope = 1, color = stlmm_color("secondary")) +
+  facet_wrap(~ model, nrow = 1, labeller = as_labeller(panel_labels)) +
+  coord_equal(xlim = c(0, 6.6), ylim = c(0, 6.6)) +
+  scale_color_manual(values = c("FALSE" = stlmm_color("primary"), "TRUE" = stlmm_color("secondary"))) +
+  labs(x = "crude SIR", y = "posterior median SIR", color = "isolated", size = "expected cases") +
+  theme(strip.text = element_text(size = 11, lineheight = 0.95), legend.position = "bottom")
+```
+
+```{r nimble-stlmm-scatter, eval=exists("nimble_sir"), fig.width=16, fig.height=5.5}
+#| out-width: "100%"
+#| column: page
+nimble_stlmm_long <- bind_rows(lapply(seq_along(stlmm_models), function(j) {
+  data.frame(
+    area = sir_pair$area,
+    NAME = sir_pair$NAME,
+    CEXP = sir_pair$CEXP,
+    degree_nimble = sir_pair$degree_nimble,
+    model = stlmm_models[j],
+    nimble_sir = sir_pair[[nimble_col]],
+    stlmm_sir = sir_pair[[stlmm_cols[j]]]
+  )
+}))
+
+ggplot(nimble_stlmm_long, aes(nimble_sir, stlmm_sir)) +
+  geom_point(aes(size = CEXP, color = degree_nimble == 0), alpha = 0.85) +
+  geom_abline(intercept = 0, slope = 1, color = stlmm_color("secondary")) +
+  facet_wrap(~ model, nrow = 1, labeller = as_labeller(panel_labels)) +
+  coord_equal() +
+  scale_color_manual(values = c("FALSE" = stlmm_color("primary"), "TRUE" = stlmm_color("secondary"))) +
+  labs(x = "NIMBLE ICAR SIR median", y = "stLMM SIR median",
+       color = "isolated", size = "expected cases") +
+  theme(strip.text = element_text(size = 11, lineheight = 0.95), legend.position = "bottom")
+```
+
+## Posterior Quantile Comparisons
+
+The median comparisons above show how closely the centers of the posterior SIR distributions align across areas. A fuller comparison also checks whether the posterior tails are similar. The Q-Q plots below compare matched posterior SIR quantiles from the NIMBLE ICAR fit and each stLMM fit for every county, one stLMM model at a time. These panels are meant as a broad diagnostic scan: points near the one-to-one line indicate similar posterior distributions for that county, while curvature or separated endpoints indicate differences in posterior spread or tail behavior.
+
+```{r nimble-stlmm-qq-data, eval=exists("nimble_sir")}
+#| include: false
+sir_draws_stlmm <- list(
+  model_car = sweep(
+    fitted_draw_matrix(rec_proper_car, sub_sample = stlmm_sub_sample, scale = "response"),
+    2, ScotLip$CEXP, `/`
+  ),
+  model_leroux = sweep(
+    fitted_draw_matrix(rec_leroux_car, sub_sample = stlmm_sub_sample, scale = "response"),
+    2, ScotLip$CEXP, `/`
+  ),
+  model_dagar = sweep(
+    fitted_draw_matrix(rec_dagar, sub_sample = stlmm_sub_sample, scale = "response"),
+    2, ScotLip$CEXP, `/`
+  )
+)
+names(sir_draws_stlmm) <- stlmm_models
+
+nimble_sir_draws <- nimble_draws[, sir_cols, drop = FALSE]
+
+qq_probs <- seq(0.01, 0.99, length.out = 99)
+
+make_qq_dat <- function(area_ids, probs = qq_probs) {
+  bind_rows(lapply(stlmm_models, function(model) {
+    stlmm_draw <- sir_draws_stlmm[[model]]
+
+    bind_rows(lapply(area_ids, function(area_id) {
+      j <- match(area_id, ScotLip$area)
+
+      data.frame(
+        area = area_id,
+        NAME = ScotLip$NAME[j],
+        model = model,
+        probability = probs,
+        nimble = as.numeric(stats::quantile(nimble_sir_draws[, j], probs, names = FALSE)),
+        stlmm = as.numeric(stats::quantile(stlmm_draw[, j], probs, names = FALSE))
+      )
+    }))
+  }))
+}
+```
+
+```{r all-county-qq, eval=exists("nimble_sir"), fig.width=14, fig.height=18}
+#| out-width: "100%"
+#| column: page
+all_qq_dat <- make_qq_dat(ScotLip$area)
+
+for (model_i in stlmm_models) {
+  p <- ggplot(filter(all_qq_dat, model == model_i), aes(nimble, stlmm)) +
+    geom_abline(intercept = 0, slope = 1, color = stlmm_color("secondary")) +
+    geom_point(size = 0.45, alpha = 0.65, color = stlmm_color("primary")) +
+    facet_wrap(~ NAME, scales = "free", ncol = 6) +
+    labs(
+      title = model_i,
+      x = "NIMBLE ICAR SIR posterior quantile",
+      y = "stLMM SIR posterior quantile"
+    ) +
+    theme(
+      strip.text = element_text(size = 7),
+      plot.title = element_text(size = 13),
+      axis.text = element_text(size = 6)
+    )
+
+  print(p)
+}
+```
+
+The Q-Q panels suggest that the stLMM posterior SIR distributions are broadly similar to the NIMBLE ICAR posterior distributions for many counties, especially in the center of the distributions. Departures are most visible where the point clouds bend away from the one-to-one line or separate in the upper tails. Those differences are expected to be more apparent than median differences because the models use different likelihoods, graph structures, and spatial prior forms.
+
+## Interpreting the Differences
+
+The pairwise table, scatter plots, and Q-Q plots above compare complementary parts of the posterior SIR estimates. The median summaries show agreement in posterior center across all areas. The Q-Q plots show whether the county-level posterior distributions have similar spread and tail behavior.
+
+The most important modeling differences are:
+
+- **Likelihood:** NIMBLE uses exact Poisson; stLMM uses large-size NB-PG. With `size = 1000`, this is usually a small likelihood difference for these counts, but it is not zero.
+- **Prior propriety and constraint:** NIMBLE's ICAR is improper and constrained with `zero_mean = 1`; stLMM's proper CAR, Leroux CAR, and DAGAR priors are proper and unconstrained.
+- **Graph:** NIMBLE uses a disconnected `poly2nb()` graph with isolated regions; stLMM uses a connected graph with nearest-neighbor bridges.
+- **Areal prior form:** NIMBLE's ICAR is the limiting intrinsic model. stLMM's proper CAR uses $\mathbf{D}-\rho\mathbf{G}$ with sampled $\rho < 1$, Leroux CAR uses $(1-\rho)\mathbf{I}+\rho(\mathbf{D}-\mathbf{G})$, and DAGAR uses an ordered directed precision $\mathbf{Q}_{\operatorname{DAGAR}}$.
+- **Hyperpriors:** NIMBLE uses a gamma prior on ICAR precision; stLMM uses a half-$t$ prior on the process standard deviation and a bounded prior on $\rho$.

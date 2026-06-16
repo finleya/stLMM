@@ -1,0 +1,47 @@
+Package: stLMM
+Type: Package
+Title: Bayesian Spatial and Space-Time Linear Mixed Models
+Version: 0.0.1
+Authors@R: c(
+    person("Andrew O.", "Finley", role = c("aut", "cre"),
+           email = "finleya@msu.edu"),
+    person("Sudipto", "Banerjee", role = "ctb",
+           email = "abhidatta@jhu.edu"),
+    person("Abhirup", "Datta", role = "ctb",
+           email = "abhidatta@jhu.edu"))
+Author: Andrew O. Finley [aut, cre],
+  Sudipto Banerjee [ctb],
+  Abhirup Datta [ctb]
+Maintainer: Andrew O. Finley <finleya@msu.edu>
+Description: Bayesian linear mixed models with fixed effects, iid grouped
+    random effects, and composable structured latent process terms. Current
+    process terms include AR1, dense Gaussian process, nearest-neighbor
+    Gaussian process, proper and Leroux CAR, ordered DAGAR, separable CAR-time,
+    and covariate-scaled variants. The package uses a sparse precision
+    formulation with post-fit latent process recovery, fitted values, and
+    prediction.
+URL: https://github.com/finleya/stLMM, https://finleya.github.io/stLMM/
+BugReports: https://github.com/finleya/stLMM/issues
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 4.4.0)
+Imports:
+    BayesLogit (>= 2.4),
+    coda,
+    Matrix (>= 1.7-0),
+    stats
+LinkingTo:
+    BayesLogit (>= 2.4),
+    Matrix (>= 1.7-0)
+Suggests:
+    ggplot2,
+    knitr,
+    loo,
+    quarto,
+    sf,
+    testthat (>= 3.0.0)
+VignetteBuilder:
+    quarto
+Config/testthat/edition: 3

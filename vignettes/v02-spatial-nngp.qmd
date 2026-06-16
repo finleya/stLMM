@@ -1,0 +1,283 @@
+---
+title: "Spatial NNGP models with stLMM"
+subtitle: "Point-referenced spatial effects, recovery, and holdout prediction"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: show
+    code-overflow: wrap
+    html-math-method: katex
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+vignette: >
+  %\VignetteIndexEntry{02. Spatial NNGP models with stLMM}
+  %\VignetteEngine{quarto::html}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup}
+#| code-fold: true
+#| code-summary: "Show preliminaries"
+library(stLMM)
+library(ggplot2)
+
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
+
+set.seed(1)
+```
+
+```{r plot-theme, include=FALSE}
+theme_set(theme_bw(base_size = 12))
+```
+
+## Overview
+
+This vignette introduces point-referenced spatial process terms using `nngp()`. We simulate a Gaussian response from a full spatial Gaussian process with an exponential covariance function, fit the training data with a nearest neighbor Gaussian process (NNGP) approximation, recover the fitted spatial random effects, and predict held-out observations.
+
+## Model
+
+For observation $i$ at location $\mathbf{s}_i = (s_{i1}, s_{i2})^\top$, the model is
+
+$$
+y_i = \beta_0 + x_i\beta_1 + w(\mathbf{s}_i) + \epsilon_i,\qquad
+\epsilon_i \sim N(0,\tau^2).
+$$
+
+The spatial process is
+
+$$
+\mathbf{w} = \{w(\mathbf{s}_1),\ldots,w(\mathbf{s}_n)\}^\top \sim N(\mathbf{0}, \sigma^2 \mathbf{R}(\phi)),
+$$
+
+where the exponential correlation function is
+
+$$
+R_{ij}(\phi) = \exp\{-\phi \|\mathbf{s}_i - \mathbf{s}_j\|\}.
+$$
+
+The full Gaussian process covariance is used to simulate the data. The fitted model uses `nngp()`, which approximates the full process with a sparse nearest-neighbor representation. Datta et al. [-@Datta2016NNGP] introduced NNGP models as scalable fully model-based Gaussian process models for large geostatistical datasets. The implementation here uses the same NNGP model idea, but the latent spatial effects are integrated out during fitting. This lets the MCMC target the fixed-effect and covariance parameters directly; fitted-support process values are then drawn afterward with `recover()`. This workflow follows the sparse Bayesian NNGP algorithms in Finley et al. [-@Finley2019NNGP].
+
+## Data
+
+We simulate locations in the unit square, then hold out a subset of locations for prediction. The observed response combines a linear mean, a spatial random effect, and independent Gaussian noise.
+
+```{r simulate-data}
+n_train <- 90
+n_holdout <- 10
+n <- n_train + n_holdout
+
+dat <- data.frame(
+  lon = runif(n),
+  lat = runif(n),
+  x = runif(n, -1, 1)
+)
+
+beta <- c(0.5, 1)
+sigma_sq <- 1
+phi <- 4
+tau_sq <- 0.1
+
+C <- exp_cov(
+  coords = dat[, c("lon", "lat")],
+  sigma_sq = sigma_sq,
+  phi = phi
+)
+
+dat$w_true <- rmvnorm(mean = rep(0, n), Sigma = C)
+
+mu <- beta[1] + beta[2] * dat$x + dat$w_true
+epsilon <- rnorm(n, sd = sqrt(tau_sq))
+dat$y <- mu + epsilon
+
+train <- dat[1:n_train, ]
+holdout <- dat[(n_train + 1):n, ]
+```
+
+```{r spatial-data-plot, fig.width=6, fig.height=4.8}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+plot_dat <- rbind(
+  data.frame(train, sample = "training"),
+  data.frame(holdout, sample = "holdout")
+)
+
+ggplot(plot_dat, aes(lon, lat)) +
+  geom_point(
+    aes(color = y, shape = sample),
+    size = 2.2
+  ) +
+  scale_color_gradientn(colors = stlmm_palette()) +
+  coord_equal() +
+  labs(
+    x = "longitude",
+    y = "latitude",
+    color = "response",
+    shape = NULL
+  )
+```
+
+## Fit
+
+The simulated data were generated from a full Gaussian process with the exponential covariance model. The fitted model below uses `nngp()` as a nearest-neighbor approximation to that full Gaussian process. The approximation keeps the same covariance function but replaces dense full Gaussian process calculations with sparse nearest-neighbor calculations.
+
+The formula adds an NNGP spatial process over the coordinate columns `lon` and `lat`. The argument `m = 15` uses up to 15 previously ordered neighbors for each process node. The `ordering = "maxmin"` option often gives a useful ordering for spatial NNGP and Vecchia-type approximations; see Guinness [-@Guinness2018Vecchia] and Katzfuss and Guinness [-@KatzfussGuinness2021Vecchia] for discussion of how ordering can affect approximation quality. For large datasets, exact max-min ordering can be slower than coordinate or Hilbert orderings.
+
+The residual and process variances use half-$t$ priors on their corresponding standard deviations. The spatial decay parameter `phi` uses a bounded uniform prior. For the exponential correlation model, larger `phi` means correlation decays more quickly with distance.
+
+```{r fit-nngp}
+fit <- stLMM(
+  y ~ x + nngp(lon, lat, m = 15, cov_model = "exp", ordering = "maxmin"),
+  data = train,
+  priors = list(
+    resid = list(tau_sq = half_t(df = 3, scale = 0.5)),
+    nngp_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      phi = uniform(2, 30)
+    )
+  ),
+  n_samples = 500,
+  verbose = FALSE
+)
+
+summary(fit)
+```
+
+## Recover
+
+Structured process terms are integrated out during fitting. The posterior samples above contain covariance and fixed-effect parameters, but not the latent process values in a directly usable form. Calling `recover()` draws the fitted spatial random effects conditional on the retained posterior parameter samples.
+
+```{r recover-nngp}
+rec <- recover(fit, sub_sample = list(start = 201, thin = 2))
+
+rec
+```
+
+Use `as_mcmc(rec, include_w = TRUE)` when you want a `coda::mcmc` object with
+parameter samples and recovered process draws on the same posterior iterations.
+The examples below use `as_samples()` only because data-frame columns are
+convenient for `ggplot2`.
+
+Because this example has one observation at each training location, the recovered `nngp_1` columns correspond to the training rows. The data identify the combined spatially varying intercept, $\beta_0 + w(\mathbf{s}_i)$, more directly than the split between the global intercept and the average level of one realized spatial process. For this diagnostic, we therefore compare $\beta_0 + w(\mathbf{s}_i)$ rather than $w(\mathbf{s}_i)$ alone.
+
+```{r recovery-plot, fig.width=5.5, fig.height=4.8}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+rec_draws <- as_samples(rec, include_w = TRUE, metadata = FALSE)
+w_cols <- paste0("w_nngp_1_", seq_len(nrow(train)))
+w_hat <- colMeans(rec_draws[, w_cols, drop = FALSE])
+beta_0_hat <- mean(rec_draws[["(Intercept)"]])
+
+recovery_dat <- data.frame(
+  truth = beta[1] + train$w_true,
+  estimate = beta_0_hat + w_hat
+)
+
+ggplot(recovery_dat, aes(truth, estimate)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    size = 2
+  ) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  coord_equal() +
+  labs(
+    x = "true spatially varying intercept",
+    y = "posterior mean estimate"
+  )
+```
+
+## Predict
+
+Prediction at new locations uses the recovered NNGP process draws. With `joint = FALSE`, each new prediction location is simulated independently conditional on its nearest fitted-support neighbors. This is usually sufficient when the goal is a marginal posterior mean, interval, or prediction map. Use `joint = TRUE` when the dependence among prediction locations matters, for example when summaries involve averages, totals, contrasts, exceedance areas, or other functions of multiple predicted locations.
+
+```{r predict-holdout}
+holdout_new <- holdout[, c("lon", "lat", "x")]
+
+pred <- predict(
+  rec,
+  newdata = holdout_new,
+  y_samples = TRUE,
+  joint = FALSE,
+  return_w_samples = FALSE
+)
+
+summary(pred)
+```
+
+The `predict()` call returns posterior draws of $\mu$ and, when `y_samples = TRUE`, posterior predictive response draws. As shown above, passing the prediction object to `summary()` gives posterior summaries for these draws. Setting `return_w_samples = TRUE` also retains the predicted latent process draws for each process term.
+
+```{r prediction-plot, fig.width=5.5, fig.height=4.8}
+#| code-fold: true
+#| code-summary: "Show plotting code"
+pred_draws <- as_samples(pred, sample = "all", metadata = FALSE)
+mu_cols <- paste0("mu_", seq_len(nrow(holdout_new)))
+y_cols <- paste0("y_", seq_len(nrow(holdout_new)))
+mu_hat <- colMeans(pred_draws[, mu_cols, drop = FALSE])
+y_hat <- colMeans(pred_draws[, y_cols, drop = FALSE])
+
+pred_dat <- data.frame(
+  y = holdout$y,
+  mu_hat = mu_hat,
+  y_hat = y_hat
+)
+pred_lim <- range(pred_dat$y, pred_dat$y_hat)
+
+ggplot(pred_dat, aes(y, y_hat)) +
+  geom_point(
+    color = stlmm_color("primary"),
+    size = 2
+  ) +
+  geom_abline(
+    intercept = 0,
+    slope = 1,
+    color = stlmm_color("secondary"),
+    linewidth = 0.8
+  ) +
+  coord_equal(
+    xlim = pred_lim,
+    ylim = pred_lim
+  ) +
+  labs(
+    x = "held-out response",
+    y = "posterior predictive mean"
+  )
+```
+
+## What this example illustrates
+
+The main workflow difference from fixed-effect and iid random-effect models is the recovery step. NNGP process values are integrated out during fitting, so `recover()` is needed before using process contributions in fitted values or prediction.
+
+This example also shows the separation between the covariance model and the approximation. The data were simulated from a full exponential Gaussian process, while `nngp()` used a nearest-neighbor approximation with the same exponential covariance function. For larger spatial datasets, the NNGP approximation is the scalable option.
+
+## Full GP comparison
+
+For very small point-referenced datasets, `stLMM` also provides a dense full Gaussian process term through `gp()`. The model below swaps `nngp()` for `gp()` while leaving the rest of the formula and prior structure unchanged.
+
+```{r fit-gp}
+gp_fit <- stLMM(
+  y ~ x + gp(lon, lat, cov_model = "exp"),
+  data = train,
+  priors = list(
+    resid = list(tau_sq = half_t(df = 3, scale = 0.5)),
+    gp_1 = list(
+      sigma_sq = half_t(df = 3, scale = 1),
+      phi = uniform(2, 30)
+    )
+  ),
+  n_samples = 500,
+  verbose = FALSE
+)
+
+summary(gp_fit)
+```
+
+The dense `gp()` term is included mainly as a small-data reference and testing tool. The package emphasis is on models that use sparse precision matrices or sparse approximations, such as `nngp()`, `ar1()`, `car()`, and `car_time()`. Dense GP covariance calculations scale poorly as the number of unique locations grows, so `gp()` should not be treated as the default spatial workflow for large datasets.

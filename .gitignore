@@ -1,0 +1,43 @@
+# R session/editor files
+.Rhistory
+.RData
+.Ruserdata
+*.R~
+*~
+
+# R package build/check artifacts
+*.tar.gz
+*.Rcheck/
+src/*.o
+src/*.so
+src/*.dll
+src/*.dylib
+src/symbols.rds
+
+# pkgdown output
+docs/
+
+# Quarto/R Markdown outputs
+vignettes/*.html
+vignettes/*_files/
+vignettes/.quarto/
+
+# LaTeX generated files
+*.aux
+*.bbl
+*.blg
+*.idx
+*.ilg
+*.ind
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Local tooling
+.agents/
+.codex/
+.DS_Store
+__MACOSX/
