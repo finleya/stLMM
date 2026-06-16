@@ -42,7 +42,9 @@ jobs:
           needs: website
 
       - name: Build site
-        run: pkgdown::build_site(".", install = TRUE, preview = FALSE)
+        run: |
+          options(pkgdown.internet = FALSE)
+          pkgdown::build_site(".", install = TRUE, preview = FALSE)
         shell: Rscript {0}
 
       - uses: actions/upload-pages-artifact@v3
