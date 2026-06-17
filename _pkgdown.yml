@@ -3,6 +3,7 @@ destination: docs
 
 template:
   bootstrap: 5
+  math-rendering: mathjax
   bslib:
     primary: "#2f5f7f"
     base_font: "system-ui"
