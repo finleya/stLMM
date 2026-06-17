@@ -176,6 +176,8 @@ C(h, u) =
 (1 - \alpha)\exp(-\phi_2 h)\exp(-\lambda_2 u)
 \right].
 }
+This two-scale separable covariance follows the spatial-temporal forest
+inventory model used by May and Finley (2025).
 
 For \code{cov_model = "gneiting"},
 \deqn{
@@ -366,6 +368,15 @@ For \code{time_model = "exp"}, replace \code{phi} with positive temporal decay
 
 Use \code{\link{get_cor_models}} to inspect supported \code{cov_model} values
 and their correlation parameter names.
+}
+\references{
+Gneiting, T. (2002). Nonseparable, stationary covariance functions for
+space-time data. \emph{Journal of the American Statistical Association},
+97(458), 590--600. doi:10.1198/016214502760047113.
+
+May, P. B. and Finley, A. O. (2025). Spatial-temporal prediction of forest
+attributes using latent Gaussian models and inventory data.
+\emph{Spatial Statistics}, 69, 100917. doi:10.1016/j.spasta.2025.100917.
 }
 \examples{
 adj <- matrix(

@@ -80,7 +80,7 @@ $$
 \begin{aligned}
 O_i \mid \lambda_i &\sim \operatorname{Poisson}(\lambda_i E_i),\\
 \log(\lambda_i) &= \alpha + \phi_i,\\
-\boldsymbol{\phi} &\sim \operatorname{ICAR}(\mathbf{W}, 1/\tau_\phi).
+\phi_{1:N} &\sim \operatorname{ICAR}(\mathbf{W}, 1/\tau_\phi).
 \end{aligned}
 $$
 
