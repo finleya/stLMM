@@ -11,7 +11,7 @@ format:
     code-fold: true
     code-tools: true
     code-overflow: wrap
-    html-math-method: mathjax
+    html-math-method: katex
     css: stlmm-vignette.css
     embed-resources: true
     theme:
@@ -80,7 +80,7 @@ $$
 \begin{aligned}
 O_i \mid \lambda_i &\sim \operatorname{Poisson}(\lambda_i E_i),\\
 \log(\lambda_i) &= \alpha + \phi_i,\\
-\boldsymbol{\phi} &\sim \operatorname{ICAR}(\mathbf{W}, 1/\tau_\phi).
+𝛟 &\sim \operatorname{ICAR}(\mathbf{W}, 1/\tau_\phi).
 \end{aligned}
 $$
 
