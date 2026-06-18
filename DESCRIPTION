@@ -8,10 +8,13 @@ Authors@R: c(
     person("Sudipto", "Banerjee", role = "ctb",
            email = "abhidatta@jhu.edu"),
     person("Abhirup", "Datta", role = "ctb",
-           email = "abhidatta@jhu.edu"))
+           email = "abhidatta@jhu.edu"),
+    person("Paul B.", "May", role = "ctb",
+           email = "Paul.May@sdsmt.edu"))
 Author: Andrew O. Finley [aut, cre],
   Sudipto Banerjee [ctb],
-  Abhirup Datta [ctb]
+  Abhirup Datta [ctb],
+  Paul B. May [ctb]
 Maintainer: Andrew O. Finley <finleya@msu.edu>
 Description: Bayesian linear mixed models with fixed effects, iid grouped
     random effects, and composable structured latent process terms. Current
