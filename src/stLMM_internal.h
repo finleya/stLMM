@@ -434,6 +434,8 @@ const char *as_char_scalar(SEXP x, const char *where);
 int compute_n_recover(int nSamples, int recoverProcess, int recoverStart, int recoverThin);
 void require_matrix_real(SEXP x, int nr, int nc, const char *where);
 void require_matrix_int(SEXP x, int nr, int nc, const char *where);
+int small_chol_lower(double *A, int n);
+int small_chol_solve_lower(const double *L, const double *b, double *x, int n);
 double logDetFactor(cholmod_factor *L);
 int cmp_int_asc(const void *a, const void *b);
 void pattern_col_append(PatternCol *cols, int col, int row);

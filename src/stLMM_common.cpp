@@ -232,6 +232,63 @@ void require_matrix_int(SEXP x, int nr, int nc, const char *where)
     Rf_error("%s has wrong dimensions", where);
 }
 
+int small_chol_lower(double *A, int n)
+{
+  int i, j, k;
+  double sum;
+
+  for(j = 0; j < n; j++){
+    for(k = 0; k < j; k++){
+      sum = A[j + n * k];
+      for(i = 0; i < k; i++)
+        sum -= A[j + n * i] * A[k + n * i];
+      A[j + n * k] = sum / A[k + n * k];
+    }
+
+    sum = A[j + n * j];
+    for(k = 0; k < j; k++)
+      sum -= A[j + n * k] * A[j + n * k];
+
+    if(!R_FINITE(sum) || sum <= 0.0)
+      return j + 1;
+
+    A[j + n * j] = std::sqrt(sum);
+  }
+
+  return 0;
+}
+
+int small_chol_solve_lower(const double *L, const double *b, double *x, int n)
+{
+  int i, j;
+  double sum, diag;
+
+  for(i = 0; i < n; i++)
+    x[i] = b[i];
+
+  for(i = 0; i < n; i++){
+    sum = x[i];
+    for(j = 0; j < i; j++)
+      sum -= L[i + n * j] * x[j];
+    diag = L[i + n * i];
+    if(!R_FINITE(diag) || diag == 0.0)
+      return i + 1;
+    x[i] = sum / diag;
+  }
+
+  for(i = n - 1; i >= 0; i--){
+    sum = x[i];
+    for(j = i + 1; j < n; j++)
+      sum -= L[j + n * i] * x[j];
+    diag = L[i + n * i];
+    if(!R_FINITE(diag) || diag == 0.0)
+      return i + 1;
+    x[i] = sum / diag;
+  }
+
+  return 0;
+}
+
 double logDetFactor(cholmod_factor *L)
 {
   double det;

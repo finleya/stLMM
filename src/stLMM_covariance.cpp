@@ -61,10 +61,8 @@ static double nngp_matern_cor_eval(TermState *term, double h, double *bk)
 void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
 {
   int i, j, k, l;
-  int m, start, info, inc, ldc;
-  char lower;
-  double one, zero;
-  double h, u;
+  int m, start, info;
+  double h, u, rBr;
   double *c, *C, *bk;
   double sigmaRef;
   int status, statusNode, nThreads, isMatern, spatialDim;
@@ -81,11 +79,6 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
     assembly into Q.
   */
   sigmaRef = 1.0;
-  inc = 1;
-  lower = 'L';
-  one = 1.0;
-  zero = 0.0;
-  ldc = s->scratch_BF_m;
   status = 0;
   statusNode = -1;
   nThreads = s->nOmpThreads;
@@ -93,7 +86,7 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
   spatialDim = graph_spatial_dim(g, term);
 
 #ifdef _OPENMP
-#pragma omp parallel for num_threads(nThreads) private(j, k, l, m, start, info, h, u, c, C, bk)
+#pragma omp parallel for num_threads(nThreads) private(j, k, l, m, start, info, h, u, rBr, c, C, bk)
 #endif
   for(i = 0; i < g->nNode; i++){
     int threadID = 0;
@@ -126,7 +119,7 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
     C = s->scratch_BF_C + (size_t)threadID * (size_t)s->scratch_BF_m * (size_t)s->scratch_BF_m;
     bk = s->scratch_BF_bk + (size_t)threadID * (size_t)s->scratch_BF_bk_n;
 
-    for(k = 0; k < ldc * m; k++)
+    for(k = 0; k < m * m; k++)
       C[k] = 0.0;
 
     for(k = 0; k < m; k++){
@@ -142,13 +135,18 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
       for(l = 0; l <= k; l++){
         jl = g->nnIndx[start + l];
         hl = graph_distance(g, term, j, jl, &ul);
-        C[k + ldc * l] = sigmaRef * (isMatern ?
-                                     nngp_matern_cor_eval(term, hl, bk) :
-                                     term->corFun(term->theta, hl, ul, spatialDim));
+        C[k + m * l] = sigmaRef * (isMatern ?
+                                   nngp_matern_cor_eval(term, hl, bk) :
+                                   term->corFun(term->theta, hl, ul, spatialDim));
       }
     }
 
-    F77_CALL(dpotrf)(&lower, &m, C, &ldc, &info FCONE);
+    /*
+      Use package-local small dense solves here rather than BLAS/LAPACK calls.
+      This loop is OpenMP-parallel over NNGP nodes, and concurrent calls into
+      R-linked BLAS/LAPACK can be unstable on some threaded BLAS builds.
+    */
+    info = small_chol_lower(C, m);
     if(info != 0){
 #ifdef _OPENMP
 #pragma omp critical
@@ -162,7 +160,7 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
       continue;
     }
 
-    F77_CALL(dpotri)(&lower, &m, C, &ldc, &info FCONE);
+    info = small_chol_solve_lower(C, c, term->B + start, m);
     if(info != 0){
 #ifdef _OPENMP
 #pragma omp critical
@@ -176,14 +174,16 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
       continue;
     }
 
-    F77_CALL(dsymv)(&lower, &m, &one, C, &ldc, c, &inc, &zero, term->B + start, &inc FCONE);
-    term->F[i] = 1.0 / (sigmaRef - F77_CALL(ddot)(&m, term->B + start, &inc, c, &inc));
+    rBr = 0.0;
+    for(k = 0; k < m; k++)
+      rBr += c[k] * term->B[start + k];
+    term->F[i] = 1.0 / (sigmaRef - rBr);
   }
 
   if(status == -1)
     Rf_error("update_nngp_BF: neighbor count exceeds scratch_BF_m at node %d", statusNode + 1);
   if(status != 0)
-    Rf_error("update_nngp_BF: local LAPACK factorization failed at node %d with info %d", statusNode + 1, status);
+    Rf_error("update_nngp_BF: local Cholesky solve failed at node %d with info %d", statusNode + 1, status);
 }
 
 void update_gp_Q(SamplerState *s, GraphState *g, TermState *term)
