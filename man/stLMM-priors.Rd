@@ -73,6 +73,10 @@ prior is an independent Gaussian prior on the fixed-effect coefficients. The
 Gaussian likelihood defaults to \code{flat()}; Polya-Gamma likelihoods default
 to \code{normal(mean = 0, sd = 10)}.
 
+The \code{_dist} suffix is used only where the natural constructor name would
+conflict with an existing R function or a common model parameter name, as in
+\code{gamma_dist()} and \code{beta_dist()}.
+
 The inverse-gamma constructor uses the shape/scale parameterization
 \deqn{
 p(x \mid a, b) =
