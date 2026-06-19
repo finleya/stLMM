@@ -1,6 +1,6 @@
 ---
 title: "Improving stLMM runtime on multicore systems"
-subtitle: "OpenMP, BLAS/LAPACK, CHOLMOD, and benchmark setup"
+subtitle: "Initial practical guidance for OpenMP, BLAS/LAPACK, and CHOLMOD"
 author: "Andrew O. Finley"
 format:
   html:
@@ -18,181 +18,128 @@ bibliography: references.bib
 
 ## Purpose
 
-This vignette is about runtime behavior rather than model syntax. The other vignettes use small examples that run quickly while illustrating model workflow. Runtime studies are different: useful timing comparisons depend on the user's machine, numerical libraries, thread settings, and sparse-matrix structure.
+This vignette gives practical starting points for improving `stLMM` runtime on
+multicore systems. The recommendations are intentionally cautious. Runtime
+depends on the model, data structure, sparse-matrix fill-in, hardware, memory
+bandwidth, BLAS/LAPACK implementation, and the `Matrix`/CHOLMOD build used by R.
 
-This article gives practical guidance for configuring and timing `stLMM` on multicore systems. It intentionally does not ship machine-specific benchmark results with the package website because those results are tied to a particular processor, operating system, R build, BLAS/LAPACK backend, CHOLMOD build, and background load.
+More testing is needed across machines and model classes. Treat these notes as
+initial guidance rather than fixed rules. Users are encouraged to run small
+timing experiments on their own analyses, and feedback about configurations that
+help or hurt is very welcome.
 
 ## Runtime Layers
 
-There are three separate computational layers to keep distinct.
+There are three computational layers to keep separate.
 
-First, `stLMM` has OpenMP-parallel sections in selected compiled kernels. These are controlled by the `n_omp_threads` argument. This is not a general "make the sampler parallel" switch; it applies only to code regions that were explicitly written with OpenMP.
+First, `stLMM` has OpenMP-parallel sections in selected compiled kernels. These
+are controlled by the `n_omp_threads` argument. This is not a general "make
+everything parallel" switch; it only applies to code regions that were written
+with OpenMP.
 
-Second, dense linear algebra is handled by BLAS and LAPACK [@BlackfordEtAl2002BLAS; @AndersonEtAl1999LAPACK]. R supplies these libraries to packages. If R is linked against an optimized or threaded implementation, such as OpenBLAS [@OpenBLAS2025], the same `stLMM` code can benefit in dense linear algebra sections.
+Second, dense linear algebra is handled by BLAS and LAPACK
+[@BlackfordEtAl2002BLAS; @AndersonEtAl1999LAPACK]. R supplies these libraries to
+packages. If R is linked against an optimized implementation such as OpenBLAS
+[@OpenBLAS2025], MKL, or BLIS, dense linear algebra can be faster. If that
+implementation is threaded, BLAS/LAPACK can also create its own worker threads.
 
-Third, sparse Cholesky factorization is handled by CHOLMOD [@ChenDavisHagerRajamanickam2008CHOLMOD] through the R `Matrix` package [@BatesMaechlerJagan2025Matrix]. This layer is central for NNGP, CAR, CAR-time, and autoregressive terms because these terms produce sparse precision matrices. CHOLMOD ordering choices, sparse fill-in, and the symbolic factorization pattern can matter as much as the number of observations.
+Third, sparse Cholesky factorization is handled by CHOLMOD
+[@ChenDavisHagerRajamanickam2008CHOLMOD] through the R `Matrix` package
+[@BatesMaechlerJagan2025Matrix]. This layer is important for NNGP, CAR,
+CAR-time, and autoregressive terms because these terms produce sparse precision
+matrices. Sparse Cholesky runtime depends strongly on ordering, fill-in,
+supernode sizes, symbolic structure, and memory traffic.
 
-The thread controls for these layers are separate. In particular, `n_omp_threads` does not set the number of OpenBLAS, MKL, or BLIS threads. When R is linked to a controllable threaded BLAS, the `RhpcBLASctl` package is a convenient way to set BLAS thread counts from inside an R session. This is useful for interactive work and for small benchmark sweeps where restarting R for every thread count is inconvenient.
+These layers have different controls. `n_omp_threads` does not set OpenBLAS,
+MKL, or BLIS threads. BLAS thread controls do not necessarily control CHOLMOD's
+own OpenMP threading. Increasing several thread counts at once can oversubscribe
+the machine and make a run slower.
+
+## Practical Observations
+
+During development benchmarks, the most reliable improvement came from
+`stLMM`'s own OpenMP regions: runtime improved as `n_omp_threads` increased up
+to a point, then flattened or worsened. The useful number of threads depended on
+the machine and workload.
+
+Threaded BLAS did not improve the benchmark workloads we tested. In those runs,
+single-threaded BLAS combined with `stLMM` OpenMP was fastest. When a verified
+threaded BLAS was used, CHOLMOD-related time became slower, and prediction-heavy
+timings did not improve. This is an observation from specific development
+benchmarks, not a guarantee for every model or machine.
+
+CHOLMOD threading needs special care. Many R `Matrix` installations use CHOLMOD
+without CHOLMOD OpenMP support. In that case, CHOLMOD's own OpenMP controls
+cannot help. Supernodal CHOLMOD can still call BLAS for dense frontal-matrix
+operations, so a threaded BLAS may be used inside CHOLMOD, but whether this helps
+depends on the sparse structure, fill-in, and size of dense updates. For some
+workloads, threaded BLAS overhead can outweigh any benefit.
+
+The practical starting point is therefore:
+
+- start with BLAS threads set to one;
+- sweep `n_omp_threads` over a small grid appropriate for the machine;
+- only then test BLAS threads if dense linear algebra is suspected to matter;
+- change one layer at a time and keep the model, data, seed, and sample count
+  fixed.
+
+## Checking the Current Setup
+
+Before timing, record the R and numerical-library setup.
+
+```{r setup-info, eval=FALSE}
+sessionInfo()
+extSoftVersion()["BLAS"]
+packageVersion("Matrix")
+packageVersion("stLMM")
+```
+
+Do not assume that an OpenBLAS library is threaded just because its path contains
+`openblas`. Some systems provide both single-threaded and threaded OpenBLAS
+builds. On Linux, `ldd` can help show which libraries R and packages load.
+
+```sh
+ldd "$(R RHOME)/lib/libR.so"
+ldd "$(R RHOME)/lib/libRblas.so"
+
+Rscript -e 'so <- list.files(system.file("libs", package = "Matrix"), full.names = TRUE); system2("ldd", so)'
+Rscript -e 'so <- list.files(system.file("libs", package = "stLMM"), full.names = TRUE); system2("ldd", so)'
+```
+
+If you are testing threaded BLAS, verify actual thread use rather than relying
+only on environment variables. On Linux, one simple check during a running
+benchmark is:
+
+```sh
+ps -o pid,nlwp,pcpu,comm,args -p <R-process-id>
+```
+
+`NLWP` is the number of lightweight process threads. It should increase when a
+threaded BLAS or OpenMP region is active.
+
+## Thread Controls
+
+For interactive work, `RhpcBLASctl` is often convenient if the linked BLAS
+supports runtime control.
 
 ```{r rhpcblasctl-example, eval=FALSE}
 library(RhpcBLASctl)
 
-RhpcBLASctl::blas_set_num_threads(4)
-
-fit <- stLMM(
-  y ~ x + nngp(lon, lat, m = 15),
-  data = dat,
-  n_samples = 1000,
-  n_omp_threads = 2,
-  priors = list(
-    resid = list(tau_sq = ig(2, 1)),
-    nngp_1 = list(sigma_sq = ig(2, 1), phi = uniform(0.1, 10))
-  )
-)
+RhpcBLASctl::blas_set_num_threads(1)
 ```
 
-In this example, `blas_set_num_threads(4)` controls BLAS/LAPACK work such as dense crossproducts, dense Cholesky factorizations, and BLAS calls made by numerical libraries. Sparse CHOLMOD factorizations are a separate layer: CHOLMOD can call BLAS for dense frontal-matrix operations, so BLAS threading can matter, but CHOLMOD performance also depends on sparse ordering, fill-in, symbolic structure, memory traffic, and the CHOLMOD build. The `n_omp_threads = 2` argument controls only `stLMM`'s own OpenMP regions. These two controls can be active in the same run, but increasing both at once can oversubscribe the machine.
-
-## User Takeaways
-
-The largest speedups usually come from machine-level configuration rather than from changing model syntax. Use an optimized BLAS/LAPACK backend such as OpenBLAS or MKL, then benchmark a small thread sweep on the target machine. For interactive R sessions, `RhpcBLASctl::blas_set_num_threads()` is often the easiest way to control the BLAS layer. For scripted benchmark runs, environment variables such as `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `BLIS_NUM_THREADS`, and `OMP_NUM_THREADS` are more reproducible because they are fixed before R starts.
-
-Keep the threading layers separate. Tune BLAS/LAPACK threads and `stLMM` OpenMP threads one layer at a time, and avoid setting both to large values in the same run unless oversubscription is the experiment. A useful first pass is to hold BLAS threads at one while varying `n_omp_threads`, then hold `n_omp_threads = 1` while varying BLAS threads. For sparse CAR, CAR-time, and NNGP models, also check CHOLMOD ordering on the target machine.
-
-## Linux Preliminaries
-
-The simplest baseline is an ordinary Linux R installation with `Matrix` and the system default BLAS/LAPACK. Time the target model under that baseline first if possible. Then add optimized libraries and rerun the same model.
-
-On Debian or Ubuntu systems, start with the basic build tools.
+For reproducible benchmarks, prefer setting thread counts before R starts. For
+example, with OpenBLAS:
 
 ```sh
-sudo apt update
-sudo apt install build-essential gfortran pkg-config numactl
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 Rscript timing-script.R
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=4 Rscript timing-script.R
+OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=1 Rscript timing-script.R
 ```
 
-Then add OpenBLAS, LAPACK, SuiteSparse, METIS, and OpenMP support for runtime experiments.
+For `stLMM`'s own OpenMP regions, use the explicit model argument.
 
-```sh
-sudo apt install libopenblas-dev liblapack-dev libsuitesparse-dev \
-  libmetis-dev libomp-dev
-```
-
-BLIS and MKL are optional alternatives for BLAS/LAPACK comparison runs.
-
-```sh
-sudo apt install libblis-pthread-dev intel-mkl libmkl-dev libmkl-rt \
-  libmkl-gnu-thread
-```
-
-On the Ubuntu machine used while developing this vignette, installing `libopenblas-dev` automatically changed the BLAS and LAPACK alternatives to OpenBLAS in auto mode. That is convenient, but it should be verified rather than assumed.
-
-```sh
-Rscript -e 'sessionInfo(); print(extSoftVersion()["BLAS"])'
-update-alternatives --display libblas.so.3-x86_64-linux-gnu
-update-alternatives --display liblapack.so.3-x86_64-linux-gnu
-```
-
-If alternatives are available but OpenBLAS was not selected automatically, an administrator can set them explicitly. The exact paths can differ by distribution.
-
-```sh
-sudo update-alternatives --set libblas.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3
-
-sudo update-alternatives --set liblapack.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/openblas-pthread/liblapack.so.3
-```
-
-Restart R after changing BLAS/LAPACK alternatives. Existing R sessions keep the libraries they already loaded.
-
-BLIS can also provide the BLAS ABI on Debian or Ubuntu through `libblis-pthread-dev`. Depending on the system, it may not replace LAPACK, so treat this as a BLAS-library comparison unless the LAPACK backend is also changed. Switch the BLAS alternative before starting R and verify the loaded library with `extSoftVersion()["BLAS"]`.
-
-```sh
-sudo update-alternatives --set libblas.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/blis-pthread/libblas.so.3
-
-Rscript -e 'print(extSoftVersion()["BLAS"])'
-
-sudo update-alternatives --set libblas.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3
-```
-
-Ubuntu's `intel-mkl` packages register `libmkl_rt.so` as both a BLAS and LAPACK alternative. MKL is non-free software; verify that its license is appropriate for your use case before making it the default backend.
-
-```sh
-sudo update-alternatives --set libblas.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/libmkl_rt.so
-
-sudo update-alternatives --set liblapack.so.3-x86_64-linux-gnu \
-  /usr/lib/x86_64-linux-gnu/libmkl_rt.so
-
-MKL_THREADING_LAYER=GNU MKL_NUM_THREADS=4 Rscript -e 'print(extSoftVersion()["BLAS"])'
-```
-
-## Matrix, CHOLMOD, and METIS
-
-`stLMM` uses the CHOLMOD API exposed by `Matrix`. Installing a system METIS package does not necessarily change an already installed `Matrix` package. METIS-based orderings are available only if the CHOLMOD library used by `Matrix` was built with partitioning support.
-
-The practical rule is to install SuiteSparse and METIS development libraries before building R packages that need to interact with those libraries. Then verify the behavior from R and from `stLMM` rather than relying only on the package list.
-
-Use `ldd` to see what R and package shared libraries resolve at runtime.
-
-```sh
-ldd "$(R RHOME)/lib/libR.so"
-
-Rscript -e 'so <- list.files(system.file("libs", package = "Matrix"), full.names = TRUE); system2("ldd", so)'
-
-Rscript -e 'so <- list.files(system.file("libs", package = "stLMM"), full.names = TRUE); system2("ldd", so)'
-```
-
-Then fit a tiny model with a requested CHOLMOD ordering and inspect the reported ordering.
-
-```{r cholmod-control-example, eval=FALSE}
-set.seed(1)
-dat <- data.frame(
-  y = rnorm(16),
-  x = rnorm(16),
-  lon = rep(seq_len(4), 4),
-  lat = rep(seq_len(4), each = 4)
-)
-
-fit <- stLMM(
-  y ~ x + nngp(lon, lat, m = 3),
-  data = dat,
-  starting = list(
-    resid = list(tau_sq = fixed(0.5)),
-    nngp_1 = list(sigma_sq = fixed(1), phi = fixed(1))
-  ),
-  n_samples = 3,
-  cholmod_control = "metis",
-  describe_terms = TRUE,
-  verbose = FALSE
-)
-```
-
-The `cholmod_control` argument can be passed as a string, as in `cholmod_control = "metis"`, or as a control list with an `ordering` entry. The supported ordering values are `"auto"`, `"best"`, `"natural"`, `"amd"`, `"metis"`, `"nesdis"`, and `"colamd"`. The default `"auto"` uses CHOLMOD's default strategy. The `"best"` option asks CHOLMOD to try its full built-in method set, which can make symbolic analysis slower. The METIS-based choices require the CHOLMOD library used by `Matrix` to support them.
-
-## Thread Controls
-
-For interactive work, `RhpcBLASctl` can set thread counts after R starts, provided the linked BLAS/OpenMP runtime supports runtime control.
-
-```{r rhpcblasctl-thread-control, eval=FALSE}
-library(RhpcBLASctl)
-
-RhpcBLASctl::blas_get_num_procs()
-RhpcBLASctl::blas_set_num_threads(4)
-```
-
-Some installed versions of `RhpcBLASctl` expose `blas_set_num_threads()` but not `blas_get_num_threads()`. In that case, use the setter directly and verify behavior with timing runs. The package also exposes OpenMP controls such as `omp_set_num_threads()` on many systems. Treat those as process-level OpenMP defaults. For `stLMM`'s own supported OpenMP kernels, prefer the explicit `stLMM()` argument `n_omp_threads`, which is the package-level control passed into those kernels.
-
-For batch benchmarks, set thread counts before starting R. For OpenBLAS, a typical shell command is:
-
-```sh
-OPENBLAS_NUM_THREADS=4 Rscript run-benchmark.R
-```
-
-For OpenMP regions in `stLMM`, set `n_omp_threads` in the model call.
-
-```{r omp-control-example, eval=FALSE}
+```{r omp-example, eval=FALSE}
 fit <- stLMM(
   y ~ x + nngp(lon, lat, m = 15),
   data = dat,
@@ -205,60 +152,67 @@ fit <- stLMM(
 )
 ```
 
-Benchmark one layer at a time. For example, hold BLAS threads at 1 while studying `n_omp_threads`, then hold `n_omp_threads = 1` while studying OpenBLAS threads.
+Choose a thread grid that fits the machine. A laptop, a shared server, and a
+large workstation should not use the same grid. A reasonable first sweep is a
+small set of powers of two, capped at a sensible value for the machine.
 
-```sh
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
-  Rscript timing-script.R
+```{r thread-grid-example, eval=FALSE}
+physical_cores <- parallel::detectCores(logical = FALSE)
+if (is.na(physical_cores)) {
+  physical_cores <- parallel::detectCores(logical = TRUE)
+}
 
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=4 \
-  Rscript timing-script.R
-
-OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=1 \
-  Rscript timing-script.R
+omp_grid <- unique(pmin(c(1, 2, 4, 8, 16, physical_cores), physical_cores))
+omp_grid
 ```
 
-Avoid oversubscription unless that is the experiment. Setting OpenMP and BLAS both to large thread counts can create more runnable threads than physical CPU cores and can make the run slower.
+On larger machines, it can also be useful to include the number of logical CPUs.
+For compute-heavy workloads, logical CPUs from simultaneous multithreading do
+not usually double throughput, but they are worth testing if the run is memory
+or latency limited.
 
-A thread is a software execution stream; a core is a physical execution resource. On systems with simultaneous multithreading, two logical CPUs can share one physical core. The second hardware thread can help when one thread is stalled while waiting for memory, but it does not double floating-point throughput. For compute-heavy runs, a good first sweep is powers of two up to the number of physical cores, plus the physical-core count and the full logical-CPU count. For example, on a 24-core/48-thread machine, use `1,2,4,8,16,24,32,48`.
+## Matrix, CHOLMOD, and Ordering
 
-Use `lscpu` and `lscpu -e=CPU,CORE,SOCKET,NODE` to see the mapping between logical CPUs, cores, sockets, and NUMA nodes. If a run uses 12 threads, pinning to 12 distinct physical cores can be tested with `taskset` after checking that those logical CPU IDs correspond to different core IDs.
+`stLMM` uses the CHOLMOD interface exposed by `Matrix`. Installing SuiteSparse
+or METIS system packages does not necessarily change an already installed
+`Matrix` package. METIS-based orderings are available only if the CHOLMOD
+library used by `Matrix` was built with that support.
 
-```sh
-lscpu -e=CPU,CORE,SOCKET,NODE
+The `cholmod_control` argument can be passed as a string, for example
+`cholmod_control = "metis"`, or as a control list with an `ordering` entry. The
+supported ordering values are `"auto"`, `"best"`, `"natural"`, `"amd"`,
+`"metis"`, `"nesdis"`, and `"colamd"`. The default `"auto"` uses CHOLMOD's
+default strategy. The `"best"` option asks CHOLMOD to try its full built-in
+method set, which can make symbolic analysis slower.
 
-taskset -c 0-11 env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=12 \
-  Rscript timing-script.R
-```
+For large sparse models, ordering is worth testing. The best ordering can differ
+by model structure, spatial/temporal support, neighbor count, and Matrix/CHOLMOD
+build.
 
-The operating system and the OpenMP runtime usually do a reasonable job on a quiet single-socket machine, but pinning can reduce run-to-run noise, avoid accidentally packing threads onto sibling hardware threads, and make NUMA experiments reproducible. OpenMP affinity variables such as `OMP_PROC_BIND` and `OMP_PLACES` can also be useful, but `taskset` is a simple way to make an explicit CPU-set comparison.
-
-On Linux, use `taskset` or `numactl` to pin a benchmark to a known set of cores.
-
-```sh
-taskset -c 0-7 env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=8 \
-  Rscript timing-script.R
-
-numactl --physcpubind=0-7 --membind=0 \
-  env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=8 \
-  Rscript timing-script.R
+```{r cholmod-ordering-example, eval=FALSE}
+fit <- stLMM(
+  y ~ x + nngp(lon, lat, m = 15),
+  data = dat,
+  n_samples = 1000,
+  n_omp_threads = 4,
+  cholmod_control = "amd",
+  priors = list(
+    resid = list(tau_sq = ig(2, 1)),
+    nngp_1 = list(sigma_sq = ig(2, 1), phi = uniform(0.1, 10))
+  )
+)
 ```
 
 ## Benchmarking Your Own Runs
 
-Runtime measurements are most useful when they are tied to the exact model, hardware, and R installation used for the analysis. Before reporting timing results, record:
+The most useful benchmark is the target analysis, or a shortened version of it.
+Keep the model, data, seed, and number of MCMC samples fixed while changing one
+runtime setting at a time.
 
-- processor and memory information, for example from `lscpu`;
-- `sessionInfo()` and `extSoftVersion()`;
-- BLAS/LAPACK alternatives or loaded library paths;
-- `Matrix` and `stLMM` versions;
-- thread environment variables such as `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `BLIS_NUM_THREADS`, and `OMP_NUM_THREADS`;
-- model size, number of MCMC samples, neighbor count for NNGP models, and `cholmod_control`.
-
-For a small timing sweep, keep the model and random seed fixed and change one layer at a time. Use elapsed time medians across repeated runs rather than a single run. For example:
+A first experiment is to hold BLAS threads at one and vary `n_omp_threads`.
 
 ```r
-run_fit <- function(omp_threads){
+run_fit <- function(omp_threads) {
   stLMM(
     y ~ x + nngp(lon, lat, m = 15),
     data = dat,
@@ -273,24 +227,49 @@ run_fit <- function(omp_threads){
 
 system.time(run_fit(1))
 system.time(run_fit(4))
+system.time(run_fit(8))
 ```
 
-For larger or more formal comparisons, use separate R processes so the BLAS/OpenMP environment is fixed before R starts.
+For more reproducible comparisons, use separate R processes so thread
+environment variables are fixed before R starts.
 
 ```sh
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 Rscript timing-script.R
-OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=1 Rscript timing-script.R
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=4 Rscript timing-script.R
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=8 Rscript timing-script.R
 ```
 
-When testing `cholmod_control`, hold thread settings fixed and record the requested ordering along with the elapsed time. The best sparse ordering can differ by model structure and CHOLMOD build, so it is worth checking for large CAR, CAR-time, DAGAR-time, and NNGP models.
+Then, if you want to test threaded BLAS, hold `n_omp_threads` fixed and vary the
+BLAS layer. Monitor actual thread use and elapsed time.
 
-## Practical Workflow
+```sh
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=4 Rscript timing-script.R
+OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=4 Rscript timing-script.R
+OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 Rscript timing-script.R
+```
 
-For a new machine or a new class of models, a practical runtime workflow is:
+Before sharing benchmark results, record:
 
-- record the machine, R, BLAS/LAPACK, `Matrix`, and `stLMM` configuration before timing;
-- benchmark one threading layer at a time, holding the others fixed;
-- check CHOLMOD ordering for sparse models with large latent supports;
-- avoid oversubscription unless it is the explicit experiment;
-- treat the timing results as machine-specific until they are repeated on the target system.
+- CPU model, number of physical cores, number of logical CPUs, and memory;
+- `sessionInfo()` and `extSoftVersion()["BLAS"]`;
+- `Matrix` and `stLMM` versions;
+- loaded BLAS/LAPACK libraries, when available;
+- thread settings such as `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`,
+  `BLIS_NUM_THREADS`, and `OMP_NUM_THREADS`;
+- model family, sparse term type, neighbor count, data size, and
+  `cholmod_control`;
+- elapsed time summaries across repeated runs when possible.
+
+## Practical Checklist
+
+- Use an optimized BLAS/LAPACK implementation, but do not assume threaded BLAS
+  will help.
+- Start benchmarking with BLAS threads set to one.
+- Sweep `n_omp_threads` over a machine-appropriate grid.
+- Avoid setting BLAS and OpenMP thread counts high at the same time unless
+  oversubscription is the experiment.
+- For large sparse models, test CHOLMOD ordering choices.
+- Verify actual thread use when testing threaded libraries.
+- Repeat timing experiments for each major model/data class.
+- Share feedback when alternative BLAS/LAPACK, Matrix/CHOLMOD builds, ordering
+  choices, or thread settings materially improve performance.
