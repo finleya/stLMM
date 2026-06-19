@@ -273,51 +273,63 @@ priors = list(dagar_time_1 = list(sigma_sq = ig(shape, scale),
                                   rho = uniform(lower, upper),
                                   phi = uniform(lower, upper)))
 }
+\itemize{
+\item \strong{Starting values, tuning, and fixed parameters.}
 Omitting \code{starting} uses data-based or conservative defaults. Omitting
-\code{tuning} uses default initial Metropolis proposal scales. Setting a
-tuning value to zero fixes that covariance or residual variance parameter.
-Process terms require priors for parameters that are sampled. Parameters marked
-with \code{fixed()} use their supplied values and are omitted from Metropolis
-proposal blocks. The Gaussian likelihood defaults to a flat fixed effect prior,
-while Polya-Gamma likelihoods default to
-\code{normal(mean = 0, sd = 10)} for fixed effects. The \code{flat()} and
-\code{normal()} constructors are accepted only for \code{priors$beta}.
-Variance parameters are positive. The \code{half_normal()} and \code{half_t()}
-variance-prior constructors are specified on the corresponding standard
-deviation scale and transformed internally to the variance scale. Covariance
-theta parameters use a
+\code{tuning} uses default initial Metropolis proposal scales. Setting a tuning
+value to zero fixes that covariance or residual variance parameter. Parameters
+marked with \code{fixed()} use their supplied values and are omitted from
+Metropolis proposal blocks.
+
+\item \strong{Priors and parameter transforms.}
+Process terms require priors for parameters that are sampled. The Gaussian
+likelihood defaults to a flat fixed effect prior, while Polya-Gamma likelihoods
+default to \code{normal(mean = 0, sd = 10)} for fixed effects. The
+\code{flat()} and \code{normal()} constructors are accepted only for
+\code{priors$beta}. Variance parameters are positive. The
+\code{half_normal()} and \code{half_t()} variance-prior constructors are
+specified on the corresponding standard deviation scale and transformed
+internally to the variance scale. Covariance theta parameters use a
 bounded-logit proposal transform and therefore require finite support. For
 positive theta parameters, \code{log_normal()} and \code{gamma_dist()} must
-include \code{support = c(lower, upper)}. See \code{\link{stLMM_priors}} and
-\code{\link{stLMM_terms}} for details.
-For \code{chains > 1}, omitted starting values are dispersed automatically from
-these defaults. With \code{chain_control$seed}, dispersed starts and
+include \code{support = c(lower, upper)}. See
+\code{\link{stLMM_priors}} and \code{\link{stLMM_terms}} for details.
+
+\item \strong{Multiple chains.}
+For \code{chains > 1}, omitted starting values are dispersed automatically
+from the defaults. With \code{chain_control$seed}, dispersed starts and
 chain-specific random number streams are generated before any chain is sampled,
 so corresponding chains are reproducible across different Metropolis blocking
 choices. If a starting value is supplied by the user, it controls that
 parameter: scalar values are recycled to all chains, and vectors with length
-\code{chains} provide chain-specific starts. Other lengths are rejected.
-For process terms, chain-specific starts should be supplied in list blocks, for
+\code{chains} provide chain-specific starts. Other lengths are rejected. For
+process terms, chain-specific starts should be supplied in list blocks, for
 example \code{starting = list(nngp_1 = list(sigma_sq = c(1, 2, 3),
 phi = c(0.2, 0.4, 0.6)))}.
+
+\item \strong{Warmup and retained-sampling adaptation.}
 By default, the Metropolis sampler runs a short discarded warmup phase that
 calibrates proposal scales before retained samples are collected. Warmup draws
 are not returned in posterior sample matrices; warmup diagnostics are stored in
 \code{fit$adaptive_metropolis$warmup}. Retained-sampling adaptation is
 controlled separately through \code{metropolis$target_accept} and
 \code{metropolis$batch_length}.
-Metropolis blocking changes only the proposal partition used for covariance
-and residual variance parameters; it does not change the model. Blocking can
+
+\item \strong{Metropolis blocking.}
+Metropolis blocking changes only the proposal partition used for covariance and
+residual variance parameters; it does not change the model. Blocking can
 improve mixing for multi-term or residual-variance models, but each block may
 require a separate collapsed likelihood evaluation and sparse factorization.
 The default \code{"joint"} block is usually the fastest choice. Treat the
 other blocking schemes as diagnostic or model-specific alternatives: compare
 trace plots, R-hat, effective sample sizes, and runtime before changing the
-default for routine analyses.
-\code{metropolis = "scalar"} updates one active covariance or residual
-variance parameter at a time using scalar random-walk adaptation. It can be
-useful when block proposals mix poorly, but it may be substantially slower for
-models with expensive collapsed likelihood evaluations.
+default for routine analyses. \code{metropolis = "scalar"} updates one active
+covariance or residual variance parameter at a time using scalar random-walk
+adaptation. It can be useful when block proposals mix poorly, but it may be
+substantially slower for models with expensive collapsed likelihood
+evaluations.
+
+\item \strong{Sparse factorization controls.}
 The \code{cholmod_control} argument is intended for advanced diagnostics and
 performance benchmarking. The default \code{ordering = "auto"} uses CHOLMOD's
 default ordering strategy. Alternative orderings can change sparse Cholesky
@@ -326,8 +338,12 @@ model. Use \code{describe_terms = TRUE} or inspect \code{fit$term_description}
 to compare the selected CHOLMOD ordering, fill ratio, \code{lnz}, and flops.
 The \code{"best"} option can make symbolic analysis slower because CHOLMOD
 tries more orderings before factorization.
-When \code{resid(model = "fixed", variance = vhat)} is used, \code{tau_sq} is not sampled and
-should not be supplied in \code{starting}, \code{tuning}, or \code{priors}.
+
+\item \strong{Fixed residual variances.}
+When \code{resid(model = "fixed", variance = vhat)} is used, \code{tau_sq} is
+not sampled and should not be supplied in \code{starting}, \code{tuning}, or
+\code{priors}.
+}
 See \code{\link{stLMM_terms}} for the package-native formula terms recognized
 by \code{stLMM()}.
 }

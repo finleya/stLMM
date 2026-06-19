@@ -767,6 +767,39 @@ This covariance matrix is a mathematical object only; the code does not form $\b
 \end{equation}
 This is implemented by \texttt{apply\_Vinv()}: \texttt{apply\_A\_transpose\_weighted()} computes $\bu_1$, \texttt{solve\_M\_lat()} computes $\bu_2$, \texttt{apply\_A()} computes $\bu_3$, and the final diagonal scaling and subtraction compute $\mathcal{V}^{-1}_{\mathrm{op}}(\bv)$. Algebraically, this operator is equivalent to applying $\bV^{-1}$, but the computation is only a sequence of diagonal scalings, sparse map operations, and solves with the CHOLMOD factor of $\bM$.
 
+The Sherman--Morrison--Woodbury identity is used here as a derivation, not as
+a literal computation involving formed inverses. In the implementation, every
+appearance of $\bM^{-1}$ in the algebra below is evaluated as a solve with the
+current CHOLMOD factor of $\bM$. The same identity can be evaluated after
+moving design matrices into the coefficient-space crossproducts. For any
+observed-row design matrix $\bG$ and observed-row vector $\bv$, define
+\begin{equation}
+  \bB_G = \bA\trans\bW\bG,
+  \qquad
+  \bb_v = \bA\trans\bW\bv .
+\end{equation}
+Then
+\begin{equation}
+\label{eq:Vinv-crossprod}
+\begin{aligned}
+  \bG\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bG)
+    &= \bG\trans\bW\bG -
+       \bB_G\trans \operatorname{solve}_M(\bB_G),\\
+  \bG\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bv)
+    &= \bG\trans\bW\bv -
+       \bB_G\trans \operatorname{solve}_M(\bb_v).
+\end{aligned}
+\end{equation}
+This is not a different precision expression from
+Equation~\eqref{eq:Vinv-op}. It is the same collapsed
+Sherman--Morrison--Woodbury algebra evaluated at the crossproduct level. The
+implementation uses this form for the Gaussian $\bbeta$ and $\balpha$ Gibbs
+updates, avoiding explicit construction of $\bV^{-1}$, $\bM^{-1}$, or dense
+observation-space transformed design matrices.
+When no structured process terms are present, $\bA$ and $\bM$ are absent and
+the second terms in Equation~\eqref{eq:Vinv-crossprod} vanish, leaving
+$\bG\trans\bW\bG$ and $\bG\trans\bW\bv$.
+
 \texttt{compute\_logDetV()} evaluates
 \begin{equation}
   \label{eq:logdet-V}
@@ -948,17 +981,26 @@ Conditional on the current $\balpha$, define the partial residual
 \begin{equation}
   \by_\beta = \by - \bZ\balpha .
 \end{equation}
-The implementation first applies the collapsed observed-precision operator to the fixed-effect design columns and to this partial residual:
+The flat-prior fixed-effect precision and right-hand side are the
+crossproduct quantities
 \begin{equation}
-  \bU_X = \mathcal{V}^{-1}_{\mathrm{op}}(\bX),\qquad
-  \bu_y = \mathcal{V}^{-1}_{\mathrm{op}}(\by_\beta).
+  \bQ_{\beta,0}
+    = \bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX),
+  \qquad
+  \bb_{\beta,0}
+    = \bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by_\beta).
 \end{equation}
-Here $\bU_X$ is computed by \texttt{apply\_Vinv\_multiple()} and $\bu_y$ by \texttt{apply\_Vinv()}; both reuse the current CHOLMOD factor of $\bM$. The flat-prior fixed-effect precision and right-hand side are then assembled by dense BLAS products:
-\begin{equation}
-  \bQ_\beta = \bX\trans\bU_X,\qquad
-  \bb_\beta = \bX\trans\bu_y.
-\end{equation}
-These are the usual fixed-effect full-conditional quantities, but they are computed from operator applications rather than a formed observed covariance or precision matrix. The final draw is produced by \texttt{draw\_gaussian\_from\_precision()}, which factorizes the small dense precision $\bQ_\beta$, solves for the mean, and adds triangular-solve Gaussian noise. With an independent normal prior
+The implementation assembles these with Equation~\eqref{eq:Vinv-crossprod}
+using $\bG=\bX$ and $\bv=\by_\beta$. Thus it forms the weighted dense products
+$\bX\trans\bW\bX$ and $\bX\trans\bW\by_\beta$, forms
+$\bA\trans\bW\bX$ and $\bA\trans\bW\by_\beta$, and applies the current CHOLMOD
+factor of $\bM$ to the latter quantities. It does not form $\bV^{-1}$,
+$\bM^{-1}$, or the observation-space matrix
+$\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$.
+
+The final draw is produced by \texttt{draw\_gaussian\_from\_precision()}, which
+factorizes the small dense precision $\bQ_\beta$, solves for the mean, and adds
+triangular-solve Gaussian noise. With an independent normal prior
 \begin{equation}
   \bbeta \sim N(\bmu_\beta,\bD_\beta),
 \end{equation}
@@ -966,14 +1008,15 @@ where $\bD_\beta$ is diagonal, the update is
 \begin{equation}
 \begin{aligned}
   \bQ_\beta
-    &= \bX\trans\bU_X + \bD_\beta^{-1}, \\
+    &= \bQ_{\beta,0} + \bD_\beta^{-1}, \\
   \bb_\beta
-    &= \bX\trans\bu_y + \bD_\beta^{-1}\bmu_\beta .
+    &= \bb_{\beta,0} + \bD_\beta^{-1}\bmu_\beta .
 \end{aligned}
 \end{equation}
 The Gaussian likelihood defaults to the flat-prior form. P{\'o}lya-Gamma likelihoods default to a proper independent normal prior with mean zero and standard deviation 10, unless the user supplies \texttt{priors\$beta}.
 
-This update is implemented in \texttt{update\_beta\_draw\_collapsed()}. The expensive step is applying $\mathcal{V}^{-1}_{\mathrm{op}}$ to the columns of $\bX$ and to $\by_\beta$, which reuses the CHOLMOD factorization of $\bM$.
+This update is implemented in \texttt{update\_beta\_draw\_collapsed()}, with
+\texttt{form\_XtVinvX\_and\_rhs()} assembling the two crossproducts above.
 
 \subsection{Update of \texorpdfstring{$\balpha$}{alpha}}
 
@@ -981,16 +1024,40 @@ Conditional on the current $\bbeta$, define
 \begin{equation}
   \by_\alpha = \by - \bX\bbeta .
 \end{equation}
-The grouped random-effect update applies the same operator to columns of the sparse grouped-design matrix and to the partial residual. Operationally, \texttt{form\_ZtVinvZ\_and\_rhs()} scatters one grouped-design column to dense observed-row workspace, applies \texttt{apply\_Vinv()}, and uses sparse grouped-design dot products to fill
+The grouped random-effect full conditional can be written in the same
+operator notation as the fixed-effect update:
 \begin{equation}
   \bQ_{\alpha,0} = \bZ\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bZ),\qquad
   \bb_\alpha = \bZ\trans \mathcal{V}^{-1}_{\mathrm{op}}(\by_\alpha).
 \end{equation}
+As with the fixed-effect update, this notation is mathematical rather than an
+instruction to apply $\mathcal{V}^{-1}_{\mathrm{op}}$ separately to every
+column. The implementation uses Equation~\eqref{eq:Vinv-crossprod} with
+$\bG=\bZ$ and $\bv=\by_\alpha$. The products $\bZ\trans\bW\bZ$ and
+$\bZ\trans\bW\by_\alpha$ are accumulated from the sparse grouped-design matrix,
+and $\bA\trans\bW\bZ$ is built by walking the nonzero entries of $\bZ$ and the
+term-specific observation-to-latent maps. The resulting latent-space columns
+are passed through \texttt{solve\_M\_lat\_multiple()}, i.e., through the current
+CHOLMOD factor of $\bM$, not through a formed $\bM^{-1}$.
+
+For a random-intercept iid term with scalar residual precision, the
+no-structured-process case reduces to weighted group counts and weighted group
+sums. The same formula also covers random slopes, multiple iid terms, fixed or
+sampled diagonal residual precision models, and P{\'o}lya-Gamma working
+precisions because all of those cases enter through the sparse $\bZ$ and
+diagonal $\bW$.
+
 The prior precision for the explicit iid random effects is then added to the diagonal:
 \begin{equation}
   \bQ_\alpha = \bQ_{\alpha,0} + \bD_\alpha^{-1}.
 \end{equation}
-These are the usual grouped-random-effect full-conditional quantities, but they are computed from operator applications rather than a formed observed covariance or precision matrix. The final draw uses \texttt{draw\_gaussian\_from\_precision()} with the small dense precision $\bQ_\alpha$ and right-hand side $\bb_\alpha$. This step is implemented in \texttt{update\_alpha\_draw\_collapsed()}.
+These are the usual grouped-random-effect full-conditional quantities, but
+they are computed from weighted sparse design products and factor-based solves
+with $\bM$, rather than from a formed observed covariance or precision matrix.
+The final draw uses \texttt{draw\_gaussian\_from\_precision()} with the small
+dense precision $\bQ_\alpha$ and right-hand side $\bb_\alpha$. This step is
+implemented in \texttt{update\_alpha\_draw\_collapsed()}, with
+\texttt{form\_ZtVinvZ\_and\_rhs()} assembling the two crossproducts above.
 
 \subsection{Update of explicit random-effect variances}
 
@@ -1384,17 +1451,30 @@ Function & Role \\
 \texttt{apply\_A\_transpose\_weighted()} &
   Compute $\bA\trans \bW\bv$ for a single observation-space vector. \\
 \texttt{apply\_A()} & Compute $\bA\bv$ for a single latent vector. \\
-\texttt{apply\_A\_transpose\_multiple()} & Apply $\bA\trans$ to multiple columns. \\
 \texttt{apply\_A\_transpose\_weighted\_multiple()} & Apply $\bA\trans \bW$ to multiple columns. \\
-\texttt{apply\_A\_multiple()} & Apply $\bA$ to multiple columns. \\
 \texttt{apply\_Vinv()} & Apply $\mathcal{V}^{-1}_{\mathrm{op}}$ to a single vector. \\
-\texttt{apply\_Vinv\_multiple()} & Apply $\mathcal{V}^{-1}_{\mathrm{op}}$ to multiple columns. \\
+\texttt{form\_XtWX\_and\_XtWy()} &
+  Accumulate the weighted dense fixed-effect products $\bX\trans\bW\bX$ and
+  $\bX\trans\bW\by_\beta$. \\
+\texttt{form\_AtWX\_and\_AtWy()} &
+  Form the latent-space fixed-effect products $\bA\trans\bW\bX$ and
+  $\bA\trans\bW\by_\beta$. \\
 \texttt{form\_XtVinvX\_and\_rhs()} &
   Form $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$ and
-  $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bZ\balpha)$ from operator applications and dense coefficient-space products. \\
+  $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bZ\balpha)$ from Woodbury
+  crossproducts, weighted dense fixed-effect products, and factor-based solves
+  with $\bM$. \\
+\texttt{form\_ZtWZ\_and\_ZtWy()} &
+  Accumulate the weighted sparse grouped-design products $\bZ\trans\bW\bZ$ and
+  $\bZ\trans\bW\by_\alpha$. \\
+\texttt{form\_AtWZ\_and\_AtWy()} &
+  Form the latent-space grouped-design products $\bA\trans\bW\bZ$ and
+  $\bA\trans\bW\by_\alpha$. \\
 \texttt{form\_ZtVinvZ\_and\_rhs()} &
   Form $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bZ)$ and
-  $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bX\bbeta)$ from operator applications and sparse grouped-design dot products. \\
+  $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bX\bbeta)$ from Woodbury
+  crossproducts, weighted sparse grouped-design products, and factor-based
+  solves with $\bM$. \\
 \texttt{compute\_logDetV()} & Evaluate $\log|\bV|$ using Equation~\eqref{eq:logdet-V}. \\
 \texttt{logdet\_Qw\_blocks()} &
   Evaluate prior precision log determinants for NNGP, GP, AR1, CAR, DAGAR,
