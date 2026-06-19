@@ -25,6 +25,11 @@ test_that("multi-chain fits keep ordinary fit objects and support coda", {
   s <- summary(fit)
   expect_s3_class(s, "summary_stLMM_chains")
   expect_true(all(c("parameter", "rhat", "effective_size") %in% names(s$diagnostics)))
+  s_sel <- summary(fit, parameters = c("x", "tau_sq"))
+  expect_equal(rownames(s_sel$parameters), c("x", "tau_sq"))
+  expect_equal(s_sel$diagnostics$parameter, c("x", "tau_sq"))
+  expect_error(summary(fit, parameters = "not_a_parameter"),
+               "unknown parameter")
 
   s1_burn <- summary(fit$chains[[1]], burn = 2)
   m1 <- as.matrix(as_mcmc(fit$chains[[1]]))

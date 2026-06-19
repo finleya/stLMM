@@ -18,11 +18,46 @@ test_that("print summary and plot methods work for stLMM fits", {
   expect_true(all(c("mean", "sd", "q2.5", "q50.0", "q97.5") %in% colnames(s$parameters$beta)))
   expect_output(print(s), "stLMM summary")
 
+  s_sel <- summary(fit, parameters = c("x", "tau_sq"))
+  expect_named(s_sel$parameters, c("beta", "tau_sq"))
+  expect_equal(rownames(s_sel$parameters$beta), "x")
+  expect_equal(rownames(s_sel$parameters$tau_sq), "tau_sq")
+  expect_error(summary(fit, parameters = "not_a_parameter"),
+               "unknown parameter")
+
   f <- tempfile(fileext = ".pdf")
   grDevices::pdf(f)
   expect_invisible(plot(fit, parameters = "tau_sq", burnin = 1, thin = 2))
   grDevices::dev.off()
   expect_true(file.exists(f))
+})
+
+test_that("summary can select iid random-effect parameters", {
+  set.seed(3006)
+  dat <- data.frame(
+    y = rnorm(12),
+    x = rnorm(12),
+    group = factor(rep(letters[1:3], length.out = 12))
+  )
+
+  fit <- stLMM(
+    y ~ x + iid(group),
+    data = dat,
+    starting = list(tau_sq = 1, iid_1 = list(sigma_sq = 1)),
+    priors = list(tau_sq = ig(2, 1), iid_1 = list(sigma_sq = ig(2, 1))),
+    n_samples = 8,
+    verbose = FALSE
+  )
+
+  all_summary <- summary(fit)
+  expect_true(nrow(all_summary$parameters$alpha) > 1L)
+
+  s <- summary(fit, parameters = c("x", "iid_1_a", "tau_sq"))
+  expect_named(s$parameters, c("beta", "alpha", "tau_sq"))
+  expect_equal(rownames(s$parameters$beta), "x")
+  expect_equal(rownames(s$parameters$alpha), "iid_1_a")
+  expect_equal(rownames(s$parameters$tau_sq), "tau_sq")
+  expect_null(s$parameters$iid_sigma_sq)
 })
 
 test_that("print summary and plot methods work for recovered objects", {

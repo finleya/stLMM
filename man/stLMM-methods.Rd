@@ -18,22 +18,23 @@
 \usage{
 \method{print}{stLMM}(x, ...)
 \method{summary}{stLMM}(object, probs = c(0.025, 0.5, 0.975),
-  burn = 0L, ...)
+  burn = 0L, parameters = NULL, ...)
 \method{plot}{stLMM}(x, type = c("trace", "density"), parameters = NULL,
   max_parameters = 12L, burnin = 0L, thin = 1L, ...)
 \method{print}{stLMM_chains}(x, ...)
 \method{summary}{stLMM_chains}(object, probs = c(0.025, 0.5, 0.975),
-  diagnostics = TRUE, include_w = FALSE, burn = 0L, ...)
+  diagnostics = TRUE, include_w = FALSE, burn = 0L,
+  parameters = NULL, ...)
 \method{plot}{stLMM_chains}(x, type = c("trace", "density"),
   parameters = NULL, max_parameters = 12L, include_w = FALSE,
   n_col = NULL, chain_colors = NULL, lwd = 1, burnin = 0L,
   thin = 1L, ...)
 \method{print}{stLMM_recovery}(x, ...)
 \method{summary}{stLMM_recovery}(object, probs = c(0.025, 0.5, 0.975),
-  burn = 0L, include_w = FALSE, max_w = 20L, ...)
+  burn = 0L, parameters = NULL, include_w = FALSE, max_w = 20L, ...)
 \method{summary}{stLMM_recovery_chains}(object,
   probs = c(0.025, 0.5, 0.975), diagnostics = TRUE,
-  include_w = FALSE, burn = 0L, ...)
+  include_w = FALSE, burn = 0L, parameters = NULL, ...)
 \method{plot}{stLMM_recovery}(x, term = NULL, nodes = NULL,
   type = c("trace", "density", "fitted"), observed = NULL,
   max_nodes = 12L, burnin = 0L, thin = 1L, ...)
@@ -60,7 +61,9 @@ three probabilities: lower, center, and upper.}
 For recovery objects, \code{"trace"}, \code{"density"}, or \code{"fitted"}.
 For prediction objects, \code{"interval"}, \code{"density"}, or
 \code{"scatter"}.}
-\item{parameters}{Optional parameter names to plot for an \code{stLMM} fit.}
+\item{parameters}{Optional exact parameter names to summarize or plot for an
+\code{stLMM} fit. For summaries, unlisted parameters are omitted from the
+returned parameter table or tables.}
 \item{max_parameters}{Maximum number of parameters to plot by default.}
 \item{burn}{Number of initial posterior draws to discard before computing
 fit summaries and multi-chain diagnostics. The default \code{0L} uses all

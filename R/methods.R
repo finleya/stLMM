@@ -30,6 +30,90 @@ posterior_summary_table <- function(x, probs = c(0.025, 0.5, 0.975)){
   out
 }
 
+sample_parameter_names <- function(samples, include_w = FALSE){
+
+  if(!isTRUE(include_w))
+    samples$w <- NULL
+
+  active <- Filter(Negate(is.null), samples)
+  out <- character(0)
+
+  for(nm in names(active)){
+    z <- active[[nm]]
+    if(is.null(dim(z))){
+      out <- c(out, nm)
+    } else {
+      z <- as.matrix(z)
+      cn <- colnames(z)
+      if(is.null(cn))
+        cn <- paste0("param_", seq_len(ncol(z)))
+      out <- c(out, cn)
+    }
+  }
+
+  out
+}
+
+validate_summary_parameters <- function(parameters, available){
+
+  if(is.null(parameters))
+    return(NULL)
+
+  if(!is.character(parameters) || anyNA(parameters) || any(!nzchar(parameters)))
+    stop("error: parameters must be a non-empty character vector")
+
+  miss <- setdiff(parameters, available)
+  if(length(miss))
+    stop("error: unknown parameter(s): ", paste(miss, collapse = ", "))
+
+  parameters
+}
+
+filter_sample_blocks <- function(samples, parameters = NULL, include_w = FALSE){
+
+  if(is.null(parameters))
+    return(samples)
+
+  parameters <- validate_summary_parameters(
+    parameters,
+    sample_parameter_names(samples, include_w = include_w)
+  )
+
+  out <- samples
+  for(nm in names(out)){
+    if(!isTRUE(include_w) && identical(nm, "w"))
+      next
+
+    z <- out[[nm]]
+    if(is.null(z))
+      next
+
+    if(is.null(dim(z))){
+      if(nm %in% parameters)
+        out[[nm]] <- matrix(as.numeric(z), ncol = 1L,
+                            dimnames = list(NULL, nm))
+      else
+        out[[nm]] <- NULL
+      next
+    }
+
+    z <- as.matrix(z)
+    cn <- colnames(z)
+    if(is.null(cn)){
+      cn <- paste0("param_", seq_len(ncol(z)))
+      colnames(z) <- cn
+    }
+
+    keep <- intersect(parameters, cn)
+    if(length(keep))
+      out[[nm]] <- z[, keep, drop = FALSE]
+    else
+      out[[nm]] <- NULL
+  }
+
+  out
+}
+
 collect_parameter_summaries <- function(samples, probs = c(0.025, 0.5, 0.975)){
 
   out <- list()
@@ -144,12 +228,14 @@ print.stLMM_chains <- function(x, ...){
 summary.stLMM <- function(object,
                          probs = c(0.025, 0.5, 0.975),
                          burn = 0L,
+                         parameters = NULL,
                          ...){
 
   if(!is.numeric(probs) || anyNA(probs) || any(probs <= 0 | probs >= 1))
     stop("error: probs must contain values in (0,1)")
   burn <- validate_burn(burn, object$backend$n_samples)
   samples <- drop_burn_samples(object$samples, burn = burn)
+  samples <- filter_sample_blocks(samples, parameters = parameters)
 
   out <- list(
     call = object$backend$formula,
@@ -216,6 +302,7 @@ summary.stLMM_chains <- function(object,
                                  diagnostics = TRUE,
                                  include_w = FALSE,
                                  burn = 0L,
+                                 parameters = NULL,
                                  ...){
 
   if(!is.numeric(probs) || anyNA(probs) || any(probs <= 0 | probs >= 1))
@@ -224,6 +311,20 @@ summary.stLMM_chains <- function(object,
 
   chains <- as_mcmc(object, include_w = include_w, burn = burn)
   m <- as.matrix(chains)
+  if(!is.null(parameters)){
+    parameters <- validate_summary_parameters(parameters, colnames(m))
+    m <- m[, parameters, drop = FALSE]
+  }
+
+  diagnostics_out <- if(isTRUE(diagnostics)){
+    d <- chain_diagnostics(object, include_w = include_w, burn = burn)
+    if(!is.null(parameters))
+      d <- d[parameters, , drop = FALSE]
+    d
+  } else {
+    NULL
+  }
+
   out <- list(
     call = object$chains[[1L]]$backend$formula,
     n_chains = object$n_chains,
@@ -239,7 +340,7 @@ summary.stLMM_chains <- function(object,
     burn = burn,
     n_used = object$chains[[1L]]$backend$n_samples - burn,
     parameters = posterior_summary_table(m, probs = probs),
-    diagnostics = if(isTRUE(diagnostics)) chain_diagnostics(object, include_w = include_w, burn = burn) else NULL,
+    diagnostics = diagnostics_out,
     term_description = object$term_description
   )
 
@@ -489,12 +590,14 @@ print.stLMM_recovery_chains <- function(x, ...){
 summary.stLMM_recovery <- function(object,
                                   probs = c(0.025, 0.5, 0.975),
                                   burn = 0L,
+                                  parameters = NULL,
                                   include_w = FALSE,
                                   max_w = 20L,
                                   ...){
 
   burn <- validate_burn(burn, object$backend$n_samples)
-  out <- summary.stLMM(object, probs = probs, burn = burn)
+  out <- summary.stLMM(object, probs = probs, burn = burn,
+                       parameters = parameters)
   out$recover_iter <- object$recover_iter
   out$recovered_terms <- names(object$w_samples)
   out$w_node_order <- vapply(object$w_samples, function(z) attr(z, "node_order") %||% NA_character_, character(1))
@@ -542,6 +645,7 @@ summary.stLMM_recovery_chains <- function(object,
                                          diagnostics = TRUE,
                                          include_w = FALSE,
                                          burn = 0L,
+                                         parameters = NULL,
                                          ...){
 
   out <- summary.stLMM_chains(
@@ -550,6 +654,7 @@ summary.stLMM_recovery_chains <- function(object,
     diagnostics = diagnostics,
     include_w = include_w,
     burn = burn,
+    parameters = parameters,
     ...
   )
   out$recover_iter <- lapply(object$chains, `[[`, "recover_iter")
