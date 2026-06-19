@@ -1476,49 +1476,161 @@ void apply_Vinv_multiple(SamplerState *s, const double *Vobs, int ncol, double *
     }
 }
 
+static void form_XtWX_and_XtWy(SamplerState *s, const double *ytilde, double *XtWX, double *XtWy)
+{
+  int i, j, k;
+  double wi, xij;
+
+  for(i = 0; i < s->p * s->p; i++)
+    XtWX[i] = 0.0;
+  for(j = 0; j < s->p; j++)
+    XtWy[j] = 0.0;
+
+  for(j = 0; j < s->p; j++){
+    for(i = 0; i < s->n; i++){
+      wi = s->obsPrecision[i];
+      xij = s->X[i + s->n * j];
+      XtWy[j] += xij * wi * ytilde[i];
+
+      for(k = j; k < s->p; k++)
+        XtWX[k + s->p * j] += xij * wi * s->X[i + s->n * k];
+    }
+  }
+}
+
+static void form_AtWX_and_AtWy(SamplerState *s, const double *ytilde, double *AtWX, double *AtWy)
+{
+  apply_A_transpose_weighted_multiple(s, s->X, s->p, AtWX);
+  apply_A_transpose_weighted(s, ytilde, AtWy);
+}
+
 void form_XtVinvX_and_rhs(SamplerState *s, const double *ytilde, double *XtVinvX, double *XtVinvy)
 {
   int i, j, inc;
-  double one, zero;
-  double *VinvX, *Vinvy;
+  double correction;
+  double *AtWX, *AtWy, *MinvAtWX, *MinvAtWy;
 
   if(s->p <= 0)
     return;
 
-  one = 1.0;
-  zero = 0.0;
+  form_XtWX_and_XtWy(s, ytilde, XtVinvX, XtVinvy);
+
+  if(s->qLatTotal <= 0)
+    return;
+
   inc = 1;
 
-  VinvX = (double*)R_alloc(s->n * s->p, sizeof(double));
-  Vinvy = (double*)R_alloc(s->n, sizeof(double));
+  AtWX = (double*)R_alloc(s->qLatTotal * s->p, sizeof(double));
+  AtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
+  MinvAtWX = (double*)R_alloc(s->qLatTotal * s->p, sizeof(double));
+  MinvAtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
 
-  apply_Vinv_multiple(s, s->X, s->p, VinvX);
-  apply_Vinv(s, ytilde, Vinvy);
+  form_AtWX_and_AtWy(s, ytilde, AtWX, AtWy);
+  solve_M_lat_multiple(s, AtWX, s->p, MinvAtWX);
+  solve_M_lat(s, AtWy, MinvAtWy);
 
-  F77_CALL(dgemm)("T", "N", &s->p, &s->p, &s->n,
-                  &one, s->X, &s->n, VinvX, &s->n,
-                  &zero, XtVinvX, &s->p FCONE FCONE);
+  for(j = 0; j < s->p; j++){
+    correction = F77_CALL(ddot)(&s->qLatTotal,
+                                AtWX + s->qLatTotal * j, &inc,
+                                MinvAtWy, &inc);
+    XtVinvy[j] -= correction;
 
-  F77_CALL(dgemv)("T", &s->n, &s->p,
-                  &one, s->X, &s->n, Vinvy, &inc,
-                  &zero, XtVinvy, &inc FCONE);
+    for(i = j; i < s->p; i++){
+      correction = F77_CALL(ddot)(&s->qLatTotal,
+                                  AtWX + s->qLatTotal * i, &inc,
+                                  MinvAtWX + s->qLatTotal * j, &inc);
+      XtVinvX[i + s->p * j] -= correction;
+    }
+  }
+}
+
+static void form_ZtWZ_and_ZtWy(SamplerState *s, const double *ytilde, double *ZtWZ, double *ZtWy)
+{
+  int i, j, k, row;
+  double wz;
+
+  for(i = 0; i < s->q * s->q; i++)
+    ZtWZ[i] = 0.0;
+  for(j = 0; j < s->q; j++)
+    ZtWy[j] = 0.0;
+
+  for(j = 0; j < s->q; j++){
+    for(i = 0; i < s->n; i++)
+      s->nWork1[i] = 0.0;
+
+    for(k = s->Zp[j]; k < s->Zp[j + 1]; k++){
+      row = s->Zi[k];
+      wz = s->obsPrecision[row] * s->Zx[k];
+      s->nWork1[row] += wz;
+      ZtWy[j] += s->Zx[k] * s->obsPrecision[row] * ytilde[row];
+    }
+
+    for(i = j; i < s->q; i++)
+      ZtWZ[i + s->q * j] = sparse_Z_col_dot_dense(s, i, s->nWork1);
+  }
+}
+
+static void form_AtWZ_and_AtWy(SamplerState *s, const double *ytilde, double *AtWZ, double *AtWy)
+{
+  int idx, i, j, k, row, t;
+  double wz;
+  TermState *term;
+
+  for(idx = 0; idx < s->qLatTotal * s->q; idx++)
+    AtWZ[idx] = 0.0;
+
+  apply_A_transpose_weighted(s, ytilde, AtWy);
+
+  for(j = 0; j < s->q; j++){
+    for(k = s->Zp[j]; k < s->Zp[j + 1]; k++){
+      row = s->Zi[k];
+      wz = s->obsPrecision[row] * s->Zx[k];
+
+      for(t = 0; t < s->nTerms; t++){
+        term = s->terms + t;
+        i = term->wOffset + term->map[row];
+        AtWZ[i + s->qLatTotal * j] += term->scale[row] * wz;
+      }
+    }
+  }
 }
 
 void form_ZtVinvZ_and_rhs(SamplerState *s, const double *ytilde, double *ZtVinvZ, double *ZtVinvy)
 {
-  int i, j;
+  int i, j, inc;
+  double correction;
+  double *AtWZ, *AtWy, *MinvAtWZ, *MinvAtWy;
+
   if(s->q <= 0)
     return;
 
+  form_ZtWZ_and_ZtWy(s, ytilde, ZtVinvZ, ZtVinvy);
+
+  if(s->qLatTotal <= 0)
+    return;
+
+  inc = 1;
+
+  AtWZ = (double*)R_alloc(s->qLatTotal * s->q, sizeof(double));
+  AtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
+  MinvAtWZ = (double*)R_alloc(s->qLatTotal * s->q, sizeof(double));
+  MinvAtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
+
+  form_AtWZ_and_AtWy(s, ytilde, AtWZ, AtWy);
+  solve_M_lat_multiple(s, AtWZ, s->q, MinvAtWZ);
+  solve_M_lat(s, AtWy, MinvAtWy);
+
   for(j = 0; j < s->q; j++){
-    scatter_Z_col_to_dense(s, j, s->nWork1);
-    apply_Vinv(s, s->nWork1, s->nWork2);
+    correction = F77_CALL(ddot)(&s->qLatTotal,
+                                AtWZ + s->qLatTotal * j, &inc,
+                                MinvAtWy, &inc);
+    ZtVinvy[j] -= correction;
 
-    for(i = j; i < s->q; i++)
-      ZtVinvZ[i + s->q * j] = sparse_Z_col_dot_dense(s, i, s->nWork2);
-
+    for(i = j; i < s->q; i++){
+      correction = F77_CALL(ddot)(&s->qLatTotal,
+                                  AtWZ + s->qLatTotal * i, &inc,
+                                  MinvAtWZ + s->qLatTotal * j, &inc);
+      ZtVinvZ[i + s->q * j] -= correction;
+    }
   }
-
-  apply_Vinv(s, ytilde, s->nWork1);
-  sparse_Zt_mult(s, s->nWork1, ZtVinvy);
 }

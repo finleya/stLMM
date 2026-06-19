@@ -1,0 +1,1493 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,bm,booktabs,longtable,array,enumitem,graphicx,hyperref,makeidx}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{natbib}
+\usepackage{microtype}
+\setlist[itemize]{leftmargin=2em}
+\setlist[enumerate]{leftmargin=2em}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\makeindex
+
+% Common notation aliases. Vectors and matrices are bold so equations and
+% inline math use one consistent visual convention.
+\newcommand{\by}{\bm{y}}
+\newcommand{\bw}{\bm{w}}
+\newcommand{\balpha}{\bm{\alpha}}
+\newcommand{\bbeta}{\bm{\beta}}
+\newcommand{\beps}{\bm{\varepsilon}}
+\newcommand{\br}{\bm{r}}
+\newcommand{\bz}{\bm{z}}
+\newcommand{\bu}{\bm{u}}
+\newcommand{\bv}{\bm{v}}
+\newcommand{\bkappa}{\bm{\kappa}}
+\newcommand{\bpsi}{\bm{\psi}}
+\newcommand{\ba}{\bm{a}}
+\newcommand{\bc}{\bm{c}}
+\newcommand{\bb}{\bm{b}}
+\newcommand{\bo}{\bm{o}}
+\newcommand{\bh}{\bm{h}}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\btheta}{\bm{\theta}}
+\newcommand{\bx}{\bm{x}}
+\newcommand{\bA}{\bm{A}}
+\newcommand{\bB}{\bm{B}}
+\newcommand{\bC}{\bm{C}}
+\newcommand{\bD}{\bm{D}}
+\newcommand{\bF}{\bm{F}}
+\newcommand{\bG}{\bm{G}}
+\newcommand{\bH}{\bm{H}}
+\newcommand{\bI}{\bm{I}}
+\newcommand{\bL}{\bm{L}}
+\newcommand{\bM}{\bm{M}}
+\newcommand{\bP}{\bm{P}}
+\newcommand{\bQ}{\bm{Q}}
+\newcommand{\bR}{\bm{R}}
+\newcommand{\bS}{\bm{S}}
+\newcommand{\bU}{\bm{U}}
+\newcommand{\bV}{\bm{V}}
+\newcommand{\bW}{\bm{W}}
+\newcommand{\bX}{\bm{X}}
+\newcommand{\bZ}{\bm{Z}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\bzero}{\bm{0}}
+\newcommand{\trans}{^\top}
+
+\hypersetup{
+colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue }
+
+\title{\texttt{stLMM}: Modeling and Software Details}
+\author{}
+
+
+% Cover-page layout controls. Increase \coverlogolift to move the logo up.
+\newcommand{\coverlogolift}{1in}
+\newcommand{\coverlogowidth}{0.38\textwidth}
+
+\begin{document}
+\pagenumbering{gobble}
+\begin{titlepage}
+  \centering
+  \vspace*{0.65in}
+  {\Huge\bfseries \texttt{stLMM}\par}
+  \vspace{0.35in}
+  {\LARGE Modeling and Software Details\par}
+  \vspace{0.55in}
+  {\large Andrew O. Finley\par}
+  \vspace{0.25in}
+  {\large Updated \today\par}
+  \vfill
+  \vspace*{-\coverlogolift}
+  \includegraphics[width=\coverlogowidth]{logo.png}
+  \vfill
+\end{titlepage}
+
+\clearpage
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\section{Motivation and overview}
+\index{overview}
+\index{modeling framework}
+
+The \texttt{stLMM} package is in development to meet a growing interest in exploring and assessing small area estimation (SAE) models that support forest inventory for a range of space-time domains. While many R packages can fit particular SAE model classes, few single packages specialize in broad classes of unit- and area-level models tailored to data and settings encountered in inventory applications. Simplified exploration and application motivate this package's unified model specification and estimation framework. Although the specific motivation for this package was inventory applications, the methods are general and should find use in settings with similar data and inferential objectives.
+
+The package fits linear mixed models (LMMs) with parameters estimated using Bayesian methods. To accommodate different SAE model classes, the LMMs can have fixed effects, unstructured random effects, diverse types of structured point- and area-referenced space-time random effects, and different residual variance structures. There is a particular focus on computational efficiency for space and time dependence structures appropriate for space- and time-indexed datasets, hence the \texttt{st} in the package name. The package allows fine-tuned control over random-effect specifications to explore model specification, computing, and estimation, while also providing general defaults for routine applications.
+
+The unified design is based on a collapsed model specification, where high-dimensional structured random effects are integrated out, leaving only the low-dimensional covariance parameters that control space-time dependence to be estimated. Efficient computing using the collapsed model comes from working with structured random effects that have sparse precision matrices and estimation methods that take advantage of these sparse matrices.
+
+Random effect terms are:
+\begin{itemize}
+\item independent and identically distributed (iid) grouped random-effect term \texttt{iid()};
+\item Gaussian process (GP) term \texttt{gp()};
+\item nearest-neighbor Gaussian process (NNGP) term \texttt{nngp()};
+\item autoregressive AR(1) term \texttt{ar1()};
+\item conditional autoregressive (CAR) term \texttt{car()};
+\item directed acyclic graph autoregressive (DAGAR) term \texttt{dagar()};
+\item separable CAR-time term \texttt{car\_time()};
+\item separable DAGAR-time term \texttt{dagar\_time()}.
+\end{itemize}
+With the exception of \texttt{gp()}, all other process terms have sparse precision matrices.
+
+Terms can serve as group-varying or space-time varying effects via a \texttt{:} operator. For example, varying effects on a generic covariate \texttt{x} can be written as \texttt{x:iid()}, \texttt{x:gp()}, \texttt{x:nngp()}, \texttt{x:car()}, \texttt{x:dagar()}, \texttt{x:car\_time()}, or \texttt{x:dagar\_time()}.
+
+Space and space-time point-referenced data are handled using the \texttt{nngp()} and \texttt{gp()} terms, with covariance functions discoverable through \texttt{get\_cor\_models()}. For spatial data, these covariance functions include the Mat{\'e}rn and exponential. For space-time data, separable and nonseparable functions are available. The package design makes it straightforward to add new covariance models to the registry. Any number of coordinate columns can be passed to define the Euclidean space used for constructing the covariance. For space-time covariance models, coordinate order is part of the model, with the final coordinate treated as time.
+
+The \texttt{car()} and \texttt{car\_time()} terms accommodate spatial and space-time areal data using proper CAR specifications. A spatial adjacency graph is supplied to each function. The graph can be constructed using \texttt{car\_graph()}. The space-time \texttt{car\_time()} term fits a separable model, where a time column defines the temporal support. The temporal component can use either an ordered-support AR(1) precision or a continuous-time exponential correlation with a temporal decay parameter. The \texttt{dagar()} term uses the same graph support as \texttt{car()}, but orients the graph according to a user-specified ordering and applies the ordered DAGAR construction of \cite{DattaDAGAR2019}. The \texttt{dagar\_time()} term combines this ordered DAGAR spatial precision with the same temporal precision options used by \texttt{car\_time()}.
+
+The package also retains model metadata needed for post-fit recovery, fitted values, and prediction. The intended workflow is
+\begin{verbatim}
+fit <- stLMM(...)
+rec <- recover(fit, ...)
+fitted(rec)
+predict(rec, newdata = ...)
+\end{verbatim}
+where subsampling of posterior parameter draws can occur at the recovery and prediction steps. For P{\'o}lya-Gamma process models, \texttt{predict(fit, ...)} can also use saved in-chain process draws directly; \texttt{recover()} is then a selection and labeling step rather than a stochastic reconstruction step.
+
+For models without structured process terms, \texttt{fitted()} and \texttt{predict()} can be called directly on the fit object. For Gaussian-likelihood models with structured process terms, \texttt{recover()} is the explicit post-fit step that samples latent process draws conditional on retained posterior parameter draws. For P{\'o}lya-Gamma process models, the sampler retains in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)} and \texttt{recover()} selects from those saved draws. Enabling \texttt{save\_process} is intentionally limited to P{\'o}lya-Gamma models with structured process terms; Gaussian-likelihood process models remain collapsed and use post-fit recovery.
+
+\section{Modeling framework}
+\index{modeling framework}
+\index{hierarchical model}
+\index{latent process}
+\index{collapsed sampler}
+
+The package is built around a unified sparse-precision view of Bayesian Gaussian mixed models. The basic observation model is
+\begin{equation}
+  \by = \bX\bbeta + \bZ\balpha + \bA\bw + \beps,
+\end{equation}
+where
+\begin{itemize}
+\item $\bX\bbeta$ are fixed effects;
+\item $\bZ\balpha$ are explicit iid grouped random effects;
+\item $\bw$ is the stacked structured latent process vector;
+\item $\bA$ maps observation rows to latent process nodes and applies any covariate scaling for space-time varying coefficient terms;
+\item $\beps$ is the Gaussian residual component.
+\end{itemize}
+
+The default residual model is homoskedastic
+\begin{equation}
+  \beps \sim N(0, \tau^2 \bI_n),
+\end{equation}
+with options set via a single \texttt{resid()} term for a more general diagonal observation precision
+\begin{equation}
+  \bW = \mathrm{diag}(p_1,\ldots,p_n),
+\end{equation}
+where $p_i=\tau^{-2}$ under the default model, $p_i=1/\widehat v_i$ under fixed direct estimate residual variances, $p_i=1/\tau_i^2$ under sampled direct-estimate residual variance models, with additional options described in the manual page.
+
+The fixed-effect coefficient vector is indexed as
+\begin{equation}
+  \bbeta = \left(\beta_1,\ldots,\beta_p\right)\trans .
+\end{equation}
+The explicit iid random effects have
+\begin{equation}
+  \balpha \sim N(0, \bD_\alpha),
+\end{equation}
+where $\balpha=(\alpha_1,\ldots,\alpha_q)\trans$ and $\bD_\alpha$ is block diagonal by iid term. The structured process block has
+\begin{equation}
+  \bw \sim N(0, \bQ_w^{-1}),
+\end{equation}
+with $\bQ_w$ assembled as a block-diagonal prior precision over process terms.
+
+For one process term with latent support $s_1,\ldots,s_{q_k}$, the finite latent vector is
+\begin{equation}
+  \bw_k = \left(w_k(s_1), \ldots, w_k(s_{q_k})\right)\trans .
+\end{equation}
+If there are $K$ process terms, then
+\begin{equation}
+  \bw = \left( \bw_1\trans, \cdots, \bw_K\trans \right)\trans,\qquad
+  \bQ_w = \mathrm{blockdiag}(\bQ_1,\ldots,\bQ_K),
+\end{equation}
+and the total latent dimension is
+\begin{equation}
+  q_{\mathrm{lat}} = \sum_{k=1}^K q_k.
+\end{equation}
+
+The main sampler is collapsed with respect to $\bw$, i.e., structured latent process draws are integrated out during parameter updates. For Gaussian-likelihood models with structured process terms, process draws may be recovered after fitting by \texttt{recover()}. P{\'o}lya-Gamma process models retain the warm-running in-chain process draws used by the augmentation step, with the default retained grid \texttt{save\_process = list(start = 1, thin = 1)}.
+
+This formulation is not the fastest sampler for each individual model class, but it gives one coherent implementation for point-referenced, areal, temporal, and space-time terms.
+
+\section{Current interface}
+\index{interface}
+\index{stLMM@\texttt{stLMM()}}
+
+The user-facing functions are deliberately small:
+\begin{itemize}
+\item \texttt{stLMM()} fits the model;
+\item \texttt{recover()} recovers latent process draws from a fit;
+\item \texttt{predict()} predicts given new data;
+\item \texttt{log\_lik()} and \texttt{waic()} compute pointwise log-likelihood matrices and WAIC on the observed rows;
+\item S3 methods for printing, summaries, and plots.
+\end{itemize}
+
+The \texttt{log\_lik()} calculation is conditional on the latent model expression used by fitted values. Models without structured process terms can be evaluated directly from the fit object. Gaussian-likelihood process models require recovered latent process draws, while P{\'o}lya-Gamma process models can use the saved in-chain process draws when \texttt{save\_process} retained them. The optional \texttt{loo} package is used only when \texttt{waic()} is called.
+
+Backend helpers such as graph builders, correlation registries, and nearest-neighbor index constructors are internal implementation details, not part of the API.
+
+The current \texttt{stLMM()} signature is
+\begin{verbatim}
+stLMM(formula, data = parent.frame(), starting = list(), tuning = NULL,
+     priors = NULL, family = "gaussian", trials = NULL, size = NULL,
+     n_samples, n_omp_threads = 1,
+     nngp_search = c("fast", "brute"),
+     verbose = TRUE, n_report = 100, warmup = TRUE,
+     metropolis = list(), cholmod_control = list(), chains = 1L,
+     save_process = NULL, chain_control = list(),
+     describe_terms = FALSE, ...)
+\end{verbatim}
+
+To simplify model specification, not all prior distributions need to be specified by the user. Reasonable defaults are used for some low-level quantities, such as the fixed-effect prior and default starts. Other priors, especially structured-process covariance priors, require explicit user consideration and are therefore required.
+
+The \texttt{family} argument currently supports \texttt{"gaussian"}, \texttt{"binomial"}, and \texttt{"negative\_binomial"}. For \texttt{family = "binomial"}, the response is the number of successes and \texttt{trials} supplies the number of trials. If \texttt{trials} is omitted, each row is treated as one Bernoulli trial. Binomial models use a logit link, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "negative\_binomial"}, the response is a nonnegative integer count and \texttt{size} supplies a fixed positive negative-binomial size parameter. Negative-binomial models use a log-mean link and also omit Gaussian residual variance terms.
+
+Standard R formula offsets are supported through \texttt{offset()}. The offset is a known additive component of the linear predictor. For count models with an exposure or expected-count scaling $E_i$, users can write \texttt{offset(log(E))}. Section~\ref{sec:negative-binomial} gives the negative-binomial model and computational rationale.
+
+\subsection{Control lists}
+
+\texttt{starting} and \texttt{tuning} are optional. If omitted, the sampler uses conservative defaults, which should be checked against the scale and dependence structure of the fitted model.
+
+Priors are supplied through explicit prior constructors. Fixed effects may use \texttt{flat()} or \texttt{normal(mean, sd)}. The Gaussian likelihood defaults to \texttt{flat()} for $\bbeta$, while P{\'o}lya-Gamma likelihoods default to \texttt{normal(mean = 0, sd = 10)}. The \texttt{normal()} constructor defines independent normal priors and allows scalar or coefficient-specific mean and standard-deviation vectors. The \texttt{flat()} and \texttt{normal()} constructors are accepted only for \texttt{priors\$beta}.
+
+The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, except iid grouped random-effect variances, which are currently Gibbs-updated and therefore use \texttt{ig()}. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
+
+Parameter names are local to the model term. This follows the software API and keeps user-supplied \texttt{starting}, \texttt{tuning}, and \texttt{priors} lists readable, but it means the same symbol can have different meanings in different terms. For example, \texttt{phi} is a spatial decay parameter in an exponential GP or NNGP term, but it is an ordered-support one-step correlation in an \texttt{ar1()} term.
+
+Process and sampled residual variance parameters are fixed via \texttt{fixed(value)} in the starting list. For example, \texttt{starting = list(nngp\_1 = list(phi = fixed(6)))} fixes the \texttt{phi} parameter in the first NNGP term. Fixed parameters are skipped in the Metropolis update so they do not add computing overhead, but they still contribute to the likelihood.
+
+\subsection{Multiple chains and coda diagnostics}
+\index{chains}
+\index{coda@\texttt{coda}}
+
+The \texttt{chains} argument runs multiple MCMC chains sequentially from the same parsed model. With \texttt{chains = 1}, \texttt{stLMM()} returns the ordinary \texttt{stLMM} object. With \texttt{chains > 1}, it returns an \texttt{stLMM\_chains} object whose \texttt{chains} component is a list of ordinary \texttt{stLMM} fits. This keeps downstream behavior explicit: \texttt{recover()} returns an \texttt{stLMM\_recovery\_chains} object with one recovered object per chain, and \texttt{predict()} returns an \texttt{stLMM\_prediction\_chains} object with one prediction object per chain. Subsampling for recovery and prediction is applied within each chain.
+
+If the user omits starting values, multi-chain fitting uses the same default centers as single-chain fitting but disperses positive variance starts on the log scale and bounded covariance starts within their prior bounds. The \texttt{chain\_control} list supports \texttt{seed}, which sets the R random seed before chain starts are generated, and \texttt{dispersion}, which controls log-scale jitter for omitted positive starts.
+
+If the user supplies a starting value, that value is treated as authoritative. Scalar starts are recycled to every chain. Vectors with length \texttt{chains} define chain-specific starts.
+
+The package provides \texttt{as\_mcmc()} as a bridge to \texttt{coda}. Single-chain objects convert to \texttt{coda::mcmc}; multi-chain objects convert to \texttt{coda::mcmc.list}. The \texttt{summary()} method for multi-chain fits reports pooled posterior summaries and coda-style chain diagnostics including point-estimate $\hat R$ and effective sample size where available.
+
+\subsection{Formula model terms}
+
+The formula language distinguishes explicit iid grouped random effects from structured latent process terms:
+\begin{itemize}
+\item \texttt{iid(group)} adds an iid Gaussian random intercept over observed group levels;
+\item \texttt{x:iid(group)} adds an iid Gaussian random slope for numeric covariate \texttt{x};
+\item \texttt{iid(group) + x:iid(group)} creates two scalar iid terms with separate variance parameters, with term objects labeled in the order they appear in the model, e.g., \texttt{iid\_1} and \texttt{iid\_2};
+\item \texttt{nngp(...)}, \texttt{gp(...)}, and \texttt{ar1(...)} add structured latent process terms;
+\item \texttt{car(area, graph = g)} adds a CAR latent process over an areal graph produced by \texttt{car\_graph()}; the \texttt{car\_model} argument selects the proper or Leroux spatial precision;
+\item \texttt{car\_time(area, time, graph = g, time\_model = "ar1")} adds a separable CAR-by-AR1 latent process over graph areas crossed with fitted time values, again using \texttt{car\_model} for the spatial CAR component;
+\item \texttt{x:nngp(...)}, \texttt{x:gp(...)}, and \texttt{x:ar1(...)} create covariate-scaled process terms; the same convention applies to \texttt{x:car(...)} and \texttt{x:car\_time(...)}.
+\end{itemize}
+
+The iid terms use the explicit $\bZ\balpha$ random-effect and do not require post-fit recovery. Structured process terms are collapsed during parameter updates. Gaussian-likelihood process fits require \texttt{recover()} before process contributions are used in fitted values or prediction, while P{\'o}lya-Gamma process fits save in-chain process draws by default and \texttt{recover()} selects from those draws when a narrower retained subset is desired. The retained P{\'o}lya-Gamma process grid can be controlled with \texttt{save\_process = list(start = ..., thin = ...)} when memory is a concern.
+
+The \texttt{resid(...)} term is not a latent random-effect term. It specifies the Gaussian residual variance model and is parsed separately from the fixed-effect, iid, and structured-process terms. Omitting \texttt{resid()} is equivalent to \texttt{resid(model = "tau\_sq")}, which estimates one global residual variance. Users may also write this default explicitly when it helps make a model formula self-documenting. Other \texttt{resid()} models allow fixed row-specific variances, group-specific residual variances, and direct-estimate variance models used in Fay-Herriot-style analyses. These options are described in Section~\ref{residual-models} and in the \texttt{?resid} manual page.
+
+\section{Latent supports and backend metadata}
+\index{latent support}
+\index{backend metadata}
+
+Each structured term contributes a term-specific latent support and a latent block of size $q_k$. The support may be unique point coordinates, unique AR1 time values, graph areas, or graph areas crossed with fitted time values. Different process terms do not have to share the same support or coordinates.
+
+Repeated fitted rows can map to the same latent node. For example, observations with the same coordinates or point observations within the same group or area are allowed to map to the same latent node. Missing response values indicated with an \texttt{NA} are permitted. They do not contribute to the likelihood, but their structured effects are recovered via \texttt{recover()}; see Section~\ref{missing} for details.
+
+The fitted object retains the backend object, including the original design matrices, process terms, graphs, term descriptions, and coordinate metadata. This retained backend is essential for recovery, fitted values, prediction, and diagnostics.
+
+\section{Model terms}
+\index{model terms}
+\index{precision blocks}
+
+This section describes the model terms from the user-facing formula level down to their latent supports, prior precision blocks, recovery behavior, and current prediction limits.
+
+\subsection{Fixed effects}
+\index{fixed effects}
+\index{beta@$\beta$}
+
+Fixed effects use ordinary R formula syntax and enter the model through $\bX\bbeta$. Standard formula offsets enter as a known vector $\bo$ and are not sampled. In formulas, users write \texttt{offset(expr)}; internally the fitted linear predictor is $\bo+\bX\bbeta+\bZ\balpha+\bA\bw$. Fixed effects are sampled directly during fitting using the collapsed Gaussian update described later. Fixed effects and offsets do not require post-fit recovery.
+
+\subsection{iid grouped random-effect terms}
+\index{iid random effects}
+\index{iid@\texttt{iid()}}
+\index{alpha@$\alpha$}
+
+\texttt{iid(group)} adds an iid Gaussian random intercept over observed group levels. \texttt{x:iid(group)} adds an iid Gaussian random slope for numeric covariate \texttt{x}. These terms use the explicit $\bZ\balpha$ rather than the collapsed structured-process.
+
+Each iid term receives its own variance parameter. For example, \texttt{iid(group) + x:iid(group)} produces two iid random-effect variance controls, typically named \texttt{iid\_1} and \texttt{iid\_2}. The iid random effects are sampled directly during fitting and are returned in \texttt{alpha\_samples}; no \texttt{recover()} call is needed for these coefficients.
+
+As with $\bbeta$, the choice not to fold $\balpha$ into $\bw$ is deliberate. Gibbs updates for these terms are inexpensive relative to the downside of adding more nonzero elements to the collapsed precision matrix and additional parameters to the Metropolis update. It is also useful to have $\balpha$ immediately available after fitting.
+
+\subsection{NNGP terms}
+\index{NNGP}
+\index{nngp@\texttt{nngp()}}
+
+The space-time NNGP term is specified as \texttt{nngp(coord1, coord2, ..., m = 15, ordering = "coord", cov\_model = "exp")}. \texttt{ordering} options are \texttt{"coord"}, \texttt{"default"}, \texttt{"maxmin"}, \texttt{"hilbert"}, \texttt{"random"}, or a numeric permutation of the graph nodes. The term's conditional representation is held in neighbor-weight vectors $B_k$ and conditional precision factors $F_k$, updated by \texttt{update\_nngp\_BF()}. Here $F_{k,i}$ is the inverse conditional variance on the unit-variance correlation scale. This is a precision-factor notation; it is the reciprocal of the conditional variance often denoted $F_i$ in the NNGP literature. These quantities do not include the process variance $\sigma_k^2$. The scalar factor $\sigma_k^{-2}$ is applied during latent precision assembly so NNGP terms follow the same convention as other process terms.
+
+Conceptually,
+\begin{equation}
+  \bQ_k = \sigma_k^{-2} \widetilde{\bQ}_k(\theta_k),
+\end{equation}
+where $\widetilde{\bQ}_k(\theta_k)$ is represented compactly by NNGP neighbor weights and conditional precision factors. The NNGP contribution to $\log|\bQ_w|$ is
+\begin{equation}
+  \label{eq:logdet-nngp}
+  \log |\bQ_k| = -q_k \log(\sigma_k^2) + \sum_{i=1}^{q_k} \log(F_{k,i}),
+\end{equation}
+implemented inside \texttt{logdet\_Qw\_blocks()}.
+
+The latent support is the unique fitted coordinate support for that term. Repeated observations at the same coordinates share the same latent node. Recovery returns NNGP latent draws in original support order for users, while the ordered internal support is retained for prediction and fitted-value alignment. Prediction supports existing fitted nodes, independent new-node prediction, moderate-size dense joint new-node prediction using fitted-support neighbors, and scalable Vecchia-style joint prediction in which earlier prediction nodes can enter the history set for later prediction nodes.
+
+\subsection{Dense GP terms}
+\index{GP}
+\index{gp@\texttt{gp()}}
+
+Dense GP terms are implemented primarily for smaller supports and for testing. A space-time GP term is specified as \texttt{gp(coord1, coord2, ..., cov\_model = "exp")}. This term uses a dense correlation matrix
+\begin{equation}
+  \bR_k(\theta_k)
+    =
+    \left[\rho_{\theta_k}(s_i,s_j)\right]_{i,j=1}^{q_k},
+\end{equation}
+then forms
+\begin{equation}
+  \bQ_k = \sigma_k^{-2}\bR_k(\theta_k)^{-1}.
+\end{equation}
+
+This is handled by \texttt{update\_gp\_Q()}, which fills the dense correlation matrix, performs a dense Cholesky factorization, computes $\log|\bR_k|$, inverts the correlation matrix, and scales by $\sigma_k^{-2}$. The log-determinant contribution is
+\begin{equation}
+  \label{eq:logdet-gp}
+  \log|\bQ_k| = -q_k \log(\sigma_k^2) - \log|\bR_k|.
+\end{equation}
+The sign difference between the NNGP and dense GP log determinants reflects their internal representation: the NNGP stores a sparse scale-free precision, whereas the dense GP is specified through a correlation matrix that is inverted to obtain the prior precision.
+
+The latent support is the unique fitted coordinate support. Dense GP recovery uses the same collapsed Gaussian recovery equations as other structured processes. Prediction can add new dense GP nodes for small supports, but dense GP terms should not be used for large latent supports.
+
+\subsection{Point-referenced covariance functions}
+\index{covariance functions}
+\index{Matern@Mat{\'e}rn}
+
+The covariance functions used by \texttt{gp()} and \texttt{nngp()} are stored in a small registry. Users can inspect the registry with \texttt{get\_cor\_models()}. The currently implemented families are \texttt{exp}, \texttt{matern}, \texttt{sep\_exp}, \texttt{multi\_res\_sep\_exp}, and \texttt{gneiting}. The model term contributes a process variance $\sigma^2$ and the covariance function contributes theta parameters named by the registry.
+
+For the exponential covariance,
+\begin{equation}
+  C(s_i,s_j) = \sigma^2 \exp\{-\phi d_{ij}\},
+\end{equation}
+where $d_{ij}$ is Euclidean distance and $\phi>0$ is a decay parameter. For the Mat{\'e}rn covariance,
+\begin{equation}
+  C(s_i,s_j)
+    =
+    \sigma^2
+    \frac{(\phi d_{ij})^\nu}
+         {2^{\nu-1}\Gamma(\nu)}
+    K_\nu(\phi d_{ij}),
+    \qquad d_{ij}>0,
+\end{equation}
+with $C(s_i,s_i)=\sigma^2$. Here $\phi>0$ is a decay parameter, $\nu>0$ is the smoothness parameter, and $K_\nu(\cdot)$ is the modified Bessel function of the second kind.
+
+There are several separable covariance options and one nonseparable option from the Gneiting family \citep{Gneiting2002}. These space-time models assume the final supplied coordinate is time. Reordering coordinates changes the model, not only the neighbor search.
+
+\subsection{AR1 terms}
+\index{AR1}
+\index{ar1@\texttt{ar1()}}
+
+AR1 terms use tridiagonal precision formulas assembled directly from $\phi$ and $\sigma_k^2$. The numerical block is assembled by \texttt{assemble\_ar1\_block\_into\_M()}, and the determinant contribution is evaluated analytically inside \texttt{logdet\_Qw\_blocks()}. For $q_k>1$, the stationary ordered-support AR1 prior precision is
+\begin{equation}
+  \bQ_k =
+  \frac{1}{\sigma_k^2(1-\phi^2)}
+  \begin{bmatrix}
+    1 & -\phi & 0 & \cdots & 0 \\
+    -\phi & 1+\phi^2 & -\phi & \ddots & \vdots \\
+    0 & -\phi & 1+\phi^2 & \ddots & 0 \\
+    \vdots & \ddots & \ddots & \ddots & -\phi \\
+    0 & \cdots & 0 & -\phi & 1
+  \end{bmatrix}.
+\end{equation}
+The one-node edge case is handled as a $1\times 1$ precision matrix,
+\begin{equation}
+  \bQ_k = \begin{bmatrix}\sigma_k^{-2}\end{bmatrix},
+\end{equation}
+independent of $\phi$.
+The corresponding determinant contribution is
+\begin{equation}
+  \label{eq:logdet-ar1}
+  \log|\bQ_k|
+  =
+  \begin{cases}
+    -q_k\log(\sigma_k^2) - (q_k-1)\log(1-\phi^2), & q_k>1,\\
+    -\log(\sigma_k^2), & q_k=1.
+  \end{cases}
+\end{equation}
+In the implementation this edge case is implicit: the same determinant calculation is used and the $(q_k-1)\log(1-\phi^2)$ term vanishes when $q_k=1$.
+
+The latent support is the sorted unique fitted time support. Repeated fitted rows at the same time share one latent node. Prediction follows this fitted ordered-support convention: the current implementation treats the support as an ordered AR1 chain rather than as continuous-time gaps in the numeric time values. Thus $\phi$ is a one-step correlation on the sorted support, not a per-unit-time correlation. Unequally spaced values such as years $\{2000,2005,2010\}$ and $\{2000,2001,2002\}$ have the same AR1 graph structure once sorted.
+
+\subsection{CAR terms}
+\index{CAR}
+\index{car@\texttt{car()}}
+\index{car_graph@\texttt{car\_graph()}}
+
+Spatial CAR terms are specified as \texttt{car(area, graph = g, car\_model = "proper")} or \texttt{car(area, graph = g, car\_model = "leroux")}, where $g$ is an object produced by \texttt{car\_graph()}. The graph can be built from a symmetric adjacency matrix or from an \texttt{sf} polygon layer. Polygon inputs require an explicit ID column so fitted data rows can be matched to graph areas.
+
+The default spatial CAR precision is the degree-scaled proper CAR model
+\begin{equation}
+  \bQ_{\mathrm{car}}
+    = \sigma^{-2}(\bD - \rho \bG),
+    \qquad 0 < \rho < 1,
+\end{equation}
+where $\bG$ is the symmetric binary adjacency matrix and $\bD$ is the diagonal degree matrix. The graph stored by \texttt{car\_graph()} is not row-standardized. Rather, this degree-scaled precision is equivalent to a CAR conditional specification with row-standardized neighbor averaging in the conditional mean,
+\begin{equation}
+  E(w_i\mid\bw_{-i})
+    = \frac{\rho}{d_i}\sum_{j\sim i} w_j,
+  \qquad
+  \mathrm{Var}(w_i\mid\bw_{-i})
+    = \frac{\sigma^2}{d_i},
+\end{equation}
+where $d_i$ is the number of neighbors for area $i$. Thus the CAR term averages neighboring random effects in the full conditional distribution while retaining a sparse precision written in terms of the binary adjacency and degree matrix \cite{banerjee2014hierarchical}.
+
+The Leroux CAR option \citep{LerouxLeiBreslow1999} uses the same graph object and parameter names, but replaces the spatial precision by
+\begin{equation}
+  \bQ_{\mathrm{leroux}}
+    = \sigma^{-2}\{(1-\rho)\bI + \rho(\bD-\bG)\},
+    \qquad 0 < \rho < 1.
+\end{equation}
+This parameterization interpolates between iid area effects as $\rho$ approaches zero and intrinsic-CAR smoothing as $\rho$ approaches one. The exact endpoint $\rho=1$ is not used because it gives a singular intrinsic precision for connected graphs. The current software API also uses the open lower bound $\rho>0$ for sampled CAR association parameters; an exactly independent area effect is represented by \texttt{iid()} rather than by setting CAR \texttt{rho} to zero.
+
+The restriction $\rho\in(0,1)$ is an implementation and modeling choice that allows positive spatial association for the connected binary graphs used here. It is a deliberate narrowing of the full spectral proper-CAR parameter range, not a claim that nonpositive $\rho$ is generally improper. More generally, positive definiteness of $\bD-\rho\bG$ is governed by the eigenvalues of $\bD^{-1/2}\bG\bD^{-1/2}$. If $\lambda_{\min}$ and $\lambda_{\max}$ are the smallest and largest eigenvalues of this normalized adjacency matrix, then the proper range is
+\begin{equation}
+  \lambda_{\min}^{-1} < \rho < \lambda_{\max}^{-1}.
+\end{equation}
+For connected binary graphs, $\lambda_{\max}=1$, so $\rho<1$ is the upper bound; the lower bound can be negative and is ruled out by the current positive-association restriction.
+
+\texttt{car\_graph()} is conservative by default. Isolated areas and disconnected components error under \texttt{island = "error"}. For polygon layers with expected islands, \texttt{island = "nearest"} adds explicit nearest-neighbor bridge edges between disconnected components. The bridge metadata are retained in the graph object.
+
+The graph objects have \texttt{plot()} methods intended for audit and teaching plots. For \texttt{sf}-based graphs, the plot overlays the adjacency edges on the polygon geometry and can highlight bridge edges added by \texttt{island = "nearest"}. For matrix-based graphs, the same method returns a \texttt{ggplot2} graph display using a deterministic circular layout. These plots are diagnostics of the graph construction, not part of the sampler.
+
+CAR precision contributions are assembled sparsely into $\bM$. The determinant $\log|\bQ_{\mathrm{car}}|$ is evaluated by CHOLMOD on a cached sparse CAR prior matrix. Conceptually, the proper and Leroux determinant contributions are
+\begin{equation}
+  \label{eq:logdet-car}
+  \log|\bQ_{\mathrm{car}}|
+  =
+  -S\log(\sigma^2) + \log|\bD-\rho\bG|
+\end{equation}
+and
+\begin{equation}
+  \label{eq:logdet-leroux}
+  \log|\bQ_{\mathrm{leroux}}|
+  =
+  -S\log(\sigma^2)
+  + \log|(1-\rho)\bI+\rho(\bD-\bG)|.
+\end{equation}
+The sparse pattern and symbolic analysis are cached; numeric values are refreshed as $\sigma^2$ and $\rho$ change.
+
+The latent support is the graph area support. Fitted data rows are matched to graph areas through the area variable. Recovery returns one latent value per graph area. Prediction is currently limited to areas already present in the fitted graph.
+
+\subsection{DAGAR terms}
+\index{DAGAR}
+\index{dagar@\texttt{dagar()}}
+
+Spatial DAGAR terms are specified as \texttt{dagar(area, graph = g, ordering = "coord")}, where $g$ is an object produced by \texttt{car\_graph()}. The graph supplies the undirected area adjacency. The \texttt{ordering} argument orients every adjacency edge from the earlier area to the later area and is therefore part of the model specification.
+
+Let $\pi=\{\pi(1),\ldots,\pi(S)\}$ be the predetermined ordering of the graph areas, with inverse permutation $\pi^{-1}$. For area $i$, define the directed parent set
+\begin{equation}
+  N_\pi(i)
+    =
+    \{j: i\sim j,\ \pi^{-1}(j)<\pi^{-1}(i)\},
+\end{equation}
+and let $n_\pi(i)=|N_\pi(i)|$. The directed graph $D_\pi=(V,E_\pi)$ contains the directed edges from each $j\in N_\pi(i)$ to $i$. The implementation checks that the supplied ordering is a permutation, that all directed parent indices point backward in the ordering, and hence that the constructed graph is acyclic.
+
+Following \cite{DattaDAGAR2019}, the ordered DAGAR conditional model is
+\begin{equation}
+  w_i \mid \bw_{<i,\pi}
+  \sim
+  N\left(
+    \frac{\rho}{1+\{n_\pi(i)-1\}\rho^2}
+    \sum_{j\in N_\pi(i)} w_j,\,
+    \frac{1+\{n_\pi(i)-1\}\rho^2}{1-\rho^2}
+  \right),
+  \qquad 0 \leq \rho < 1.
+\end{equation}
+The second argument of the univariate normal distribution is precision. If $n_\pi(i)=0$, then the conditional mean is zero and the conditional precision is one. This can occur for the first ordered node and can also occur for later nodes under arbitrary orderings. The term description reports the DAG parent-count summary and the number of zero-parent nodes.
+
+The propriety range in the DAGAR construction includes $\rho=0$, where the prior reduces to iid area effects. The current software API uses the open interval $0<\rho<1$ for DAGAR \texttt{rho}, matching the bounded-logit Metropolis update used for sampled spatial association parameters. Users can approximate independence with a small positive value or use an \texttt{iid()} term when an exactly independent area effect is intended. For common ordered lattice structures, \citet{DattaDAGAR2019} show that $\rho$ has a direct neighbor-correlation interpretation, which is one motivation for the DAGAR construction.
+
+Let $\bL_\pi$ be the unit lower-triangular matrix whose row $i$ contains $-b_i$ for the directed parents of node $i$, with
+\begin{equation}
+  b_i =
+  \frac{\rho}{1+\{n_\pi(i)-1\}\rho^2},
+\end{equation}
+and let $\bF_\pi$ be diagonal with entries
+\begin{equation}
+  f_i =
+  \frac{1+\{n_\pi(i)-1\}\rho^2}{1-\rho^2}.
+\end{equation}
+The scale-free DAGAR precision is
+\begin{equation}
+  \widetilde{\bQ}_{\mathrm{dagar}}(\rho)
+    =
+    \bL_\pi^\top \bF_\pi \bL_\pi.
+\end{equation}
+Using the \texttt{stLMM} process-variance convention,
+\begin{equation}
+  \bQ_{\mathrm{dagar}}
+    =
+    \sigma^{-2}\widetilde{\bQ}_{\mathrm{dagar}}(\rho),
+  \qquad
+  \bw \sim
+  N\{\bzero,\sigma^2\widetilde{\bQ}_{\mathrm{dagar}}(\rho)^{-1}\}.
+\end{equation}
+The determinant is evaluated from the conditional precisions:
+\begin{equation}
+  \label{eq:logdet-dagar}
+  \log|\bQ_{\mathrm{dagar}}|
+    =
+    -S\log(\sigma^2)
+    +
+    \sum_{i=1}^S \log f_i.
+\end{equation}
+
+Like the NNGP term, \texttt{ordering} options are \texttt{"coord"}, \texttt{"default"}, \texttt{"maxmin"}, \texttt{"hilbert"}, \texttt{"random"}, or a numeric permutation of the graph nodes. Coordinate, max-min, and Hilbert orderings use polygon point-on-surface coordinates and therefore require an \texttt{sf}-based \texttt{car\_graph()} object. For adjacency-matrix graph inputs, \texttt{"coord"} and \texttt{"default"} use the supplied row order. The max-min and Hilbert orderings are available as modeling options, but DAGAR ordering should be interpreted more cautiously than NNGP ordering: it defines the directed graph for an areal autoregression rather than a nearest-neighbor approximation to a continuous-domain Gaussian process.
+
+The latent support is the graph area support. Internally, DAGAR precision assembly uses the ordering order, while recovered latent process samples are returned in the original graph-area order. Prediction is currently limited to areas already present in the fitted graph. The \texttt{plot()} method for internal DAGAR graph objects draws the directed parent edges implied by the selected ordering, which is useful for checking how an undirected areal graph was converted into a DAG.
+
+\subsection{Temporal precision used by areal time terms}
+\index{temporal precision}
+\index{time_model@\texttt{time\_model}}
+
+The \texttt{car\_time()} and \texttt{dagar\_time()} terms use the same scale-free temporal precision options. For \texttt{time\_model = "ar1"}, $\widetilde{\bQ}_{\mathrm{time}}$ is the ordered-support AR1 precision with parameter $\phi$. This is the same lattice AR1 convention used by \texttt{ar1()}: $\phi$ is a one-step correlation on the sorted fitted time support, not a per-unit-time correlation.
+
+For \texttt{time\_model = "exp"}, the temporal covariance is
+\begin{equation}
+  C_t(t_i,t_j) = \exp\{-\lambda |t_i-t_j|\}.
+\end{equation}
+For sorted one-dimensional time values, this is the covariance of a discretely observed Ornstein--Uhlenbeck process, and the inverse correlation matrix is tridiagonal even when the time gaps are unequal. If
+\begin{equation}
+  r_j = \exp\{-\lambda(t_{j+1}-t_j)\},
+  \qquad j=1,\ldots,T-1,
+\end{equation}
+for sorted unique time values $t_1<\cdots<t_T$, then the scale-free temporal precision $\widetilde{\bQ}_{\mathrm{time}}$ is sparse with nonzero entries only on the main diagonal and first off-diagonals. Thus exponential time correlation gives a sparse temporal precision without forming a dense space-time covariance matrix. This model has temporal decay parameter $\lambda>0$ rather than AR1 parameter $\phi$.
+
+\subsection{DAGAR-time terms}
+\index{DAGAR-time}
+\index{dagar_time@\texttt{dagar\_time()}}
+\index{Kronecker precision}
+
+Separable DAGAR-time terms are specified as \texttt{dagar\_time(area, time, graph = g, ordering = "coord", time\_model = "ar1")} or \texttt{dagar\_time(area, time, graph = g, ordering = "coord", time\_model = "exp")}. The graph support and ordering rules are the same as for \texttt{dagar()}. The fitted time support is the sorted set of unique time values in the fitting data. Internally, the latent support is ordered-area-major:
+\begin{equation}
+  (\pi(1),t_1),\ldots,(\pi(1),t_T),
+  (\pi(2),t_1),\ldots,(\pi(S),t_T).
+\end{equation}
+Here $\pi$ is the DAGAR area ordering and $t_1<\cdots<t_T$ are the fitted time values after sorting. User-facing recovered samples are returned in the original graph-area order crossed with fitted time order.
+
+The implemented precision is
+\begin{equation}
+  \bQ_{\mathrm{dagar},t}
+    =
+    \sigma^{-2}
+    \{\widetilde{\bQ}_{\mathrm{dagar}}(\rho)
+      \otimes
+      \widetilde{\bQ}_{\mathrm{time}}\},
+\end{equation}
+where $\widetilde{\bQ}_{\mathrm{dagar}}(\rho)$ is the scale-free ordered DAGAR precision defined above and $\widetilde{\bQ}_{\mathrm{time}}$ is the scale-free temporal precision. There is one process variance $\sigma^2$ for the full area-time process.
+
+The temporal factor uses the shared AR1 or exponential-time precision defined above. The exponential-time option supports unequal numeric time gaps.
+
+The determinant uses the Kronecker identity:
+\begin{equation}
+  \label{eq:logdet-dagar-time}
+  \log|\bQ_{\mathrm{dagar},t}|
+    =
+    -ST\log(\sigma^2)
+    +
+    T\log|\widetilde{\bQ}_{\mathrm{dagar}}(\rho)|
+    +
+    S\log|\widetilde{\bQ}_{\mathrm{time}}|.
+\end{equation}
+The DAGAR spatial factor and temporal factor are scale-free in this identity; the single $-ST\log(\sigma^2)$ term supplies the process-variance contribution.
+
+Prediction for \texttt{dagar\_time()} is currently limited to areas already in the fitted graph and time values already in the fitted time support. The area lookup is mapped through the fitted DAGAR ordering before indexing the internal latent vector. New graph areas and new fitted-time values error. The \texttt{plot()} method for the internal graph object displays the ordered DAGAR spatial graph used by the space-time term.
+
+\subsection{CAR-time terms}
+\index{CAR-time}
+\index{car_time@\texttt{car\_time()}}
+\index{Kronecker precision}
+
+Separable CAR-time terms are specified as \texttt{car\_time(area, time, graph = g, time\_model = "ar1")} or \texttt{car\_time(area, time, graph = g, time\_model = "exp")}. The optional \texttt{car\_model} argument selects the proper or Leroux CAR precision for the spatial factor. The fitted latent support is the Cartesian product of graph areas and sorted unique fitted time values. Internally, support is location-major:
+\begin{equation}
+  (s_1,t_1),\ldots,(s_1,t_T),(s_2,t_1),\ldots,(s_S,t_T).
+\end{equation}
+
+The current precision is
+\begin{equation}
+  \bQ_{\mathrm{st}}
+    = \sigma^{-2}
+      (\widetilde{\bQ}_{\mathrm{space}}
+       \otimes \widetilde{\bQ}_{\mathrm{time}}),
+\end{equation}
+where $\widetilde{\bQ}_{\mathrm{space}}=\bD-\rho\bG$ for \texttt{car\_model = "proper"} and $\widetilde{\bQ}_{\mathrm{space}}=(1-\rho)\bI+\rho(\bD-\bG)$ for \texttt{car\_model = "leroux"}. The matrix $\widetilde{\bQ}_{\mathrm{time}}$ is the scale-free AR1 or exponential temporal precision for the fitted time support. There is one identifiable process variance $\sigma^2$ for the whole space-time process. Separate spatial and temporal variance parameters should not be added to this separable term because they are not identifiable.
+
+The determinant uses the Kronecker identity:
+\begin{equation}
+  \label{eq:logdet-car-time}
+  \log|\bQ_{\mathrm{st}}|
+    = -ST\log(\sigma^2)
+      + T\log|\widetilde{\bQ}_{\mathrm{space}}|
+      + S\log|\widetilde{\bQ}_{\mathrm{time}}|.
+\end{equation}
+The spatial and temporal blocks in this determinant identity are scale-free; the single $-ST\log(\sigma^2)$ factor applies the process variance contribution to the full separable space-time precision.
+
+The implementation assembles the sparse Kronecker precision pattern directly and reuses CHOLMOD for the collapsed $\bM$ factorization.
+
+Recovery returns one latent value per fitted area-time support point. Prediction is currently limited to existing graph areas and fitted time values. New graph areas or new time values require a separate prediction design because they change the latent support.
+
+\subsection{Space, time, and space-time varying terms}
+\index{SVC}
+\index{spatially varying coefficient}
+
+Space, time, and space-time varying terms are generically referred to as spatially varying coefficient (SVC) terms and are represented as covariate-scaled process terms, for example \texttt{x:nngp(...)}, \texttt{x:car(...)}, or \texttt{x:car\_time(...)}. The latent process block is still a regular structured process block, but the observation-to-process map $\bA$ includes the prediction or fitted-row covariate values. This means the SVC contribution to the linear predictor is $x_i w(s_i)$, not merely $w(s_i)$.
+
+Recovery returns the underlying latent coefficient process $w(s)$. Fitted values and prediction multiply those recovered latent draws by the fitted or newdata covariate values before adding the term contribution to the linear predictor.
+
+\section{Residual variance models}\label{residual-models}
+\index{residual variance}
+\index{diagonal observation precision}
+\index{Fay-Herriot}
+
+\texttt{stLMM} specifies Gaussian residual variance models with a formula term \texttt{resid(...)}, rather than with a separate top-level argument. Only one \texttt{resid()} term is allowed in a model formula, and it is not a latent process term. It defines the diagonal observation precision used by the collapsed likelihood.
+
+The default residual model estimates one global scalar $\tau^2$, with $p_i=\tau^{-2}$ for every observed row:
+\begin{equation}
+  \epsilon_i \sim N(0,\tau^2).
+\end{equation}
+Omitting \texttt{resid()} is equivalent to writing either \texttt{resid()} or \texttt{resid(model = "tau\_sq")}. The prior, starting value, and tuning value for this default model are supplied through the \texttt{resid} control block, for example \texttt{priors = list(resid = list(tau\_sq = ig(shape, scale)))}. This remains the recommended default unless the response is a direct estimate with a meaningful design-based variance, or unless residual variation is expected to differ across known groups.
+
+\subsection{Fixed row-specific variances}
+\index{resid@\texttt{resid()}}
+\index{fixed residual variance}
+
+\texttt{resid(model = "fixed", variance = vhat)} treats supplied row-specific variances as fixed:
+\begin{equation}
+  \tau_i^2 = \widehat v_i,\qquad p_i = 1/\widehat v_i.
+\end{equation}
+Observed response rows require finite positive $\widehat v_i$. Missing response rows may have missing residual variances because they do not enter the likelihood. When this option is used, $\tau^2$ is not sampled and should not be supplied in \texttt{starting}, \texttt{tuning}, or \texttt{priors}. This is the usual way to enter known sampling variances in a direct-estimate model.
+
+\subsection{Group-specific residual variances}
+\index{group-specific residual variance}
+
+\texttt{resid(model = "group", group = g)} estimates one residual variance per observed residual group:
+\begin{equation}
+  \epsilon_i \mid g_i \sim N(0,\tau_{g_i}^2),
+  \qquad p_i=1/\tau_{g_i}^2.
+\end{equation}
+The grouping variable is term-agnostic. It may be a sampling stratum, measurement protocol, forest type, ownership class, area identifier, or any other known classification where residual variation is expected to differ. It does not have to match the support of a CAR, DAGAR, iid, or other random-effect term.
+
+Priors for this model are supplied through \texttt{priors\$resid}. A single prior can be recycled across groups, e.g.,
+\begin{verbatim}
+priors = list(resid = list(tau_sq = half_t(df = 3, scale = 1)))
+\end{verbatim}
+or a named list can provide group-specific priors. Starting and tuning values are supplied analogously through \texttt{starting\$resid\$tau\_sq} and \texttt{tuning\$resid\$tau\_sq}. Scalars are recycled over groups, and named vectors or lists can be used when group-specific controls are needed. Values marked with \texttt{fixed()} are held fixed and excluded from Metropolis updates.
+
+\subsection{Direct-estimate-informed group variances}
+\index{direct-estimate variance}
+\index{Shannon prior}
+
+\texttt{resid(model = "group", group = g, variance = vhat, prior = "ig")} also estimates one residual variance per group, but uses externally supplied variance information to define the prior. This is useful in small-area settings where a direct estimate is accompanied by a design-based or otherwise externally estimated sampling variance.
+
+For \texttt{prior = "ig"}, the prior is
+\begin{equation}
+  \tau_g^2 \sim \mathrm{IG}(a, b_g),
+\end{equation}
+where the argument \texttt{shape} is the inverse-gamma shape $a$. The \texttt{center} argument controls the scale $b_g$: \texttt{center = "mean"} sets $b_g=(a-1)\widehat v_g$, while \texttt{center = "mode"} sets $b_g=(a+1)\widehat v_g$.
+
+\texttt{resid(model = "group", group = g, variance = vhat, n = n\_eff, prior = "shannon")} uses an effective-sample-size construction. The prior is
+\begin{equation}
+  \tau_g^2 \sim \mathrm{IG}\left(n_g/2,
+      (n_g-1)\widehat v_g/2\right),
+\end{equation}
+where $n_g$ is the supplied group-level effective sample size. The implementation requires $\widehat v_g$ and $n_g$ to be constant within each residual group, and requires $n_g>1$. This prior is not exactly centered at $\widehat v_g$ by either its mean or its mode. For $n_g>2$, its mean is $(n_g-1)\widehat v_g/(n_g-2)$, and its mode is $(n_g-1)\widehat v_g/(n_g+2)$. Both approach $\widehat v_g$ as $n_g$ grows, so larger $n_g$ produces a more concentrated prior around the supplied direct-estimate variance. For finite $n_g>2$, the mean is above $\widehat v_g$ and the mode is below $\widehat v_g$. The symbol $n_g$ is local to this residual-variance prior and denotes an effective sample size for group $g$; it is unrelated to the binomial trial count $n_i$ used in the binomial likelihood section.
+
+All sampled residual variance parameters in the group models enter the adaptive Metropolis update. They are not Gibbs-updated because the structured process has been marginalized in the collapsed likelihood.
+
+\subsection{Scaled direct-estimate residual variances}
+\index{scaled residual variance}
+\index{kappa@$\kappa$}
+
+\texttt{resid(model = "scaled", variance = vhat)} estimates a low-dimensional multiplier:
+\begin{equation}
+  \tau_i^2 = \kappa \widehat v_i.
+\end{equation}
+The parameter $\kappa$ is sampled on the log scale, so the residual variance is strictly positive as long as $\widehat v_i>0$.
+
+When an effective sample size is supplied, \texttt{resid(model = "scaled", variance = vhat, n = n\_eff)} uses
+\begin{equation}
+  \log(\tau_i^2) =
+    \log(\kappa) + \omega_i \log(\widehat v_i) +
+    (1-\omega_i)\log(\tau_0^2),
+  \qquad
+  \omega_i = \frac{n_i}{n_i + c},
+\end{equation}
+where $c$ is the positive \texttt{shrinkage} constant. Larger $n_i$ keeps $\tau_i^2$ closer to $\widehat v_i$; smaller $n_i$ shrinks toward the common scale $\tau_0^2$. Both $\kappa$ and $\tau_0^2$ are sampled on the log scale. This is a log-scale, or geometric, interpolation. When many $\omega_i$ values are close to zero, $\tau_i^2$ is driven mainly by the product $\kappa\tau_0^2$, so $\kappa$ and $\tau_0^2$ can be weakly separately identified. In that setting, priors and posterior diagnostics should be read with this identifiability limitation in mind.
+
+\section{Collapsed matrix and basic identities}
+\index{collapsed matrix}
+\index{M matrix@$M$ matrix}
+
+Given the stacked process map $\bA$, the sampler works with the sparse latent matrix
+\begin{equation}
+  \label{eq:M-lat}
+  \bM = \bQ_w + \bA\trans \bW \bA.
+\end{equation}
+In the homoskedastic Gaussian special case, $\bW=\tau^{-2}\bI$, so this is equivalent to $\bQ_w + \tau^{-2}\bA\trans \bA$.
+
+This is the central matrix of the collapsed sampler. It is built in two stages:
+\begin{enumerate}
+\item \texttt{build\_M\_lat\_pattern\_sparse()} constructs the symbolic lower-triangular sparsity pattern,
+\item \texttt{assemble\_M\_lat\_numeric()} fills the numerical entries by adding $\bQ_w$ and the observation contribution $\bA\trans \bW \bA$.
+\end{enumerate}
+
+After assembly, the matrix is factorized by CHOLMOD. Symbolic analysis is performed once through \texttt{M\_cholmod\_analyze()}, and numerical factorizations are refreshed through \texttt{M\_cholmod\_factorize()} as covariance parameters, residual precisions, or P{\'o}lya-Gamma working precisions change. Conceptually, write the CHOLMOD factorization as
+\begin{equation}
+  \label{eq:M-factor}
+  \bP\bM\bP\trans=\bL\bL\trans,
+\end{equation}
+where $\bP$ is a fill-reducing permutation and $\bL$ is triangular. This notation is used to express the linear algebra in the same style as sparse collapsed Gaussian-process algorithms \citep[see, e.g.,][Section~2.1]{Finley2019}. In the implementation, $\bL$ is not extracted and triangular solves are not hand-coded. CHOLMOD owns the sparse factor object, including the permutation and its internal supernodal or simplicial representation, and \texttt{stLMM} dispatches solves through \texttt{M\_cholmod\_solve()}.
+
+In the algorithms below, we write this CHOLMOD-backed solve as
+\begin{equation}
+  \label{eq:solve-M-def}
+  \operatorname{solve}_M(\bb)=\bx
+  \qquad\text{where}\qquad
+  \bM\bx=\bb .
+\end{equation}
+In the implementation, \texttt{solve\_M\_lat()} applies
+$\operatorname{solve}_M(\bb)$ by calling
+\texttt{M\_cholmod\_solve(CHOLMOD\_A, ...)} on the current CHOLMOD
+factor. Thus $\operatorname{solve}_M(\bb)$ denotes a factor-based
+linear solve, not multiplication by a formed $\bM^{-1}$.
+
+For residual
+\begin{equation}
+  \br = \by - \bX\bbeta - \bZ\balpha,
+\end{equation}
+let $\bR=\bW^{-1}$ denote the diagonal residual covariance. The collapsed observation covariance is
+\begin{equation}
+  \label{eq:V-cov}
+  \bV = \bR + \bA \bQ_w^{-1} \bA\trans.
+\end{equation}
+This covariance matrix is a mathematical object only; the code does not form $\bV$, $\bV^{-1}$, or $\bM^{-1}$. Under the homoskedastic Gaussian residual model, $\bR=\tau^2\bI_n$ and $\bW=\tau^{-2}\bI_n$. The Woodbury identity motivates the following observed-row precision operator. For any observed-row vector $\bv$, define $\mathcal{V}^{-1}_{\mathrm{op}}(\bv)$ by
+\begin{equation}
+\label{eq:Vinv-op}
+\begin{aligned}
+  \bu_1 &= \bA\trans \bW\bv,\\
+  \bu_2 &= \operatorname{solve}_M(\bu_1),\\
+  \bu_3 &= \bA\bu_2,\\
+  \mathcal{V}^{-1}_{\mathrm{op}}(\bv) &= \bW\bv - \bW\bu_3 .
+\end{aligned}
+\end{equation}
+This is implemented by \texttt{apply\_Vinv()}: \texttt{apply\_A\_transpose\_weighted()} computes $\bu_1$, \texttt{solve\_M\_lat()} computes $\bu_2$, \texttt{apply\_A()} computes $\bu_3$, and the final diagonal scaling and subtraction compute $\mathcal{V}^{-1}_{\mathrm{op}}(\bv)$. Algebraically, this operator is equivalent to applying $\bV^{-1}$, but the computation is only a sequence of diagonal scalings, sparse map operations, and solves with the CHOLMOD factor of $\bM$.
+
+The Sherman--Morrison--Woodbury identity is used here as a derivation, not as
+a literal computation involving formed inverses. In the implementation, every
+appearance of $\bM^{-1}$ in the algebra below is evaluated as a solve with the
+current CHOLMOD factor of $\bM$. The same identity can be evaluated after
+moving design matrices into the coefficient-space crossproducts. For any
+observed-row design matrix $\bG$ and observed-row vector $\bv$, define
+\begin{equation}
+  \bB_G = \bA\trans\bW\bG,
+  \qquad
+  \bb_v = \bA\trans\bW\bv .
+\end{equation}
+Then
+\begin{equation}
+\label{eq:Vinv-crossprod}
+\begin{aligned}
+  \bG\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bG)
+    &= \bG\trans\bW\bG -
+       \bB_G\trans \operatorname{solve}_M(\bB_G),\\
+  \bG\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bv)
+    &= \bG\trans\bW\bv -
+       \bB_G\trans \operatorname{solve}_M(\bb_v).
+\end{aligned}
+\end{equation}
+This is not a different precision expression from
+Equation~\eqref{eq:Vinv-op}. It is the same collapsed
+Sherman--Morrison--Woodbury algebra evaluated at the crossproduct level. The
+implementation uses this form for the Gaussian $\bbeta$ and $\balpha$ Gibbs
+updates, avoiding explicit construction of $\bV^{-1}$, $\bM^{-1}$, or dense
+observation-space transformed design matrices.
+When no structured process terms are present, $\bA$ and $\bM$ are absent and
+the second terms in Equation~\eqref{eq:Vinv-crossprod} vanish, leaving
+$\bG\trans\bW\bG$ and $\bG\trans\bW\bv$.
+
+\texttt{compute\_logDetV()} evaluates
+\begin{equation}
+  \label{eq:logdet-V}
+  \log|\bV| = \log|\bR| + \log|\bM| - \log|\bQ_w|,
+\end{equation}
+without forming $\bV$. Here $\log|\bR|=-\sum_i \log p_i$ is computed from the observed-row precision vector, $\log|\bM|$ is read from the CHOLMOD factor by \texttt{logDetFactor()}, and $\log|\bQ_w|$ is accumulated from the term-specific precision blocks by \texttt{logdet\_Qw\_blocks()}.
+Because the process prior precision is block diagonal,
+\begin{equation}
+  \label{eq:Qw-blockdiag}
+  \bQ_w=\mathrm{blockdiag}(\bQ_1,\ldots,\bQ_K),
+  \qquad
+  \log|\bQ_w|=\sum_{k=1}^K\log|\bQ_k|.
+\end{equation}
+The term-specific contributions are given in Equations~\eqref{eq:logdet-nngp}, \eqref{eq:logdet-gp}, \eqref{eq:logdet-ar1}, \eqref{eq:logdet-car}, \eqref{eq:logdet-leroux}, \eqref{eq:logdet-dagar}, \eqref{eq:logdet-dagar-time}, and \eqref{eq:logdet-car-time}.
+
+The collapsed Gaussian log likelihood is then evaluated, up to constants, as
+\begin{equation}
+  \label{eq:collapsed-loglik}
+  \log p(\by\mid\cdot)
+  =
+  -\frac{1}{2}
+  \left\{
+    \log|\bV| +
+    \br\trans \mathcal{V}^{-1}_{\mathrm{op}}(\br)
+  \right\}.
+\end{equation}
+The quadratic contribution is computed by \texttt{quadform\_Vinv()}, which calls \texttt{apply\_Vinv()} to obtain $\bz=\mathcal{V}^{-1}_{\mathrm{op}}(\br)$ and then returns the dot product $\br\trans\bz$. Thus the collapsed likelihood quadratic is evaluated by applying the needed operators to a vector and taking an inner product, rather than by forming a matrix product or dense inverse. \texttt{log\_cov\_params\_target\_collapsed()} combines this quadratic term, the determinant contribution, and the prior terms for the current covariance and residual-variance parameters.
+
+\section{Observed-row likelihood generalization}\label{missing}
+
+The backend allows missing response values without letting missing responses contribute likelihood information. This is needed for CAR and DAGAR models with graph nodes or area-time cells that have no observed response, and it is also useful for AR1, GP, NNGP, iid, and fitted or imputation workflows.
+
+This section is a specialization of the collapsed identities in the previous section, not a separate likelihood. The design does not place \texttt{NA} values into precision matrices. Instead, the fitted object retains full-row and full-support objects, while the sampler uses an observed-row likelihood view. Let $\mathcal{O}$ be the set of rows with observed response and $\mathcal{M}$ be the rows with missing response. The backend stores
+\begin{equation}
+  \by_{\mathcal{O}},\quad \bX_{\mathcal{O}},\quad \bZ_{\mathcal{O}},\quad
+  \bA_{\mathcal{O}},
+\end{equation}
+for sampler updates, while also retaining $\bX_{\mathrm{full}}$, $\bZ_{\mathrm{full}}$, full process maps, and full latent supports for fitted values, recovery, prediction, and imputation.
+
+Under the default homoskedastic Gaussian observation model, the collapsed matrix is
+\begin{equation}
+  \bM = \bQ_w + \tau^{-2} \bA_{\mathcal{O}}\trans \bA_{\mathcal{O}},
+\end{equation}
+and the determinant identity uses the number of observed responses:
+\begin{equation}
+  \log|\bV_{\mathcal{O}}|
+    = n_{\mathcal{O}}\log(\tau^2) + \log|\bM| - \log|\bQ_w|.
+\end{equation}
+Rows in $\mathcal{M}$ add no likelihood contribution. A latent process node with no observed rows remains in $\bQ_w$ and can still be estimated through the prior and neighboring latent nodes.
+
+This layer rejects missing fixed-effect covariates, iid grouping IDs, iid slope covariates, process coordinates, and SVC covariates. Only the response is allowed to be missing. The current implementation is organized around a diagonal observed-row precision representation:
+\begin{equation}
+  \bW_{\mathcal{O}} = \mathrm{diag}(p_i),\qquad
+  \bR_{\mathcal{O}} = \bW_{\mathcal{O}}^{-1},\qquad
+  \bM = \bQ_w + \bA_{\mathcal{O}}\trans \bW_{\mathcal{O}} \bA_{\mathcal{O}},
+\end{equation}
+with the same factor-based operators defined in the previous section. For any observed-row vector $\bv_{\mathcal{O}}$,
+\begin{equation}
+\begin{aligned}
+  \bu_1 &= \bA_{\mathcal{O}}\trans \bW_{\mathcal{O}}\bv_{\mathcal{O}},\\
+  \bu_2 &= \operatorname{solve}_M(\bu_1),\\
+  \bu_3 &= \bA_{\mathcal{O}}\bu_2,\\
+  \mathcal{V}^{-1}_{\mathcal{O},\mathrm{op}}(\bv_{\mathcal{O}})
+    &= \bW_{\mathcal{O}}\bv_{\mathcal{O}} - \bW_{\mathcal{O}}\bu_3,\\
+  \log|\bV_{\mathcal{O}}|
+    &= \log|\bR_{\mathcal{O}}| + \log|\bM| - \log|\bQ_w|.
+\end{aligned}
+\end{equation}
+The matrix $\bV_{\mathcal{O}}$ is not formed; only the action of the observed-row precision operator and its determinant identity are used. This diagonal precision layer supports fixed direct-estimate variances, sampled group-specific residual variances, and low-dimensional scaled direct-estimate variance models. For the homoskedastic Gaussian case, $p_i=\tau^{-2}$ and $\log|\bR_{\mathcal{O}}| = n_{\mathcal{O}}\log(\tau^2)$.
+
+\section{Binomial observation model}
+\index{binomial}
+\index{P{\'o}lya-Gamma}
+
+For \texttt{family = "binomial"}, the observed response $y_i$ is the number of successes out of $n_i$ trials. The linear predictor is
+\begin{equation}
+  \eta_i = o_i + \bx_i\trans \bbeta + \bu_i\trans \balpha
+    + \ba_i\trans \bw,
+\end{equation}
+and
+\begin{equation}
+  y_i \mid \eta_i \sim \mathrm{Binomial}
+  \left(n_i,\frac{\exp(\eta_i)}{1+\exp(\eta_i)}\right).
+\end{equation}
+The vector $\bu_i$ denotes the row of the grouped-random-effect design matrix $\bZ$; the symbol $\bz$ is reserved for standard normal random vectors in sampling formulas.
+
+The sampler uses the P{\'o}lya-Gamma identity. With
+\begin{equation}
+  \kappa_i = y_i - n_i/2,
+\end{equation}
+the augmented likelihood is conditionally Gaussian given
+\begin{equation}
+  \omega_i \mid \eta_i,n_i \sim \mathrm{PG}(n_i,\eta_i).
+\end{equation}
+The symbol $\omega_i$ in this section is local to P{\'o}lya-Gamma augmentation and is unrelated to the deterministic shrinkage weight $\omega_i=n_i/(n_i+c)$ used in the scaled residual variance model. Equivalently, the working response
+\begin{equation}
+  z_i^\ast = \kappa_i/\omega_i
+\end{equation}
+has conditional mean $\eta_i$ and variance $\omega_i^{-1}$. The implementation keeps the Gaussian working model on the sampled part of the predictor by using $z_i^\ast-o_i$ as the working response and adding $o_i$ only when refreshing P{\'o}lya-Gamma variables, fitted values, and predictions. Thus binomial updates reuse the Gaussian collapsed machinery by setting the observed-row precision to
+\begin{equation}
+  p_i = \omega_i.
+\end{equation}
+The P{\'o}lya-Gamma variables are refreshed at the start of each MCMC iteration under the binomial family. Because the structured process is collapsed during parameter updates, the binomial sampler keeps a warm-running internal latent process realization for the full linear predictor used in the P{\'o}lya-Gamma tilt. After each retained collapsed update, a fresh conditional process draw is generated with the current CHOLMOD factor and carried forward to the next P{\'o}lya-Gamma refresh. For structured process models, these in-chain process draws are retained by default as \texttt{save\_process = list(start = 1, thin = 1)} and form the process sample used by fitted values, prediction, and \texttt{recover()}. The retained grid can be thinned at fit time with \texttt{save\_process = list(start = ..., thin = ...)}. P{\'o}lya-Gamma random variates are generated through the hybrid sampler exposed by \texttt{BayesLogit}, which dispatches among its available algorithms as a function of the binomial trial count.
+
+\texttt{resid()} terms are not used for binomial models. There is no Gaussian residual $\tau^2$ in this likelihood, and posterior predictive response samples are generated from the binomial distribution using the posterior linear-predictor draws and the relevant trial counts.
+
+One practical consideration for binomial logit models is imbalance. When fitted probabilities are close to zero or one for many observations, or when binomial counts are concentrated near zero or near the trial count, standard data-augmentation samplers for logistic models can mix slowly. This issue is not unique to \texttt{stLMM} and is discussed for P{\'o}lya-Gamma and related data-augmentation samplers in \cite{Johndrow2019} and \cite{Zens2024}. \cite{Zens2024} propose ``ultimate'' P{\'o}lya-Gamma samplers that combine latent-utility representations with marginal data augmentation using working location and scale parameters.
+
+\section{Negative-binomial observation model}\label{sec:negative-binomial}
+\index{negative binomial}
+\index{P{\'o}lya-Gamma}
+\index{count data}
+
+The fixed-size negative-binomial family is intended for count responses while preserving the current collapsed Gaussian computational structure. It is not a direct implementation of the classical Poisson log-link model. An exact Poisson log-link likelihood does not have the same P{\'o}lya-Gamma quadratic augmentation used by the binomial logit likelihood. A negative-binomial model with a logit probability parameterization does have this form \citep{Polson2013,WindleDynamic2013,Zhou2012}.
+
+The current implementation uses a fixed size parameter $r>0$. With mean $\mu_i$,
+\begin{equation}
+  y_i \mid \mu_i,r \sim \mathrm{NegBin}(r,\mu_i),
+  \qquad
+  \mathrm{E}(y_i)=\mu_i,\qquad
+  \mathrm{Var}(y_i)=\mu_i+\mu_i^2/r .
+\end{equation}
+The user-facing linear predictor is on the log-mean scale:
+\begin{equation}
+  \eta_i = \log(\mu_i)
+    = \bx_i\trans \bbeta + \bu_i\trans \balpha
+      + \ba_i\trans \bw + o_i,
+\end{equation}
+where $o_i$ is an optional offset. For count models with known exposure or expected-count scaling $E_i$, setting $o_i=\log(E_i)$ gives $\mu_i=E_i\exp(\eta_i-o_i)$, so $\exp(\eta_i-o_i)$ is the modeled rate or ratio per unit of $E_i$. The P{\'o}lya-Gamma representation uses the logit of the negative-binomial probability parameter,
+\begin{equation}
+  \psi_i = \eta_i - \log(r).
+\end{equation}
+Under this parameterization, $\mu_i=r\exp(\psi_i)$ and the likelihood kernel is
+\begin{equation}
+  p(y_i\mid \psi_i,r)
+    \propto
+    \frac{\exp(y_i\psi_i)}
+         {\{1+\exp(\psi_i)\}^{y_i+r}} .
+\end{equation}
+This is the same P{\'o}lya-Gamma form as the binomial likelihood, with
+\begin{equation}
+  b_i = y_i+r,\qquad
+  \kappa_i = \frac{y_i-r}{2},\qquad
+  \omega_i \mid \psi_i,r \sim \mathrm{PG}(y_i+r,\psi_i).
+\end{equation}
+Conditional on $\omega_i$, the working response for the log-mean predictor is
+\begin{equation}
+  z_i^\ast = \kappa_i/\omega_i + \log(r),
+\end{equation}
+with conditional mean $\eta_i$ and variance $\omega_i^{-1}$. As in the binomial case, the implementation uses $z_i^\ast-o_i$ as the Gaussian working response for the sampled part of the predictor and uses the full $\eta_i$ only for the P{\'o}lya-Gamma tilt, fitted values, and predictions. Thus the negative-binomial update can reuse the same Gaussian collapsed machinery as the binomial update by setting
+\begin{equation}
+  p_i = \omega_i.
+\end{equation}
+The only differences from the binomial working model are the P{\'o}lya-Gamma shape $y_i+r$, the value of $\kappa_i$, and the $\log(r)$ offset in $z_i^\ast$.
+
+This $\log(r)$ adjustment is the main implementation trap when adapting the binomial P{\'o}lya-Gamma update: draw the P{\'o}lya-Gamma variate using the tilt $\psi_i=\eta_i-\log(r)$, not $\eta_i$, and then add $\log(r)$ back in the working response $z_i^\ast$. When a formula offset is present, subtract $o_i$ from $z_i^\ast$ before passing the working response to the collapsed Gaussian machinery.
+
+The initial fixed-$r$ design is deliberate. In spatial and space-time count models, a free negative-binomial dispersion parameter can compete with structured effects and unstructured grouped random effects: extra-Poisson variation can be explained by smaller $r$, by larger process variance, by iid random-effect variance, or by some combination of these. Fixing $r$ avoids adding another weakly identified variance-like component while the count likelihood, fitted values, prediction, and recovery behavior are validated. A large fixed $r$ also provides a Poisson-like model because $\mu_i^2/r$ becomes small and the negative-binomial distribution approaches the Poisson distribution as $r\rightarrow\infty$.
+
+There is a computational tradeoff. The P{\'o}lya-Gamma draw has shape $y_i+r$. Windle et al. discuss that P{\'o}lya-Gamma methods for negative-binomial count models work especially well for small or moderate counts, while large count sizes can make augmentation slower \citep{WindleDynamic2013}. Windle, Polson, and Scott also study sampling methods for $\mathrm{PG}(b,z)$ when $b$ is not one, which is the relevant case here \citep{WindleSampling2014}. Consequently, choosing an extremely large $r$ only to mimic a Poisson likelihood can be computationally unattractive. In practice, fixed-$r$ sensitivity checks should use values large enough that $\mu_i^2/r$ is small on the relevant mean scale, but not so large that P{\'o}lya-Gamma refreshes dominate runtime without changing inference.
+
+Future versions could allow $r$ to be estimated as a likelihood parameter, not as a covariance or residual variance parameter. One possible route is the Chinese-restaurant-table augmentation used in negative-binomial process and mixed negative-binomial regression work \citep{ZhouCarin2012,Zhou2012}. With a gamma prior $r\sim\mathrm{Gamma}(a_0,b_0)$, using the shape--rate convention, the usual logit-probability parameterization introduces
+\begin{equation}
+  L_i \mid y_i,r \sim \mathrm{CRT}(y_i,r)
+\end{equation}
+and gives the Gamma full conditional
+\begin{equation}
+  r\mid\cdot \sim
+  \mathrm{Gamma}\left(a_0+\sum_i L_i,\;
+    b_0+\sum_i \log\{1+\exp(\psi_i)\}\right),
+\end{equation}
+equivalently with rate $b_0-\sum_i\log(1-p_i)$. This is a Gibbs update rather than a Metropolis update under that parameterization. That extension should have its own likelihood-control grammar, for example a \texttt{starting\$likelihood} and \texttt{priors\$likelihood} block, rather than placing $r$ inside process covariance controls. It would also require careful documentation of parameterization: in the log-mean form above, changing $r$ changes $\psi_i=\eta_i-\log(r)$, so the full conditional structure differs from a model that puts the linear predictor directly on $\psi_i=\mathrm{logit}(p_i)$. Sampling $r$ should therefore be treated as a later overdispersed negative-binomial mode, not as the default spatial count model.
+
+\section{Gaussian Gibbs updates}
+
+\subsection{Update of \texorpdfstring{$\bbeta$}{beta}}
+
+Conditional on the current $\balpha$, define the partial residual
+\begin{equation}
+  \by_\beta = \by - \bZ\balpha .
+\end{equation}
+The flat-prior fixed-effect precision and right-hand side are the
+crossproduct quantities
+\begin{equation}
+  \bQ_{\beta,0}
+    = \bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX),
+  \qquad
+  \bb_{\beta,0}
+    = \bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by_\beta).
+\end{equation}
+The implementation assembles these with Equation~\eqref{eq:Vinv-crossprod}
+using $\bG=\bX$ and $\bv=\by_\beta$. Thus it forms the weighted dense products
+$\bX\trans\bW\bX$ and $\bX\trans\bW\by_\beta$, forms
+$\bA\trans\bW\bX$ and $\bA\trans\bW\by_\beta$, and applies the current CHOLMOD
+factor of $\bM$ to the latter quantities. It does not form $\bV^{-1}$,
+$\bM^{-1}$, or the observation-space matrix
+$\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$.
+
+The final draw is produced by \texttt{draw\_gaussian\_from\_precision()}, which
+factorizes the small dense precision $\bQ_\beta$, solves for the mean, and adds
+triangular-solve Gaussian noise. With an independent normal prior
+\begin{equation}
+  \bbeta \sim N(\bmu_\beta,\bD_\beta),
+\end{equation}
+where $\bD_\beta$ is diagonal, the update is
+\begin{equation}
+\begin{aligned}
+  \bQ_\beta
+    &= \bQ_{\beta,0} + \bD_\beta^{-1}, \\
+  \bb_\beta
+    &= \bb_{\beta,0} + \bD_\beta^{-1}\bmu_\beta .
+\end{aligned}
+\end{equation}
+The Gaussian likelihood defaults to the flat-prior form. P{\'o}lya-Gamma likelihoods default to a proper independent normal prior with mean zero and standard deviation 10, unless the user supplies \texttt{priors\$beta}.
+
+This update is implemented in \texttt{update\_beta\_draw\_collapsed()}, with
+\texttt{form\_XtVinvX\_and\_rhs()} assembling the two crossproducts above.
+
+\subsection{Update of \texorpdfstring{$\balpha$}{alpha}}
+
+Conditional on the current $\bbeta$, define
+\begin{equation}
+  \by_\alpha = \by - \bX\bbeta .
+\end{equation}
+The grouped random-effect full conditional can be written in the same
+operator notation as the fixed-effect update:
+\begin{equation}
+  \bQ_{\alpha,0} = \bZ\trans \mathcal{V}^{-1}_{\mathrm{op}}(\bZ),\qquad
+  \bb_\alpha = \bZ\trans \mathcal{V}^{-1}_{\mathrm{op}}(\by_\alpha).
+\end{equation}
+As with the fixed-effect update, this notation is mathematical rather than an
+instruction to apply $\mathcal{V}^{-1}_{\mathrm{op}}$ separately to every
+column. The implementation uses Equation~\eqref{eq:Vinv-crossprod} with
+$\bG=\bZ$ and $\bv=\by_\alpha$. The products $\bZ\trans\bW\bZ$ and
+$\bZ\trans\bW\by_\alpha$ are accumulated from the sparse grouped-design matrix,
+and $\bA\trans\bW\bZ$ is built by walking the nonzero entries of $\bZ$ and the
+term-specific observation-to-latent maps. The resulting latent-space columns
+are passed through \texttt{solve\_M\_lat\_multiple()}, i.e., through the current
+CHOLMOD factor of $\bM$, not through a formed $\bM^{-1}$.
+
+For a random-intercept iid term with scalar residual precision, the
+no-structured-process case reduces to weighted group counts and weighted group
+sums. The same formula also covers random slopes, multiple iid terms, fixed or
+sampled diagonal residual precision models, and P{\'o}lya-Gamma working
+precisions because all of those cases enter through the sparse $\bZ$ and
+diagonal $\bW$.
+
+The prior precision for the explicit iid random effects is then added to the diagonal:
+\begin{equation}
+  \bQ_\alpha = \bQ_{\alpha,0} + \bD_\alpha^{-1}.
+\end{equation}
+These are the usual grouped-random-effect full-conditional quantities, but
+they are computed from weighted sparse design products and factor-based solves
+with $\bM$, rather than from a formed observed covariance or precision matrix.
+The final draw uses \texttt{draw\_gaussian\_from\_precision()} with the small
+dense precision $\bQ_\alpha$ and right-hand side $\bb_\alpha$. This step is
+implemented in \texttt{update\_alpha\_draw\_collapsed()}, with
+\texttt{form\_ZtVinvZ\_and\_rhs()} assembling the two crossproducts above.
+
+\subsection{Update of explicit random-effect variances}
+
+For iid random-effect block $b$, $\sigma^2_{\alpha,b}$ is the variance used in the corresponding diagonal block of $\bD_\alpha$. The inverse-gamma prior parameters $a_b$ and $b_b$ are supplied through \texttt{priors}. Given the current random effects in block $b$, the block variance update is Gibbs with an inverse-gamma full conditional. For block size $m_b$ and
+\begin{equation}
+  s_b = \balpha_b\trans \balpha_b,
+\end{equation}
+the update is
+\begin{equation}
+\begin{aligned}
+  a_b^\ast &= a_b + \frac{m_b}{2}, \\
+  b_b^\ast &= b_b + \frac{s_b}{2}, \\
+  \sigma^2_{\alpha,b} \mid \cdot &\sim
+    \mathrm{IG}(a_b^\ast, b_b^\ast).
+\end{aligned}
+\end{equation}
+This is implemented by \texttt{update\_sigmaSqRE\_gibbs()}.
+
+\section{Adaptive covariance Metropolis blocks}
+
+The current sampler updates covariance and sampled residual variance parameters with adaptive random-walk Metropolis steps on transformed scales. The adaptive Metropolis strategy draws on unpublished adaptive Metropolis notes by Benjamin Shaby and on the broader adaptive MCMC literature \citep{andrieu2008tutorial, Roberts01012009, RobertsRosenthal2007Coupling}.
+
+We use $\btheta_k$ for the covariance-function parameters of structured process term $k$, for example a range, decay, correlation, smoothness, or nonseparable mixing parameter. The broader Metropolis-updated parameter collection is denoted $\bpsi$ and can include scalar residual variance parameters, process variances, and $\btheta_k$ values. The default is still one joint block over all entries of $\bpsi$, but the \texttt{metropolis} control list can choose a different blocking rule without changing the model being fit.
+
+On the model scale, the parameter collection can include:
+\begin{itemize}
+\item $\tau^2$ under the default Gaussian residual model,
+\item sampled residual variances under direct-estimate residual models,
+\item each process variance $\sigma_k^2$,
+\item each covariance-function parameter $\theta_{k,j}$.
+\end{itemize}
+The transformed adaptive Metropolis vector is
+\begin{equation}
+  \boldsymbol{\eta}=h(\bpsi),
+\end{equation}
+where $h(\cdot)$ applies log transformations to positive variance parameters and bounded-logit transformations to bounded covariance-function parameters. Thus the transformed entries can include:
+\begin{itemize}
+\item $\log(\tau^2)$,
+\item each sampled residual variance on the log scale,
+\item each $\log(\sigma_k^2)$,
+\item each bounded-logit transformed process parameter \begin{equation} \eta_{k,j} = \log\left(\frac{\theta_{k,j}-a_{k,j}}{b_{k,j}-\theta_{k,j}}\right). \end{equation}
+\end{itemize}
+
+Parameters in the starting list specified via \texttt{fixed()} are excluded from the Metropolis updates. If all covariance and sampled residual variance tuning entries are zero, the Metropolis step is skipped.
+
+The implemented blocking choices are:
+\begin{itemize}
+\item \texttt{"joint"}: all covariance and sampled residual variance parameters in one block;
+\item \texttt{"by\_term"}: residual variance parameters in one block and each process term's variance plus covariance parameters in a separate block;
+\item \texttt{"residual\_process"}: residual variance parameters in one block and all process covariance parameters in another;
+\item \texttt{"variance\_theta"}: variance parameters in one block and range/correlation/covariance-shape parameters in another;
+\item \texttt{"process\_variance"}: residual variance, process variance, and covariance-function theta parameters in separate blocks;
+\item \texttt{"scalar"}: one parameter per block, using scalar random-walk adaptation.
+\end{itemize}
+
+The default \texttt{metropolis = list(blocking = "joint")} preserves the original behavior. A single string such as \texttt{metropolis = "by\_term"} is also accepted. Retained-sampling adaptation is controlled by \texttt{metropolis\$target\_accept} and \texttt{metropolis\$batch\_length}. The default target acceptance is 0.234 for block updates and 0.44 for scalar updates; the default retained-adaptation batch length is 25.
+
+Before retained sampling, the default behavior is to run a discarded covariance warmup phase controlled by \texttt{warmup}. The default \texttt{warmup = TRUE} runs a short proposal-scale calibration for Metropolis blocks; \texttt{warmup = FALSE} disables it. Warmup iterations are not included in the returned posterior sample matrices, so \texttt{n\_samples} always denotes post-warmup retained samples.
+
+The warmup phase uses the same Gibbs and covariance Metropolis update as the main sampler, but stores no posterior samples. It adjusts proposal scales from batch acceptance rates and stops when the blocks fall inside the target interval after any required minimum batches, or when the maximum number of warmup batches is reached.
+
+The retained update is implemented through \texttt{update\_cov\_params\_mh\_collapsed()}, which loops over proposal blocks. For a multivariate block $b$, proposals have covariance $\lambda_b \bSigma_b$, where $\bSigma_b$ is the adaptive empirical covariance shape and $\lambda_b$ is a variance-like adaptive multiplier. For scalar blocks, the proposal variance is $\delta_b^2 \Sigma_b$.
+Here $\Sigma_b>0$ is the scalar proposal shape, including any scale folded in from the warmup phase, and $\delta_b$ is a one-dimensional random-walk scale. Multivariate blocks adapt an empirical covariance shape and a multiplier on that covariance, while scalar blocks adapt a direct step size. Proposals are evaluated through a scratch covariance state and the live covariance state is changed only on acceptance.
+
+For a current residual $\br=\by-\bX\bbeta-\bZ\balpha$, the collapsed target contribution for covariance and sampled residual variance parameters is
+\begin{equation}
+  \label{eq:collapsed-mh-target}
+  \ell(\bpsi)
+  =
+  -\frac{1}{2}
+  \left\{
+    \log|\bV(\bpsi)|
+    +
+    \br\trans\mathcal{V}^{-1}_{\mathrm{op},\bpsi}(\br)
+  \right\}
+  + \log p(\bpsi)
+  + \log |J_h(\bpsi)|,
+\end{equation}
+where the Jacobian term is included for transformed Metropolis parameters. The first two terms are the collapsed likelihood in Equation~\eqref{eq:collapsed-loglik}, evaluated at the proposed covariance and residual-precision values. Operationally, each proposal assembles a candidate $\bM$, refreshes its CHOLMOD factor, computes $\log|\bV|$ with Equation~\eqref{eq:logdet-V}, computes the quadratic form by applying $\mathcal{V}^{-1}_{\mathrm{op},\bpsi}$ to $\br$, and then accepts or rejects the proposal. No dense $\bV$, $\bV^{-1}$, $\bM^{-1}$, or $\bQ_w^{-1}$ is formed.
+
+The fitted object reports:
+\begin{itemize}
+\item \texttt{covariance\_acceptance}: aggregate acceptance across covariance and sampled residual variance proposals,
+\item \texttt{adaptive\_metropolis}: transformed parameter labels, current transformed values, initial covariance, final proposal covariance, batch acceptance history, proposal scale history, global acceptance, and a nested \texttt{warmup} list,
+\item \texttt{adaptive\_metropolis\$blocks}: one entry per retained Metropolis block, including block labels, block dimension, acceptance, proposal covariance or scalar scale history, and block-specific warmup diagnostics.
+\end{itemize}
+
+The nested \texttt{adaptive\_metropolis\$warmup} list records:
+\begin{itemize}
+\item whether warmup was enabled,
+\item warmup batch length, maximum batches, target interval, and stop reason,
+\item number of attempted and accepted warmup proposals,
+\item warmup batch acceptance history and proposal-scale history,
+\item starting and ending transformed covariance parameters,
+\item starting and ending proposal covariance matrices.
+\end{itemize}
+
+This metadata is intentionally separate from posterior samples. It makes automatic tuning auditable without confusing warmup draws with posterior draws. Diagnostics that intentionally set tuning values to zero may show flat covariance chains or no covariance acceptance; that is expected because those parameters are fixed and the corresponding blocks are omitted.
+
+Blocking changes the proposal partition, not the posterior distribution. It can improve a difficult fit when one large joint proposal is poorly scaled, but it can also be slower because every block proposal repeats the collapsed likelihood calculation and sparse factorization work. The scalar option is mainly a diagnostic and robustness option; it is not expected to be the fastest choice for expensive process models. There is no Gibbs update for sampled residual variances in the collapsed likelihood; they are Metropolis parameters because the structured process has been marginalized.
+
+\section{Collapsed sampler algorithm}
+
+The main routine is \texttt{stLMM\_collapsed\_sampler()}. After initialization, the sampler builds the symbolic sparsity pattern of $\bM$, performs CHOLMOD symbolic analysis, assembles the initial numeric values, and factorizes $\bM$. It then runs the discarded covariance warmup phase when enabled and when there is at least one covariance or sampled residual variance parameter. Ignoring storage and reporting, each retained post-warmup iteration follows Algorithm~1.
+
+\begin{center}
+\begin{minipage}{0.95\textwidth}
+\textbf{Algorithm 1: one retained collapsed-sampler iteration.}
+\begin{enumerate}
+\item If the likelihood is P{\'o}lya-Gamma, refresh the augmentation variables, working response, observed-row precision $\bW$, collapsed matrix $\bM$, and CHOLMOD factor using \texttt{update\_pg\_working\_model()}.
+\item Sample $\bbeta$ from its Gaussian full conditional using $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$ and $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bZ\balpha)$.
+\item Sample $\balpha$ from its Gaussian full conditional using $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bZ)$ and $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bX\bbeta)$.
+\item Sample explicit iid random-effect variances with \texttt{update\_sigmaSqRE\_gibbs()}.
+\item Form the running residual $\br=\by-\bX\bbeta-\bZ\balpha$ for the covariance-parameter update.
+\item For each adaptive Metropolis block, propose covariance or sampled residual variance parameters, assemble and factor the candidate $\bM$, evaluate Equation~\eqref{eq:collapsed-mh-target}, and accept or reject the proposal.
+\item If the likelihood is P{\'o}lya-Gamma and structured process terms are present, refresh $\br$ and draw the current latent process from its conditional distribution. This draw is always made to seed the next P{\'o}lya-Gamma refresh; it is stored only on the \texttt{save\_process} grid.
+\end{enumerate}
+\end{minipage}
+\end{center}
+
+Step 1 is skipped for Gaussian likelihoods. Under P{\'o}lya-Gamma likelihoods, currently \texttt{family = "binomial"} and \texttt{family = "negative\_binomial"} with fixed size, the iteration begins by refreshing the P{\'o}lya-Gamma variables using the current warm-running latent process draw in the full linear predictor. After the augmentation is refreshed, the sampler uses the same collapsed coefficient and covariance update machinery with $\bW=\mathrm{diag}(\omega_i)$. At the end of the iteration, for structured process models, the sampler draws a fresh conditional $\bw$ using the current factorized $\bM$ and carries it forward to the next P{\'o}lya-Gamma refresh. These internal process draws are retained by default for P{\'o}lya-Gamma process models, avoiding a separate post-fit P{\'o}lya-Gamma/process reconstruction chain.
+
+\section{Latent process recovery and fitted values}
+
+For Gaussian-likelihood models with structured process terms, recovery is a standalone post-fit step using \texttt{recover()}. For each selected posterior draw, recovery samples
+\begin{equation}
+  \bw \mid \by,\bbeta,\balpha,\bW,\{\sigma_k^2\},\btheta
+\end{equation}
+using the stored backend, current posterior parameter draw, sparse $\bM$ assembly, and CHOLMOD factorization. The recovered conditional precision is
+\begin{equation}
+  \label{eq:M-rec}
+  \bM_{\mathrm{rec}} = \bQ_w + \bA\trans \bW \bA.
+\end{equation}
+This is the same sparse matrix $\bM$ defined in the collapsed sampler, refactored with the covariance and residual-precision values for the selected posterior draw; recovery does not introduce a separate computational matrix.
+
+Under the observed-row likelihood layer, recovery samples latent process draws on each term's full latent support. Only observed rows contribute to the recovery conditional:
+\begin{equation}
+  \mathrm{Prec}(\bw \mid \cdot)
+    = \bQ_w + \bA_{\mathcal{O}}\trans \bW_{\mathcal{O}} \bA_{\mathcal{O}},
+\end{equation}
+and the conditional mean uses observed-row residual information only:
+\begin{equation}
+  \label{eq:recover-rhs}
+  \bb_w = \bA_{\mathcal{O}}\trans \bW_{\mathcal{O}}
+      \left(\by_{\mathcal{O}} - \bX_{\mathcal{O}}\bbeta
+            - \bZ_{\mathcal{O}}\balpha\right).
+\end{equation}
+The conditional mean is obtained by solving with the recovered conditional precision; $\bQ_w^{-1}$ is never formed explicitly. Rows with missing responses do not enter $\bb_w$, but their mapped latent nodes remain in $\bw$. Thus missing-response AR1, GP, NNGP, CAR, DAGAR, CAR-time, and DAGAR-time nodes are recovered at \texttt{recover()} time whenever they are part of the fitted term support. Their posterior information comes from the prior precision and any observed neighboring or repeated nodes, not from an imputed response value.
+
+For P{\'o}lya-Gamma process models, \texttt{stLMM()} saves the in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)}. In this case \texttt{recover()} is a selection and labeling step: it subsets the saved process draws according to \texttt{sub\_sample\$start} and \texttt{sub\_sample\$thin}, preserves the corresponding \texttt{recover\_iter} indices, and returns the usual \texttt{stLMM\_recovery} object. The main posterior parameter matrices are not physically thinned when process draws are saved; downstream methods align parameter rows to \texttt{recover\_iter}. If a P{\'o}lya-Gamma process model was fit with process saving disabled, post-fit recovery is not available and the model should be refit with \texttt{save\_process = TRUE} or an explicit \texttt{save\_process = list(start = ..., thin = ...)}. Enabling \texttt{save\_process} for Gaussian-likelihood process models is disallowed, because drawing and storing $\bw$ in the main Gaussian sampler would undo the collapsed-sampler design.
+
+Stochastic recovery uses the CHOLMOD factorization of the recovered conditional precision:
+\begin{equation}
+  \label{eq:recover-stochastic}
+  \bw = \bP\trans \bL^{-\top}\bz + \mathrm{E}(\bw \mid \cdot),
+  \qquad \bz \sim N(0,\bI).
+\end{equation}
+Here $\bP$ is the fill-reducing permutation and $\bL$ is the triangular factor. This draws from $N\{\mathrm{E}(\bw\mid\cdot),\bM_{\mathrm{rec}}^{-1}\}$ without forming $\bM_{\mathrm{rec}}^{-1}$.
+
+\begin{center}
+\begin{minipage}{0.95\textwidth}
+\textbf{Algorithm 2: latent process recovery for one posterior draw.}
+\begin{enumerate}
+\item Set the posterior draw's covariance and residual-precision parameters in the backend state and assemble $\bM_{\mathrm{rec}}$ in Equation~\eqref{eq:M-rec}.
+\item Factor $\bM_{\mathrm{rec}}$ with CHOLMOD, conceptually $\bP\bM_{\mathrm{rec}}\bP\trans=\bL\bL\trans$.
+\item Form $\br=\by-\bX\bbeta-\bZ\balpha$ and $\bb_w=\bA\trans\bW\br$, using observed rows only.
+\item Compute the conditional mean $\bar{\bw}$ by solving $\bM_{\mathrm{rec}}\bar{\bw}=\bb_w$ with \texttt{M\_cholmod\_solve(CHOLMOD\_A, ...)}.
+\item Draw $\bz\sim N(0,\bI)$ and compute $\beps=\bP\trans\bL^{-\top}\bz$ with \texttt{M\_cholmod\_solve(CHOLMOD\_Lt, ...)} followed by \texttt{M\_cholmod\_solve(CHOLMOD\_Pt, ...)}.
+\item Return $\bw=\bar{\bw}+\beps$.
+\end{enumerate}
+\end{minipage}
+\end{center}
+
+These steps are implemented in \texttt{recover\_w\_draw\_collapsed()}. For P{\'o}lya-Gamma process fits with saved in-chain process draws, \texttt{recover()} subsets and labels the saved draws instead of re-running Algorithm~2.
+
+Recovered process samples are returned by term. For NNGP terms, \texttt{w\_samples} is in original support order for users, while \texttt{w\_samples\_ordered} keeps the internal graph order needed by fitted values and prediction. \texttt{recover\_iter} records the original MCMC iteration indices, and prediction/fitted methods use it to align recovered latent draws with parameter samples.
+
+\texttt{fitted.stLMM()} supports fit objects without process terms directly. For models with process terms, fitted values require a recovered object and include fixed effects, explicit grouped random effects, and recovered structured process contributions.
+
+With missing responses, fitted values are full-row quantities. Observed rows report fitted values for observed data, while missing-response rows report posterior mean quantities using the retained full-row design and the recovered full-support latent process draws.
+
+\section{Prediction design and implementation scope}
+
+Prediction is a post-fit layer. It reuses the fitted backend, posterior samples, and recovered latent process draws rather than adding prediction to the MCMC sampler.
+
+The current prediction API is:
+\begin{verbatim}
+predict.stLMM(object, newdata = NULL, y_samples = FALSE,
+             sub_sample = list(start = 1L, thin = 1L),
+             scale = c("response", "link"), ...)
+
+predict.stLMM_recovery(object, newdata = NULL, y_samples = FALSE,
+                      joint = FALSE,
+                      joint_method = c("full", "vecchia"),
+                      pred_m = NULL, pred_ordering = "maxmin",
+                      st_scale = 1, return_w_samples = TRUE,
+                      sub_sample = list(start = 1L, thin = 1L),
+                      scale = c("response", "link"), ...)
+\end{verbatim}
+
+The currently implemented behavior is:
+\begin{itemize}
+\item fit objects can be predicted directly only when the model has no structured process terms;
+\item process models require saved or recovered latent process samples;
+\item \texttt{sub\_sample} selects posterior draw indices for \texttt{predict.stLMM()} and recovered draw indices through \texttt{recover\_iter} for \texttt{predict.stLMM\_recovery()};
+\item prediction returns posterior sample matrices, not summaries;
+\item \texttt{mu\_samples} is always returned;
+\item \texttt{y\_samples} is returned only when \texttt{y\_samples = TRUE};
+\item \texttt{w\_samples} is returned only by recovered-process prediction when \texttt{return\_w\_samples = TRUE}.
+\end{itemize}
+\texttt{joint}, \texttt{joint\_method}, \texttt{pred\_m}, \texttt{pred\_ordering}, and \texttt{st\_scale} are arguments to \texttt{predict.stLMM\_recovery()} only, because new process-node prediction requires saved or recovered latent process draws. Formula offsets are evaluated in \texttt{newdata} when present and are included in both link-scale and response-scale predictions. For binomial fits, \texttt{scale = "response"} returns probabilities for fitted means, while \texttt{scale = "link"} returns the linear predictor. Posterior predictive \texttt{y\_samples} are binomial draws using fitted or prediction trial counts. For the fixed-size negative-binomial family, \texttt{scale = "response"} returns $\exp(\eta_i)$ and posterior predictive \texttt{y\_samples} are negative-binomial draws using the fixed fitted size.
+
+For process terms, prediction rows are shared but process supports are term-specific. The prediction backend maps each prediction row separately for each fitted process term, preserving that term's graph, coordinate order, support, ordering, and SVC covariate scale. This is essential for models such as
+\begin{verbatim}
+y ~ x +
+    nngp(lon, lat, time, cov_model = "sep_exp") +
+    x:nngp(lon, lat, time, cov_model = "sep_exp") +
+    ar1(day)
+\end{verbatim}
+where the prediction rows are common but the latent supports and row-to-node maps are term-specific.
+
+Implemented process prediction includes:
+\begin{itemize}
+\item fitted-data prediction with \texttt{newdata = NULL};
+\item \texttt{newdata} whose grouped random-effect levels and process coordinates already exist in the fitted support;
+\item new AR1 nodes for \texttt{joint = FALSE};
+\item new dense GP nodes for \texttt{joint = FALSE} and exact dense GP joint prediction for \texttt{joint = TRUE};
+\item new NNGP nodes for \texttt{joint = FALSE}, moderate-size \texttt{joint = TRUE, joint\_method = "full"}, and scalable \texttt{joint = TRUE, joint\_method = "vecchia"};
+\item existing-area CAR, DAGAR, CAR-time, and DAGAR-time prediction;
+\item repeated prediction rows sharing a new latent node reuse the same simulated latent draw within each posterior sample;
+\item SVC prediction contributions are multiplied by the prediction-row covariate value;
+\item NNGP \texttt{joint = FALSE} new-node simulation is implemented in compiled code.
+\end{itemize}
+
+\subsection{Prediction algorithms}
+
+Prediction is assembled draw-by-draw on the linear predictor scale. For posterior draw $b$ and prediction row $i$,
+\begin{equation}
+  \mu_i^{(b)} = o_i + \bx_i\trans \bbeta^{(b)} + \bu_i\trans \balpha^{(b)}
+    + \sum_k a_{ik} w_k^{(b)} ,
+\end{equation}
+where the final sum is over fitted process terms. For ordinary process terms, $a_{ik}$ is one for the mapped latent node and zero otherwise. For an SVC term, $a_{ik}$ includes the prediction-row covariate value, so the contribution is $x_i^{\mathrm{svc}} w_k^{(b)}$. Here $\bu_i$ is the prediction-row random-effect design vector, i.e., the corresponding row of $\bZ_0$. For Gaussian fits, if \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
+\begin{equation}
+  y_i^{(b)} \sim N(\mu_i^{(b)}, \tau_i^{2(b)}).
+\end{equation}
+Under the default residual model, $\tau_i^{2(b)}=\tau^{2(b)}$ for all rows. For fixed, group-specific, or scaled residual variance models, the prediction code uses the fitted residual model to obtain the row-specific predictive standard deviation whenever posterior predictive response samples are requested.
+
+For binomial fits, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
+\begin{equation}
+  \pi_i^{(b)} =
+  \frac{\exp(\mu_i^{(b)})}{1+\exp(\mu_i^{(b)})}.
+\end{equation}
+If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
+\begin{equation}
+  y_i^{(b)} \sim \mathrm{Binomial}(n_i,\pi_i^{(b)}),
+\end{equation}
+where $n_i$ is the fitted or prediction trial count. With \texttt{newdata}, a column named \texttt{trials} is used when present; otherwise one trial per row is assumed.
+
+For the fixed-size negative-binomial family, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
+\begin{equation}
+  \lambda_i^{(b)} = \exp(\mu_i^{(b)}).
+\end{equation}
+If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
+\begin{equation}
+  y_i^{(b)} \sim \mathrm{NegBin}(r,\lambda_i^{(b)}),
+\end{equation}
+where $r$ is the fixed fitted size parameter and the second argument is the mean.
+
+For models without structured process terms, \texttt{predict.stLMM()} uses the posterior samples stored in the fit object. It rebuilds $\bX_0$ and $\bZ_0$ for \texttt{newdata} and returns
+\begin{equation}
+  \bmu_0^{(b)} = \bo_0 + \bX_0 \bbeta^{(b)} + \bZ_0 \balpha^{(b)} .
+\end{equation}
+For \texttt{newdata = NULL}, the retained full-row design is used, including rows whose response was missing during fitting.
+
+For process models, \texttt{predict.stLMM\_recovery()} first maps \texttt{sub\_sample} through \texttt{recover\_iter}; this keeps $\bbeta$, $\balpha$, $\tau^2$, covariance parameters, and recovered $\bw$ aligned to the same original MCMC iterations. Existing process nodes are direct lookups from recovered \texttt{w\_samples}. Repeated prediction rows that map to the same process node share the same latent draw within a posterior sample.
+
+\paragraph{AR1 new-node prediction.}
+For a new AR1 support value under \texttt{joint = FALSE}, the prediction code uses the fitted ordered-support AR1 convention. A new value is inserted into the sorted unique support only for identifying its nearest fitted neighbors. The conditional distribution is derived from the AR1 covariance implied by that ordered support. If the new value has one fitted neighbor, the conditional mean is proportional to that neighbor's recovered draw. If it lies between two fitted neighbors, the conditional mean uses both adjacent fitted neighbors and the conditional variance is the corresponding scalar Schur complement. This is adjacency in ordered support, not a numeric time-gap power rule. Consequently, for unevenly spaced time values, $\phi$ should be read as a correlation per adjacent support position rather than as a correlation per unit of elapsed time.
+
+\paragraph{Dense GP new-node prediction.}
+For a dense GP term, let $\bC_{oo}^{(b)}$ be the fitted-support covariance for draw $b$. For a unique new node $s_0$, let $\bc_{0o}^{(b)}$ be its covariance vector with the fitted support and let $c_{00}^{(b)}$ be its marginal variance. Under \texttt{joint = FALSE}, each unique new node is simulated from
+\begin{equation}
+  w(s_0)^{(b)} \mid \bw_o^{(b)}
+  \sim N\left\{
+    \bc_{0o}^{(b)} (\bC_{oo}^{(b)})^{-1} \bw_o^{(b)},
+    c_{00}^{(b)} - \bc_{0o}^{(b)} (\bC_{oo}^{(b)})^{-1} \bc_{o0}^{(b)}
+  \right\}.
+\end{equation}
+Repeated rows sharing the same new coordinates reuse the simulated node draw. Under \texttt{joint = TRUE}, let $\bC_{no}^{(b)}$ be the covariance between all unique new nodes and the fitted support, and let $\bC_{nn}^{(b)}$ be the covariance among the unique new nodes. The unique new-node vector is drawn exactly from
+\begin{equation}
+  \bw_n^{(b)} \mid \bw_o^{(b)}
+  \sim N\left[
+    \bC_{no}^{(b)} \{\bC_{oo}^{(b)}\}^{-1} \bw_o^{(b)},
+    \bC_{nn}^{(b)}
+      - \bC_{no}^{(b)} \{\bC_{oo}^{(b)}\}^{-1} \bC_{on}^{(b)}
+  \right].
+\end{equation}
+This is exact conditional GP prediction but dense in the number of unique new nodes, so it is intended for small prediction sets.
+
+\paragraph{NNGP \texttt{joint = FALSE} new-node prediction.}
+For an NNGP term, each unique new coordinate $s_0$ chooses up to $m$ nearest neighbors from the fitted support only. For space-time NNGP terms, \texttt{st\_scale} is applied only while ranking neighbors by distance: the final coordinate is multiplied by \texttt{st\_scale}, while the spatial coordinates remain on their original scale. This is not automatic standardization of space and time. If spatial coordinates are kilometers and time is years, \texttt{st\_scale = 50} means one year contributes like about 50 kilometers in the neighbor-search distance. All covariance calculations use the original coordinates after the neighbor set is selected. Let $N(s_0)$ be the selected fitted-neighbor set. For posterior draw $b$,
+\begin{equation}
+  \bB_0^{(b)} =
+  \bc_{0N}^{(b)} \{\bC_{NN}^{(b)}\}^{-1},
+  \qquad
+  V_0^{(b)} =
+  C_{00}^{(b)} - \bB_0^{(b)} \bc_{N0}^{(b)} .
+\end{equation}
+Then
+\begin{equation}
+  w(s_0)^{(b)} \mid \bw_N^{(b)}
+  \sim N\{\bB_0^{(b)} \bw_N^{(b)}, V_0^{(b)}\}.
+\end{equation}
+The current implementation builds neighbor indices once and uses a compiled kernel for the repeated draw-wise conditional calculations.
+
+\paragraph{NNGP \texttt{joint = TRUE, joint\_method = "full"} new-node prediction.}
+The \texttt{joint\_method = "full"} NNGP uses the same fitted-support neighbor sets and the same conditional means as \texttt{joint = FALSE}, but simulates the unique new nodes jointly. For unique new nodes $s_i$ and $s_j$, define the NNGP residual
+\begin{equation}
+  e_i = w(s_i) - \bB_i \bw_{N_i}.
+\end{equation}
+The residual covariance used for joint simulation is
+\begin{equation}
+\begin{aligned}
+  \mathrm{Cov}(e_i, e_j)
+    ={}& C_{ij}
+      - \bB_i \bC_{N_i j}
+      - \bC_{i N_j}\bB_j\trans
+      + \bB_i \bC_{N_i N_j} \bB_j\trans .
+\end{aligned}
+\end{equation}
+For each posterior draw, the implementation builds this dense residual covariance over the unique new prediction nodes, adds the conditional mean vector $\bB_i \bw_{N_i}^{(b)}$, and draws the joint residual with a Cholesky factorization. This changes cross-location predictive dependence while preserving the same marginal conditional means as \texttt{joint = FALSE}. The fitted-support parent sets and conditional means remain the NNGP approximation, while the joint new-node residual covariance uses full GP covariance evaluations among the prediction nodes and their fitted parents. Because this residual covariance is dense, this is a moderate-size prediction feature.
+
+\paragraph{NNGP \texttt{joint = TRUE, joint\_method = "vecchia"} new-node prediction.}
+The \texttt{joint\_method = "vecchia"} is the scalable joint prediction option. Unique new prediction nodes are ordered by \texttt{pred\_ordering}. For each ordered prediction node, neighbors are selected from the combined history made of all fitted support nodes plus earlier prediction nodes in that ordering. The optional \texttt{pred\_m} can differ from the fitted model's \texttt{m}; if \texttt{pred\_m = NULL}, the fitted \texttt{m} is used. The draw is then generated sequentially, so earlier simulated prediction nodes can enter the conditional mean of later prediction nodes. This is still an approximation and is ordering dependent, but it avoids the dense residual covariance required by \texttt{joint\_method = "full"}.
+
+\paragraph{CAR, DAGAR, CAR-time, and DAGAR-time prediction.}
+CAR prediction maps prediction rows to areas already present in the fitted CAR graph and looks up the recovered latent draw for that area. DAGAR prediction does the same lookup after mapping the area through the fitted DAGAR ordering. CAR-time prediction maps rows to existing fitted area-time nodes in location-major support. DAGAR-time prediction maps rows to existing fitted area-time nodes in ordered-area-major support. New CAR or DAGAR areas, new CAR-time or DAGAR-time areas, and new CAR-time or DAGAR-time values currently error. This keeps areal prediction faithful to the graph and time support used for fitting.
+
+With the observed-row likelihood layer, \texttt{newdata = NULL} uses the retained full-row design, not only the observed-row likelihood view. For rows whose response was missing during fitting, prediction uses the same retained fixed-effect, iid, and process maps plus recovered full-support latent draws. In that sense, recovered AR1, GP, NNGP, CAR, DAGAR, CAR-time, and DAGAR-time effects for missing-response support rows become the process contribution used by fitted values and prediction on those rows. Missing responses should be generated only as posterior predictive or imputation quantities; they should not feed back into sampler updates.
+
+CAR and DAGAR prediction currently require areas that exist in the fitted graph. CAR-time and DAGAR-time prediction require both fitted graph areas and fitted time values. New areas and new areal time values error until a model-based policy for extending areal supports is designed.
+
+For space-time NNGP prediction, \texttt{st\_scale} affects nearest-neighbor ranking only. It multiplies the final coordinate before neighbor search; the spatial coordinates are not rescaled, and the covariance calculation still uses the original coordinates. Users should choose \texttt{st\_scale} to balance spatial and temporal neighbor extents in the units used by their data.
+
+For large NNGP prediction sets, \texttt{joint = FALSE} is the simplest and fastest option when cross-prediction dependence is not needed, while \texttt{joint\_method = "vecchia"} is the scalable option when it is.
+
+Large prediction remains a simple call over user-supplied \texttt{newdata} and selected posterior draws. Users control prediction size through \texttt{newdata} and \texttt{sub\_sample}.
+
+\section{Implementation function map}
+
+Table~\ref{tab:funmap} summarizes the principal computational operators in the current collapsed sampler. It is intended as an implementation reference for the equations and algorithms above.
+
+\begin{longtable}{p{0.45\textwidth}p{0.45\textwidth}}
+\caption{Main computational functions in the current collapsed sampler.}
+\label{tab:funmap}\\
+\toprule
+Function & Role \\
+\midrule
+\endfirsthead
+\toprule
+Function & Role \\
+\midrule
+\endhead
+\texttt{build\_M\_lat\_pattern\_sparse()} &
+  Build symbolic lower-triangular sparsity pattern of $\bM$. \\
+\texttt{assemble\_M\_lat\_numeric()} &
+  Fill numerical entries of $\bM = \bQ_w + \bA\trans \bW \bA$. \\
+\texttt{assemble\_nngp\_block\_into\_M()} &
+  Add one NNGP prior precision block into $\bM$. \\
+\texttt{assemble\_gp\_block\_into\_M()} &
+  Add one dense GP prior precision block into $\bM$. \\
+\texttt{assemble\_ar1\_block\_into\_M()} &
+  Add one AR1 prior precision block into $\bM$. \\
+\texttt{assemble\_car\_block\_into\_M()} &
+  Add one sparse spatial CAR prior precision block into $\bM$. \\
+\texttt{assemble\_dagar\_block\_into\_M()} &
+  Add one sparse ordered DAGAR prior precision block into $\bM$. \\
+\texttt{assemble\_car\_time\_block\_into\_M()} &
+  Add one sparse separable CAR-time prior precision block into $\bM$. \\
+\texttt{assemble\_dagar\_time\_block\_into\_M()} &
+  Add one sparse separable DAGAR-time prior precision block into $\bM$. \\
+\texttt{refresh\_observation\_precision()} &
+  Refresh the observed-row precision vector from scalar, fixed,
+  group-specific, scaled residual variance, or P{\'o}lya-Gamma working precision values. \\
+\texttt{add\_observation\_precision\_AtA\_into\_M()} &
+  Add the $\bA\trans \bW \bA$ data contribution. \\
+\texttt{solve\_M\_lat()} & Apply $\operatorname{solve}_M(\cdot)$ to one right-hand side using the current CHOLMOD factor of $\bM$. \\
+\texttt{solve\_M\_lat\_multiple()} & Apply $\operatorname{solve}_M(\cdot)$ to multiple right-hand sides using the current CHOLMOD factor of $\bM$. \\
+\texttt{apply\_A\_transpose()} &
+  Compute $\bA\trans\bv$ for a single observation-space vector. \\
+\texttt{apply\_A\_transpose\_weighted()} &
+  Compute $\bA\trans \bW\bv$ for a single observation-space vector. \\
+\texttt{apply\_A()} & Compute $\bA\bv$ for a single latent vector. \\
+\texttt{apply\_A\_transpose\_weighted\_multiple()} & Apply $\bA\trans \bW$ to multiple columns. \\
+\texttt{apply\_Vinv()} & Apply $\mathcal{V}^{-1}_{\mathrm{op}}$ to a single vector. \\
+\texttt{form\_XtWX\_and\_XtWy()} &
+  Accumulate the weighted dense fixed-effect products $\bX\trans\bW\bX$ and
+  $\bX\trans\bW\by_\beta$. \\
+\texttt{form\_AtWX\_and\_AtWy()} &
+  Form the latent-space fixed-effect products $\bA\trans\bW\bX$ and
+  $\bA\trans\bW\by_\beta$. \\
+\texttt{form\_XtVinvX\_and\_rhs()} &
+  Form $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$ and
+  $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bZ\balpha)$ from Woodbury
+  crossproducts, weighted dense fixed-effect products, and factor-based solves
+  with $\bM$. \\
+\texttt{form\_ZtWZ\_and\_ZtWy()} &
+  Accumulate the weighted sparse grouped-design products $\bZ\trans\bW\bZ$ and
+  $\bZ\trans\bW\by_\alpha$. \\
+\texttt{form\_AtWZ\_and\_AtWy()} &
+  Form the latent-space grouped-design products $\bA\trans\bW\bZ$ and
+  $\bA\trans\bW\by_\alpha$. \\
+\texttt{form\_ZtVinvZ\_and\_rhs()} &
+  Form $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bZ)$ and
+  $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bX\bbeta)$ from Woodbury
+  crossproducts, weighted sparse grouped-design products, and factor-based
+  solves with $\bM$. \\
+\texttt{compute\_logDetV()} & Evaluate $\log|\bV|$ using Equation~\eqref{eq:logdet-V}. \\
+\texttt{logdet\_Qw\_blocks()} &
+  Evaluate prior precision log determinants for NNGP, GP, AR1, CAR, DAGAR,
+  CAR-time, and DAGAR-time blocks. \\
+\texttt{quadform\_Vinv()} & Evaluate $\br\trans\mathcal{V}^{-1}_{\mathrm{op}}(\br)$ as an operator application followed by a dot product. \\
+\texttt{recover\_w\_draw\_collapsed()} & Draw $\bw$ from the conditional latent-process distribution using Algorithm~2. \\
+\bottomrule
+\end{longtable}
+
+\bibliographystyle{apalike}
+\bibliography{stLMM}
+
+\clearpage
+\printindex
+
+\end{document}
