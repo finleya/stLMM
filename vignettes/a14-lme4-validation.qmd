@@ -281,8 +281,7 @@ parentheses. For `stLMM`, the parenthetical value is posterior SD; for `lme4`,
 it is the fixed-effect SE reported by `summary()`.
 
 The random-effect standard-deviation table reports point estimates only. Those
-variance-component summaries are useful for checking scale, but they should not
-be read as equally precise across packages.
+variance-component summaries are useful for comparing scale across packages.
 
 ```{r gaussian-small-tables}
 #| code-fold: true
@@ -427,9 +426,10 @@ knitr::kable(round_numeric_columns(logit_diag, 3))
 
 In this simulation, the fixed-effect estimates are close across packages. The
 random-intercept standard deviation is closer to the simulated truth under
-`stLMM` than under `lme4`, while the group-level conditional modes still align
-closely in the plot below. This illustrates a small finite-sample difference
-between the two estimation approaches.
+`stLMM` than under `lme4`. The scatter plot below shows the same pattern in the
+group-level conditional modes: they are strongly associated, but the points are
+not centered exactly on the 1:1 line because the estimated random-intercept
+scale differs between the two fits.
 
 ```{r logistic-random-effect-plot, fig.width=5.5, fig.height=4}
 #| code-fold: true
@@ -456,9 +456,8 @@ $$
 
 and this approaches the Poisson variance as the size $r$ becomes large. This is
 an approximation check, not an exact likelihood comparison. We use
-`size = 1000`, matching the large-size setting used in the Scottish lip cancer
-comparison article. This large size can mix more slowly, so this section uses
-longer chains than the logistic example.
+`size = 1000`. This large size can mix more slowly, so this section uses longer
+chains than the logistic example.
 
 ```{r simulate-poisson}
 #| code-fold: true
@@ -659,9 +658,7 @@ knitr::kable(round_numeric_columns(nb_diag, 3))
 ```
 
 The negative-binomial fixed effects and random-intercept scale are close across
-the two packages, even though the comparison is not perfectly matched: `stLMM`
-uses the known fixed size from the simulation, while `lme4::glmer.nb()` estimates
-the size parameter from the data.
+the two packages, even though the comparison is not perfectly matched.
 
 ```{r nb-random-effect-plot, fig.width=5.5, fig.height=4}
 #| code-fold: true
