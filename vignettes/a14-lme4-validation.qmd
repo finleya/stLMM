@@ -46,11 +46,11 @@ theme_set(theme_bw(base_size = 12))
 ## Purpose
 
 This article compares `stLMM` with `lme4` for models with independent grouped
-random effects. The goal is comparison, not replacement. `lme4` is a mature and
-general mixed-model package. Bates, Maechler, Bolker, and Walker
-[@BatesMaechlerBolkerWalker2015lme4] describe `lme4` as a modular system for
-fitting linear and generalized linear mixed models using sparse-matrix methods
-and profiled likelihood or REML estimation.
+random effects. The goal is comparison, not replacement. `lme4` is an expansive,
+mature, and widely used mixed-model package. @BatesMaechlerBolkerWalker2015lme4
+describe `lme4` as a modular system for fitting linear and generalized linear
+mixed models using sparse-matrix methods and profiled likelihood or REML
+estimation.
 
 There are several important things `lme4` can do that `stLMM` currently cannot:
 
@@ -75,6 +75,13 @@ The matching `lme4` formula is
 y ~ x1 + x2 + (1 | group) + (0 + x1 | group) + (0 + x2 | group)
 ```
 
+For numeric random-effect terms, this is also equivalent to the compact `lme4`
+formula
+
+```r
+y ~ x1 + x2 + (1 + x1 + x2 || group)
+```
+
 This intentionally avoids `(1 + x1 + x2 | group)`, because that model estimates
 the covariance matrix among group-level intercepts and slopes.
 
@@ -83,9 +90,9 @@ The non-Gaussian comparisons need extra caution:
 - `stLMM` uses Pólya-Gamma data augmentation for binomial and
   negative-binomial likelihoods;
 - `lme4::glmer()` fits GLMMs by likelihood approximation;
-- `stLMM` currently represents Poisson models through a large-size
-  negative-binomial approximation, not a native Poisson likelihood;
-- `stLMM` fixes the negative-binomial size parameter, while
+- `stLMM` represents Poisson models through a large-size negative-binomial
+  approximation, not a native Poisson likelihood;
+- `stLMM` currently fixes the negative-binomial size parameter, while
   `lme4::glmer.nb()` estimates it.
 
 ```{r helpers}
@@ -171,8 +178,7 @@ iid_random_effect_compare <- function(st_fit, lme4_fit, st_term = 1L,
 ## Gaussian Models
 
 Gaussian mixed models are the cleanest comparison because both packages target
-the same linear mixed-model likelihood for the independent random effects used
-here.
+the same linear mixed-model likelihood for independent random effects.
 
 ### Simple Data
 
@@ -218,8 +224,9 @@ gauss_true_sd <- c(
   `random intercept` = 0.5,
   `random slope x` = 0.5
 )
-head(gauss_dat)
 ```
+
+The simulated dataset has 30 groups with 15 observations in each group.
 
 ```{r gaussian-data-plot, fig.width=7, fig.height=4}
 #| code-fold: true
@@ -238,10 +245,9 @@ ggplot(gauss_dat, aes(x, y, group = group)) +
 ### Fits
 
 The `stLMM` fit uses weak inverse-gamma priors for the Gaussian residual
-variance and the two independent iid random-effect variances. We do not provide
-starting values; `stLMM` uses its defaults. We run three chains so the posterior
-summaries can be read with the accompanying $\hat R$ diagnostics. The `lme4` fit
-uses REML.
+variance and the two independent iid random-effect variances. Posterior
+inference is based on three chains, with $\hat R$ diagnostics reported below.
+The `lme4` fit uses REML.
 
 ```{r fit-gaussian-small}
 gauss_st_time <- system.time({
