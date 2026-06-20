@@ -41,4 +41,5 @@ articles:
   - a11-runtime-performance
 - title: "Additional articles"
   contents:
+  - a14-lme4-validation
   - a13-scottish-lip-cancer-nimble-comparison
