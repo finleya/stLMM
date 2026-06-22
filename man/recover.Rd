@@ -6,14 +6,24 @@
 \usage{
 recover(object, ...)
 
-\method{recover}{stLMM}(object, sub_sample = list(start = 1L, thin = 1L), ...)
+\method{recover}{stLMM}(object, n_omp_threads = NULL, verbose = FALSE,
+  sub_sample = list(start = 1L, thin = 1L), ...)
 
-\method{recover}{stLMM_chains}(object, sub_sample = list(start = 1L, thin = 1L),
-  ...)
+\method{recover}{stLMM_chains}(object, n_omp_threads = NULL, verbose = FALSE,
+  sub_sample = list(start = 1L, thin = 1L), ...)
 }
 \arguments{
 \item{object}{An object returned by \code{stLMM()}. Multi-chain fits are
 handled chain by chain.}
+\item{n_omp_threads}{Optional positive integer number of OpenMP threads for
+threaded recovery setup kernels. The default \code{NULL} uses the thread count
+stored in the fitted object. This mainly affects NNGP covariance-coefficient
+updates needed while reconstructing latent process draws; sparse CHOLMOD
+factorization and random-number generation are not OpenMP-threaded by
+\code{recover()}.}
+\item{verbose}{Logical; if \code{TRUE}, print phase-level recovery progress
+messages. Progress is reported from R before and after major recovery phases
+rather than from individual OpenMP worker threads.}
 \item{sub_sample}{A list with optional integer entries \code{start} and
 \code{thin} selecting posterior draws to recover or select from saved process
 draws.}
@@ -29,6 +39,13 @@ values out during fitting. This function reconstructs the posterior
 conditional distribution of the latent process for selected posterior draws and
 samples from it using the stored backend, posterior parameter samples, and
 CHOLMOD sparse factorization.
+
+By default, recovery uses the OpenMP thread count stored in the fitted object.
+Use \code{n_omp_threads} to override that value for a recovery call without
+refitting. The override is most relevant for NNGP terms because their
+covariance-coefficient updates are threaded. Other major recovery work,
+including sparse factorization and latent Gaussian random draws, is not
+parallelized by this argument.
 
 For Polya-Gamma process models, process draws are saved during \code{stLMM()}
 by default as \code{save_process = list(start = 1, thin = 1)}. In that case,

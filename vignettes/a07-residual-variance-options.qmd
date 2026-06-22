@@ -314,7 +314,7 @@ $$
 $$
 
 $$
-\theta_i = \mathbf{x}_i^\top\boldsymbol{\beta} + \alpha_i,\qquad
+\theta_i = \mathbf{x}_i^\top\mathbf{\beta} + \alpha_i,\qquad
 \alpha_i \sim N(0,\sigma_\alpha^2).
 $$
 
@@ -377,7 +377,7 @@ This model keeps the Fay-Herriot sampling and linking structure, but the observa
 A spatial Fay-Herriot model keeps the same direct-estimate sampling model but replaces the independent area effects with spatially structured area effects. With a CAR model,
 
 $$
-\theta_i = \mathbf{x}_i^\top\boldsymbol{\beta} + w_i,\qquad
+\theta_i = \mathbf{x}_i^\top\mathbf{\beta} + w_i,\qquad
 \mathbf{w} \sim N(\mathbf{0}, \mathbf{Q}_{\mathrm{car}}^{-1}).
 $$
 

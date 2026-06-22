@@ -179,6 +179,38 @@ test_that("predict.stLMM_recovery maps newdata to existing random effects and pr
   expect_equal(dim(pred_new$mu_samples), c(length(rec$recover_iter), nrow(new_coord)))
   expect_equal(pred_new$draw_index, rec$recover_iter)
   expect_false(isTRUE(all.equal(pred_new$mu_samples[, 1], pred$mu_samples[, 1])))
+
+  set.seed(2021)
+  pred_threads_1 <- predict(
+    rec,
+    newdata = new_coord,
+    n_omp_threads = 1,
+    return_w_samples = FALSE
+  )
+  set.seed(2021)
+  pred_threads_2 <- predict(
+    rec,
+    newdata = new_coord,
+    n_omp_threads = 2,
+    return_w_samples = FALSE
+  )
+  expect_equal(unname(pred_threads_1$mu_samples), unname(pred_threads_2$mu_samples))
+  expect_error(predict(rec, n_omp_threads = 0), "n_omp_threads must be a positive integer")
+  progress_messages <- character()
+  withCallingHandlers(
+    predict(
+      rec,
+      newdata = new_coord,
+      n_omp_threads = 1,
+      verbose = TRUE,
+      return_w_samples = FALSE
+    ),
+    message = function(m){
+      progress_messages <<- c(progress_messages, conditionMessage(m))
+      invokeRestart("muffleMessage")
+    }
+  )
+  expect_true(any(grepl("predict: assembling", progress_messages)))
 })
 
 test_that("predict.stLMM_recovery combines AR1 and NNGP new nodes term-specifically", {
@@ -1130,6 +1162,60 @@ test_that("predict.stLMM_recovery simulates new space-time NNGP nodes across cov
     expect_equal(dim(pred$mu_samples), c(3L, 3L))
     expect_equal(pred$mu_samples[, 1], pred$mu_samples[, 2])
   }
+})
+
+test_that("Gneiting NNGP supports Vecchia joint prediction controls", {
+  set.seed(211)
+  support <- expand.grid(
+    lon = seq(0, 4, length.out = 5),
+    lat = seq(0, 3, length.out = 4),
+    time = c(0, 0.5)
+  )
+  support <- support[seq_len(24), , drop = FALSE]
+  dat <- data.frame(y = rep(0, nrow(support)), support)
+  newdata <- data.frame(
+    lon = c(0.25, 0.25, 1.4, 2.6, 3.8),
+    lat = c(0.25, 0.25, 1.1, 2.0, 2.8),
+    time = c(0.1, 0.1, 0.35, 0.75, 0.9)
+  )
+
+  fit <- suppressWarnings(stLMM(
+    y ~ 0 + nngp(lon, lat, time, m = 15, cov_model = "gneiting", ordering = "maxmin"),
+    data = dat,
+    starting = list(
+      tau_sq = fixed(0.5),
+      nngp_1 = list(
+        sigma_sq = fixed(1.0),
+        a = fixed(0.4),
+        c = fixed(0.7),
+        alpha = fixed(1),
+        beta = fixed(0.6),
+        gamma = fixed(0.5),
+        delta = fixed(0)
+      )
+    ),
+    n_samples = 4,
+    warmup = FALSE,
+    verbose = FALSE
+  ))
+  rec <- recover(fit, sub_sample = list(start = 2, thin = 1), n_omp_threads = 2)
+  pred <- predict(
+    rec,
+    newdata = newdata,
+    joint = TRUE,
+    joint_method = "vecchia",
+    pred_m = 15,
+    pred_ordering = "coord",
+    st_scale = 2,
+    n_omp_threads = 2
+  )
+
+  expect_s3_class(pred, "stLMM_prediction")
+  expect_true(isTRUE(pred$joint))
+  expect_equal(pred$joint_method, "vecchia")
+  expect_equal(dim(pred$mu_samples), c(3L, nrow(newdata)))
+  expect_equal(dim(pred$w_samples$nngp_1), c(3L, nrow(newdata)))
+  expect_equal(pred$w_samples$nngp_1[, 1], pred$w_samples$nngp_1[, 2])
 })
 
 test_that("predict.stLMM_recovery validates NNGP st_scale", {

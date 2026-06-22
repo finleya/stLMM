@@ -21,6 +21,23 @@ process_sigma_sq_draws <- function(object, term, draw_index){
   stop("error: process variance samples are missing for ", term$name)
 }
 
+resolve_n_omp_threads <- function(object, n_omp_threads = NULL){
+  if(is.null(n_omp_threads))
+    n_omp_threads <- object$backend$n_omp_threads %||% 1L
+
+  if(!is.numeric(n_omp_threads) || length(n_omp_threads) != 1L ||
+     is.na(n_omp_threads) || !is.finite(n_omp_threads) ||
+     n_omp_threads < 1L || abs(n_omp_threads - round(n_omp_threads)) > 0)
+    stop("error: n_omp_threads must be a positive integer")
+
+  as.integer(n_omp_threads)
+}
+
+stlmm_progress <- function(verbose, ...){
+  if(isTRUE(verbose))
+    message(...)
+}
+
 prediction_residual_sd <- function(object, newdata, n0, where){
   residual_model <- object$backend$residual_model
   if(is.null(residual_model) || identical(residual_model$type, "global_tau"))
@@ -253,12 +270,15 @@ finish_prediction_samples <- function(object,
 predict.stLMM <- function(object,
                          newdata = NULL,
                          y_samples = FALSE,
+                         n_omp_threads = NULL,
+                         verbose = FALSE,
                          sub_sample = list(start = 1L, thin = 1L),
                          scale = c("response", "link"),
                          ...){
 
   if(!is.list(object) || is.null(object$backend))
     stop("error: object must be an stLMM fit")
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
   if(length(object$backend$process_terms) > 0L){
     if(!is.null(object$recover_iter) && length(object$recover_iter) > 0L &&
        !is.null(object$w_samples))
@@ -266,6 +286,8 @@ predict.stLMM <- function(object,
         object,
         newdata = newdata,
         y_samples = y_samples,
+        n_omp_threads = n_omp_threads,
+        verbose = verbose,
         sub_sample = sub_sample,
         scale = scale,
         ...
@@ -302,7 +324,14 @@ predict.stLMM <- function(object,
     n0 <- as.integer(object$backend$n)
     row_names <- rownames(X0)
   } else {
-    pred_backend <- build_existing_support_prediction_backend(object, newdata, st_scale = 1)
+    stlmm_progress(verbose, "predict: building prediction design matrices")
+    pred_backend <- build_existing_support_prediction_backend(
+      object,
+      newdata,
+      st_scale = 1,
+      n_omp_threads = n_omp_threads,
+      verbose = verbose
+    )
     X0 <- pred_backend$X
     Z0 <- pred_backend$Z
     offset0 <- pred_backend$offset
@@ -313,13 +342,20 @@ predict.stLMM <- function(object,
   n_draw <- length(draw_index)
   mu <- matrix(0.0, nrow = n_draw, ncol = n0)
   colnames(mu) <- row_names
+  stlmm_progress(
+    verbose,
+    "predict: assembling ", n_draw, " posterior draw(s) for ", n0,
+    " prediction row(s) using ", n_omp_threads, " OpenMP thread(s)"
+  )
 
   if(!is.null(object$beta_samples) && ncol(object$beta_samples) > 0L){
+    stlmm_progress(verbose, "predict: adding fixed effects")
     beta_draws <- object$beta_samples[draw_index, , drop = FALSE]
     mu <- mu + beta_draws %*% t(X0)
   }
 
   if(!is.null(object$alpha_samples) && ncol(object$alpha_samples) > 0L){
+    stlmm_progress(verbose, "predict: adding grouped random effects")
     alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
     mu <- mu + as.matrix(alpha_draws %*% Matrix::t(Z0))
   }
@@ -332,6 +368,7 @@ predict.stLMM <- function(object,
 
   trials <- prediction_trials(object, newdata, n0)
   gaussian_y_sampler <- function(eta){
+    stlmm_progress(verbose, "predict: simulating observation-level predictive samples")
     residual_sd <- prediction_residual_sd_samples(
       object = object,
       newdata = newdata,
@@ -351,7 +388,7 @@ predict.stLMM <- function(object,
     y
   }
 
-  finish_prediction_samples(
+  out <- finish_prediction_samples(
     object = object,
     eta = mu,
     y_samples = y_samples,
@@ -362,18 +399,34 @@ predict.stLMM <- function(object,
     joint = FALSE,
     gaussian_y_sampler = gaussian_y_sampler
   )
+  stlmm_progress(verbose, "predict: done")
+  out
 }
 
 predict.stLMM_chains <- function(object,
                                  newdata = NULL,
                                  y_samples = FALSE,
+                                 n_omp_threads = NULL,
+                                 verbose = FALSE,
                                  sub_sample = list(start = 1L, thin = 1L),
                                  scale = c("response", "link"),
                                  ...){
 
   scale <- match.arg(scale)
-  pred <- lapply(object$chains, predict, newdata = newdata, y_samples = y_samples,
-                 sub_sample = sub_sample, scale = scale, ...)
+  pred <- vector("list", length(object$chains))
+  for(i in seq_along(object$chains)){
+    stlmm_progress(verbose, "predict: chain ", i, " of ", length(object$chains))
+    pred[[i]] <- predict(
+      object$chains[[i]],
+      newdata = newdata,
+      y_samples = y_samples,
+      n_omp_threads = n_omp_threads,
+      verbose = verbose,
+      sub_sample = sub_sample,
+      scale = scale,
+      ...
+    )
+  }
   out <- list(
     chains = pred,
     n_chains = object$n_chains,
@@ -393,6 +446,8 @@ predict.stLMM_recovery <- function(object,
                                   pred_ordering = "maxmin",
                                   st_scale = 1,
                                   return_w_samples = TRUE,
+                                  n_omp_threads = NULL,
+                                  verbose = FALSE,
                                   sub_sample = list(start = 1L, thin = 1L),
                                   scale = c("response", "link"),
                                   ...){
@@ -401,6 +456,7 @@ predict.stLMM_recovery <- function(object,
 
   if(!is.list(object) || is.null(object$backend))
     stop("error: object must be a recovered stLMM fit")
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
 
   w_samples_ordered <- object$w_samples_ordered
   if(is.null(w_samples_ordered))
@@ -458,6 +514,11 @@ predict.stLMM_recovery <- function(object,
     n0 <- as.integer(object$backend$n)
     row_names <- rownames(X0)
   } else {
+    stlmm_progress(
+      verbose,
+      "predict: building prediction backend using ", n_omp_threads,
+      " OpenMP thread(s)"
+    )
     if(predict_timing)
       t0 <- proc.time()[["elapsed"]]
     pred_backend <- build_existing_support_prediction_backend(
@@ -466,7 +527,9 @@ predict.stLMM_recovery <- function(object,
       st_scale = st_scale,
       joint_method = joint_method,
       pred_m = pred_m,
-      pred_ordering = pred_ordering
+      pred_ordering = pred_ordering,
+      n_omp_threads = n_omp_threads,
+      verbose = verbose
     )
     if(predict_timing)
       message("predict timing: prediction backend = ", round(proc.time()[["elapsed"]] - t0, 3), " sec")
@@ -481,8 +544,14 @@ predict.stLMM_recovery <- function(object,
   n_draw <- length(draw_index)
   mu <- matrix(0.0, nrow = n_draw, ncol = n0)
   colnames(mu) <- row_names
+  stlmm_progress(
+    verbose,
+    "predict: assembling ", n_draw, " recovered draw(s) for ", n0,
+    " prediction row(s) using ", n_omp_threads, " OpenMP thread(s)"
+  )
 
   if(!is.null(object$beta_samples) && ncol(object$beta_samples) > 0L){
+    stlmm_progress(verbose, "predict: adding fixed effects")
     if(predict_timing)
       t0 <- proc.time()[["elapsed"]]
     beta_draws <- object$beta_samples[draw_index, , drop = FALSE]
@@ -492,6 +561,7 @@ predict.stLMM_recovery <- function(object,
   }
 
   if(!is.null(object$alpha_samples) && ncol(object$alpha_samples) > 0L){
+    stlmm_progress(verbose, "predict: adding grouped random effects")
     if(predict_timing)
       t0 <- proc.time()[["elapsed"]]
     alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
@@ -512,6 +582,11 @@ predict.stLMM_recovery <- function(object,
   for(i in seq_along(object$backend$process_terms)){
     term <- object$backend$process_terms[[i]]
     term_name <- process_names[i]
+    stlmm_progress(
+      verbose,
+      "predict: processing ", term_name, " (", i, " of ",
+      length(object$backend$process_terms), ")"
+    )
     w_i <- w_samples_ordered[[term_name]]
     if(is.null(w_i))
       stop("error: saved or recovered latent process samples missing for ", term_name)
@@ -579,9 +654,11 @@ predict.stLMM_recovery <- function(object,
             recover_row = recover_row,
             draw_index = draw_index,
             new_coords = process_maps[[i]]$new_coords,
-            neighbor_index = process_maps[[i]]$neighbor_index
+            neighbor_index = process_maps[[i]]$neighbor_index,
+            n_omp_threads = n_omp_threads
           )
         } else if(identical(joint_method, "vecchia")){
+          stlmm_progress(verbose, "predict: simulating ", term_name, " Vecchia joint NNGP new nodes")
           new_w_ordered <- simulate_nngp_prediction_nodes_vecchia(
             object = object,
             term = term,
@@ -591,11 +668,13 @@ predict.stLMM_recovery <- function(object,
             draw_index = draw_index,
             coords_all = process_maps[[i]]$vecchia_coords_all,
             neighbor_index = process_maps[[i]]$vecchia_neighbor_index,
-            neighbor_count = process_maps[[i]]$vecchia_neighbor_count
+            neighbor_count = process_maps[[i]]$vecchia_neighbor_count,
+            n_omp_threads = n_omp_threads
           )
           new_w <- matrix(0.0, nrow = nrow(new_w_ordered), ncol = ncol(new_w_ordered))
           new_w[, process_maps[[i]]$vecchia_ord] <- new_w_ordered
         } else {
+          stlmm_progress(verbose, "predict: simulating ", term_name, " independent NNGP new nodes")
           new_w <- simulate_nngp_prediction_nodes(
             object = object,
             term = term,
@@ -604,7 +683,8 @@ predict.stLMM_recovery <- function(object,
             recover_row = recover_row,
             draw_index = draw_index,
             new_coords = process_maps[[i]]$new_coords,
-            neighbor_index = process_maps[[i]]$neighbor_index
+            neighbor_index = process_maps[[i]]$neighbor_index,
+            n_omp_threads = n_omp_threads
           )
         }
         if(predict_timing)
@@ -639,6 +719,7 @@ predict.stLMM_recovery <- function(object,
 
   trials <- prediction_trials(object, newdata, n0)
   gaussian_y_sampler <- function(eta){
+    stlmm_progress(verbose, "predict: simulating observation-level predictive samples")
     if(predict_timing)
       t0 <- proc.time()[["elapsed"]]
     residual_sd <- prediction_residual_sd_samples(
@@ -662,7 +743,7 @@ predict.stLMM_recovery <- function(object,
     y
   }
 
-  finish_prediction_samples(
+  out <- finish_prediction_samples(
     object = object,
     eta = mu,
     y_samples = y_samples,
@@ -675,6 +756,8 @@ predict.stLMM_recovery <- function(object,
     w_samples = prediction_w_samples,
     gaussian_y_sampler = gaussian_y_sampler
   )
+  stlmm_progress(verbose, "predict: done")
+  out
 }
 
 predict.stLMM_recovery_chains <- function(object,
@@ -686,17 +769,34 @@ predict.stLMM_recovery_chains <- function(object,
                                          pred_ordering = "maxmin",
                                          st_scale = 1,
                                          return_w_samples = TRUE,
+                                         n_omp_threads = NULL,
+                                         verbose = FALSE,
                                          sub_sample = list(start = 1L, thin = 1L),
                                          scale = c("response", "link"),
                                          ...){
 
   scale <- match.arg(scale)
   joint_method <- match.arg(joint_method)
-  pred <- lapply(object$chains, predict, newdata = newdata, y_samples = y_samples,
-                 joint = joint, joint_method = joint_method, pred_m = pred_m,
-                 pred_ordering = pred_ordering, st_scale = st_scale,
-                 return_w_samples = return_w_samples, sub_sample = sub_sample,
-                 scale = scale, ...)
+  pred <- vector("list", length(object$chains))
+  for(i in seq_along(object$chains)){
+    stlmm_progress(verbose, "predict: chain ", i, " of ", length(object$chains))
+    pred[[i]] <- predict(
+      object$chains[[i]],
+      newdata = newdata,
+      y_samples = y_samples,
+      joint = joint,
+      joint_method = joint_method,
+      pred_m = pred_m,
+      pred_ordering = pred_ordering,
+      st_scale = st_scale,
+      return_w_samples = return_w_samples,
+      n_omp_threads = n_omp_threads,
+      verbose = verbose,
+      sub_sample = sub_sample,
+      scale = scale,
+      ...
+    )
+  }
   out <- list(
     chains = pred,
     n_chains = object$n_chains,
@@ -713,10 +813,13 @@ build_existing_support_prediction_backend <- function(object,
                                                       st_scale = 1,
                                                       joint_method = c("none", "full", "vecchia"),
                                                       pred_m = NULL,
-                                                      pred_ordering = "maxmin"){
+                                                      pred_ordering = "maxmin",
+                                                      n_omp_threads = NULL,
+                                                      verbose = FALSE){
 
   predict_timing <- identical(Sys.getenv("STLMM_PREDICT_TIMING"), "1")
   joint_method <- match.arg(joint_method)
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
   if(predict_timing)
     t0 <- proc.time()[["elapsed"]]
 
@@ -841,6 +944,7 @@ build_existing_support_prediction_backend <- function(object,
 
       neighbor_index <- NULL
       if(term$term_type == "nngp" && nrow(new_coords) > 0L){
+        stlmm_progress(verbose, "predict: finding ", term$name, " fitted-support neighbors")
         if(predict_timing)
           t0_neighbor <- proc.time()[["elapsed"]]
         neighbor_index <- nngp_prediction_neighbors(
@@ -850,7 +954,7 @@ build_existing_support_prediction_backend <- function(object,
           cov_model = term$cov_model,
           st_scale = st_scale,
           term_name = term$name,
-          n_omp_threads = object$backend$n_omp_threads
+          n_omp_threads = n_omp_threads
         )
         if(predict_timing)
           message("predict timing: ", term$name, " NNGP neighbor search = ",
@@ -858,6 +962,7 @@ build_existing_support_prediction_backend <- function(object,
       }
       vecchia_graph <- NULL
       if(term$term_type == "nngp" && nrow(new_coords) > 0L && identical(joint_method, "vecchia")){
+        stlmm_progress(verbose, "predict: building ", term$name, " Vecchia prediction graph")
         if(predict_timing)
           t0_vecchia <- proc.time()[["elapsed"]]
         vecchia_graph <- nngp_prediction_vecchia_graph(
@@ -868,7 +973,7 @@ build_existing_support_prediction_backend <- function(object,
           cov_model = term$cov_model,
           st_scale = st_scale,
           term_name = term$name,
-          n_omp_threads = object$backend$n_omp_threads
+          n_omp_threads = n_omp_threads
         )
         if(predict_timing)
           message("predict timing: ", term$name, " Vecchia NNGP prediction graph = ",
@@ -1194,13 +1299,15 @@ simulate_nngp_prediction_nodes <- function(object,
                                            draw_index,
                                            new_coords,
                                            neighbor_index,
-                                           w_samples_ordered = NULL){
+                                           w_samples_ordered = NULL,
+                                           n_omp_threads = NULL){
 
   n_new <- nrow(new_coords)
   n_draw <- length(draw_index)
 
   if(n_new == 0L)
     return(matrix(0.0, nrow = n_draw, ncol = n_new))
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
 
   support <- graph$coords_ord
   if(is.null(w_samples_ordered))
@@ -1226,7 +1333,7 @@ simulate_nngp_prediction_nodes <- function(object,
     as.numeric(sigma_sq),
     theta,
     term$cov_model,
-    as.integer(object$backend$n_omp_threads),
+    as.integer(n_omp_threads),
     PACKAGE = "stLMM"
   )
 }
@@ -1238,13 +1345,15 @@ simulate_nngp_prediction_nodes_joint <- function(object,
                                                  draw_index,
                                                  new_coords,
                                                  neighbor_index,
-                                                 w_samples_ordered = NULL){
+                                                 w_samples_ordered = NULL,
+                                                 n_omp_threads = NULL){
 
   n_new <- nrow(new_coords)
   n_draw <- length(draw_index)
 
   if(n_new == 0L)
     return(matrix(0.0, nrow = n_draw, ncol = n_new))
+  invisible(resolve_n_omp_threads(object, n_omp_threads))
 
   support <- graph$coords_ord
   if(is.null(w_samples_ordered))
@@ -1337,13 +1446,15 @@ simulate_nngp_prediction_nodes_vecchia <- function(object,
                                                    coords_all,
                                                    neighbor_index,
                                                    neighbor_count,
-                                                   w_samples_ordered = NULL){
+                                                   w_samples_ordered = NULL,
+                                                   n_omp_threads = NULL){
 
   n_pred <- length(neighbor_count)
   n_draw <- length(draw_index)
 
   if(n_pred == 0L)
     return(matrix(0.0, nrow = n_draw, ncol = n_pred))
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
 
   if(is.null(w_samples_ordered))
     w_samples_ordered <- object$w_samples_ordered %||% object$w_samples
@@ -1369,7 +1480,7 @@ simulate_nngp_prediction_nodes_vecchia <- function(object,
     as.numeric(sigma_sq),
     theta,
     term$cov_model,
-    as.integer(object$backend$n_omp_threads),
+    as.integer(n_omp_threads),
     PACKAGE = "stLMM"
   )
 }

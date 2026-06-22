@@ -2,11 +2,14 @@ recover <- function(object, ...)
   UseMethod("recover")
 
 recover.stLMM <- function(object,
+                         n_omp_threads = NULL,
+                         verbose = FALSE,
                          sub_sample = list(start = 1L, thin = 1L),
                          ...){
 
   if(!is.list(object) || is.null(object$backend))
     stop("error: object must be an stLMM fit")
+  n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
 
   if(length(object$backend$process_terms) == 0L)
     stop("error: recover() requires at least one structured process term")
@@ -33,11 +36,19 @@ recover.stLMM <- function(object,
   draw_index <- seq.int(start, n_samples, by = thin)
   if(length(draw_index) == 0L)
     stop("error: sub_sample selects no posterior draws")
+  stlmm_progress(
+    verbose,
+    "recover: selected ", length(draw_index), " posterior draw(s) using ",
+    n_omp_threads, " OpenMP thread(s)"
+  )
+
+  object$backend$n_omp_threads <- n_omp_threads
 
   is_pg_likelihood <- identical(object$backend$family, "binomial") ||
     identical(object$backend$family, "negative_binomial")
 
   if(is_pg_likelihood){
+    stlmm_progress(verbose, "recover: selecting saved in-chain process draws")
     if(is.null(object$recover_iter) || !length(object$recover_iter) ||
        is.null(object$w_samples_stacked) || !is.matrix(object$w_samples_stacked))
       stop(
@@ -69,6 +80,7 @@ recover.stLMM <- function(object,
     object$samples$w <- object$w_samples
 
     class(object) <- unique(c("stLMM_recovery", class(object)))
+    stlmm_progress(verbose, "recover: done")
     return(object)
   }
 
@@ -84,6 +96,7 @@ recover.stLMM <- function(object,
   if(is.null(residual_variance_samples))
     residual_variance_samples <- matrix(0.0, nrow = n_samples, ncol = 0L)
 
+  stlmm_progress(verbose, "recover: sampling latent process draws")
   out <- .Call(
     "stLMM_recover_w",
     object$backend,
@@ -117,14 +130,27 @@ recover.stLMM <- function(object,
   object$samples$w <- object$w_samples
 
   class(object) <- unique(c("stLMM_recovery", class(object)))
+  stlmm_progress(verbose, "recover: done")
   object
 }
 
 recover.stLMM_chains <- function(object,
+                                 n_omp_threads = NULL,
+                                 verbose = FALSE,
                                  sub_sample = list(start = 1L, thin = 1L),
                                  ...){
 
-  recovered <- lapply(object$chains, recover, sub_sample = sub_sample, ...)
+  recovered <- vector("list", length(object$chains))
+  for(i in seq_along(object$chains)){
+    stlmm_progress(verbose, "recover: chain ", i, " of ", length(object$chains))
+    recovered[[i]] <- recover(
+      object$chains[[i]],
+      n_omp_threads = n_omp_threads,
+      verbose = verbose,
+      sub_sample = sub_sample,
+      ...
+    )
+  }
   out <- list(
     chains = recovered,
     n_chains = object$n_chains,

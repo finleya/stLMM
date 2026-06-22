@@ -6,24 +6,26 @@
 \title{Posterior prediction from recovered stLMM fits}
 \usage{
 \method{predict}{stLMM}(object, newdata = NULL, y_samples = FALSE,
-  sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
-  ...)
+  n_omp_threads = NULL, verbose = FALSE, sub_sample = list(start = 1L,
+  thin = 1L), scale = c("response", "link"), ...)
 
 \method{predict}{stLMM_chains}(object, newdata = NULL, y_samples = FALSE,
-  sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
-  ...)
+  n_omp_threads = NULL, verbose = FALSE, sub_sample = list(start = 1L,
+  thin = 1L), scale = c("response", "link"), ...)
 
 \method{predict}{stLMM_recovery}(object, newdata = NULL, y_samples = FALSE,
   joint = FALSE, joint_method = c("full", "vecchia"), pred_m = NULL,
   pred_ordering = "maxmin", st_scale = 1,
-  return_w_samples = TRUE, sub_sample = list(start = 1L, thin = 1L),
-  scale = c("response", "link"), ...)
+  return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
+  sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
+  ...)
 
 \method{predict}{stLMM_recovery_chains}(object, newdata = NULL,
   y_samples = FALSE, joint = FALSE, joint_method = c("full", "vecchia"),
   pred_m = NULL, pred_ordering = "maxmin", st_scale = 1,
-  return_w_samples = TRUE, sub_sample = list(start = 1L, thin = 1L),
-  scale = c("response", "link"), ...)
+  return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
+  sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
+  ...)
 }
 \arguments{
 \item{object}{An \code{stLMM} fit without structured process terms, a
@@ -74,6 +76,14 @@ The default \code{TRUE} is useful for diagnostics and process maps. Set to
 \code{FALSE} for large prediction problems when memory use matters. For
 covariate-scaled process terms, returned values are the raw latent process
 draws, not the covariate-multiplied row-level contribution.}
+\item{n_omp_threads}{Optional positive integer number of OpenMP threads for
+threaded prediction kernels. The default \code{NULL} uses the thread count
+stored in the fitted or recovered object. This affects threaded NNGP
+prediction neighbor searches and compiled NNGP prediction simulation kernels;
+R-level dense joint GP and dense joint NNGP prediction are not OpenMP-threaded.}
+\item{verbose}{Logical; if \code{TRUE}, print phase-level prediction progress
+messages. Progress is reported from R before and after major prediction phases
+rather than from individual OpenMP worker threads.}
 \item{sub_sample}{A list with optional integer entries \code{start} and
 \code{thin}. For \code{predict.stLMM()} without process terms, these select
 posterior draw indices. For Polya-Gamma process fits with saved process draws,
@@ -96,6 +106,12 @@ response is the posterior fitted mean count.
 Prediction always represents the model as fit. Prediction-time dropping of
 model components is not supported. New grouped random-effect levels are not
 supported.
+
+By default, prediction uses the OpenMP thread count stored in the fitted or
+recovered object. Use \code{n_omp_threads} to override that value for a
+prediction call without refitting or re-running \code{recover()}. Because the
+long-running prediction kernels can be OpenMP threaded, \code{verbose = TRUE}
+reports progress at the R phase level rather than printing from worker threads.
 
 With \code{newdata = NULL}, prediction returns fitted-row posterior mean
 samples for the original data rows. With \code{newdata}, fixed-effect and iid

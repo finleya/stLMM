@@ -52,29 +52,29 @@ The useful role for `stLMM` is narrower. It gives formula-level access to a spec
 `stLMM` uses a collapsed sampler for structured latent process terms such as `ar1()`, `gp()`, `nngp()`, `car()`, and `car_time()`. The uncollapsed Gaussian model can be written as
 
 $$
-  \boldsymbol{y}
-    = \mathbf{X}\boldsymbol{\beta}
-      + \mathbf{Z}\boldsymbol{\alpha}
-      + \mathbf{A}\boldsymbol{w}
-      + \boldsymbol{\varepsilon},
+  \mathbf{y}
+    = \mathbf{X}\mathbf{\beta}
+      + \mathbf{Z}\mathbf{\alpha}
+      + \mathbf{A}\mathbf{w}
+      + \mathbf{\varepsilon},
 $$
 
 $$
-  \boldsymbol{w} \sim N(\boldsymbol{0}, \mathbf{Q}_w^{-1}),
+  \mathbf{w} \sim N(\mathbf{0}, \mathbf{Q}_w^{-1}),
   \qquad
-  \boldsymbol{\varepsilon} \sim N(\boldsymbol{0}, \mathbf{R}),
+  \mathbf{\varepsilon} \sim N(\mathbf{0}, \mathbf{R}),
 $$
 
 where $\mathbf{A}$ maps observation rows to structured latent process nodes, $\mathbf{Q}_w$ is the structured-process prior precision, $\mathbf{R}$ is the diagonal residual covariance, and $\mathbf{W}=\mathbf{R}^{-1}$ is the diagonal observation precision. Under the default homoskedastic Gaussian residual model, $\mathbf{R}=\tau^2\mathbf{I}_n$ and $\mathbf{W}=\tau^{-2}\mathbf{I}_n$.
 
-During fitting, the structured process vector $\boldsymbol{w}$ isn't sampled while covariance parameters are updated. Instead, $\boldsymbol{w}$ is integrated out. We reserve $\boldsymbol{\theta}_k$ for the covariance-function parameters of structured process term $k$, such as a range, decay, correlation, smoothness, or nonseparable mixing parameter. The broader Metropolis-updated parameter collection is denoted $\boldsymbol{\psi}$; it can include $\tau^2$, residual variances, process variances $\sigma_k^2$, and $\boldsymbol{\theta}_k$ values. Conditional on $\boldsymbol{\beta}$, $\boldsymbol{\alpha}$, and $\boldsymbol{\psi}$, the collapsed observation model is
+During fitting, the structured process vector $\mathbf{w}$ isn't sampled while covariance parameters are updated. Instead, $\mathbf{w}$ is integrated out. We reserve $\mathbf{\theta}_k$ for the covariance-function parameters of structured process term $k$, such as a range, decay, correlation, smoothness, or nonseparable mixing parameter. The broader Metropolis-updated parameter collection is denoted $\mathbf{\psi}$; it can include $\tau^2$, residual variances, process variances $\sigma_k^2$, and $\mathbf{\theta}_k$ values. Conditional on $\mathbf{\beta}$, $\mathbf{\alpha}$, and $\mathbf{\psi}$, the collapsed observation model is
 
 $$
-  \boldsymbol{y} \mid
-    \boldsymbol{\beta}, \boldsymbol{\alpha}, \boldsymbol{\psi}
+  \mathbf{y} \mid
+    \mathbf{\beta}, \mathbf{\alpha}, \mathbf{\psi}
   \sim
-  N(\mathbf{X}\boldsymbol{\beta}
-      + \mathbf{Z}\boldsymbol{\alpha}, \mathbf{V}),
+  N(\mathbf{X}\mathbf{\beta}
+      + \mathbf{Z}\mathbf{\alpha}, \mathbf{V}),
 $$
 
 with
@@ -103,17 +103,17 @@ $$
 \end{aligned}
 $$
 
-The dependence of $\mathbf{R}$, $\mathbf{W}$, $\mathbf{Q}_w$, $\mathbf{V}$, and $\mathbf{M}$ on the current value of $\boldsymbol{\psi}$ is suppressed to keep the notation readable.
+The dependence of $\mathbf{R}$, $\mathbf{W}$, $\mathbf{Q}_w$, $\mathbf{V}$, and $\mathbf{M}$ on the current value of $\mathbf{\psi}$ is suppressed to keep the notation readable.
 
-This collapsed-sampler choice is deliberate, but it has real costs. It reduces the retained MCMC parameter space and lets `stLMM` fit several structured random-effect models in one framework, including dense GP, NNGP, AR(1), CAR, CAR-time, and covariate-scaled process terms. Once $\boldsymbol{w}$ is integrated out, however, many covariance and variance parameters don't have simple Gibbs updates. A proposed range, correlation, mixing, process-variance, or residual-variance value has to be evaluated through the collapsed target, which can require rebuilding covariance or precision pieces, assembling $\mathbf{M}$, and factorizing $\mathbf{M}$.
+This collapsed-sampler choice is deliberate, but it has real costs. It reduces the retained MCMC parameter space and lets `stLMM` fit several structured random-effect models in one framework, including dense GP, NNGP, AR(1), CAR, CAR-time, and covariate-scaled process terms. Once $\mathbf{w}$ is integrated out, however, many covariance and variance parameters don't have simple Gibbs updates. A proposed range, correlation, mixing, process-variance, or residual-variance value has to be evaluated through the collapsed target, which can require rebuilding covariance or precision pieces, assembling $\mathbf{M}$, and factorizing $\mathbf{M}$.
 
 Blocking is the choice of which Metropolis-updated parameters are proposed together. One large block can be efficient when posterior dependence is well captured by the adaptive proposal covariance, but it can struggle when different parameter groups move on different scales or have different posterior dependence patterns. Splitting parameters into smaller blocks can sometimes improve mixing because each proposal is tuned to a more focused part of the posterior. There is no free lunch: each extra Metropolis block can add another target evaluation and factorization within the same retained iteration.
 
 After collapsing the structured process terms, only a few parameter groups have Gibbs updates:
 
-- fixed effects $\boldsymbol{\beta}$ are updated by Gibbs steps;
-- unstructured grouped random effects $\boldsymbol{\alpha}$, when included through terms such as `iid(group)`, are updated by Gibbs steps;
-- structured process effects $\boldsymbol{w}$ are recovered after fitting with `recover()`, not sampled during covariance-parameter updates.
+- fixed effects $\mathbf{\beta}$ are updated by Gibbs steps;
+- unstructured grouped random effects $\mathbf{\alpha}$, when included through terms such as `iid(group)`, are updated by Gibbs steps;
+- structured process effects $\mathbf{w}$ are recovered after fitting with `recover()`, not sampled during covariance-parameter updates.
 
 The default Metropolis update is one joint block containing the covariance and residual-variance parameters that are updated by Metropolis. That's usually fastest. Splitting the parameters into several blocks can improve mixing when one large proposal is hard to tune, but it can make each iteration more expensive. Blocking is therefore a computational tradeoff, not a universally better sampler.
 
@@ -128,30 +128,30 @@ The Metropolis machinery only sees covariance and residual-variance parameters t
 The sampler proposes on transformed scales. Positive parameters, such as $\tau^2$ and process variances, are updated on the log scale. Bounded covariance-function parameters are updated on a bounded-logit scale. For example, in an exponential NNGP model with residual variance, process variance, and spatial decay all updated by Metropolis, one possible transformed vector is
 
 $$
-  \boldsymbol{\eta} =
+  \mathbf{\eta} =
   \{\log(\tau^2), \log(\sigma^2), g(\phi)\}^{\top},
 $$
 
-where $\phi$ is the term's decay parameter and $g(\cdot)$ maps its bounded prior support to the real line. In general, $\boldsymbol{\eta}$ contains the transformed parameters that are updated by Metropolis. Priors and transformation Jacobians are included in the Metropolis target, so proposals are made on convenient scales while the posterior remains the model specified by the user.
+where $\phi$ is the term's decay parameter and $g(\cdot)$ maps its bounded prior support to the real line. In general, $\mathbf{\eta}$ contains the transformed parameters that are updated by Metropolis. Priors and transformation Jacobians are included in the Metropolis target, so proposals are made on convenient scales while the posterior remains the model specified by the user.
 
 ## The Adaptive Metropolis Step
 
-Let $\boldsymbol{\eta}_b$ be the current transformed parameter vector for block $b$. All parameters outside block $b$ are held fixed while that block is proposed. Let $\ell(\boldsymbol{\eta}_b)$ denote the collapsed log posterior target under the current block values, including the collapsed likelihood, priors, and transformation Jacobians.
+Let $\mathbf{\eta}_b$ be the current transformed parameter vector for block $b$. All parameters outside block $b$ are held fixed while that block is proposed. Let $\ell(\mathbf{\eta}_b)$ denote the collapsed log posterior target under the current block values, including the collapsed likelihood, priors, and transformation Jacobians.
 
 For each retained MCMC iteration, the sampler loops over the Metropolis blocks. For each block $b$:
 
 1. Propose a random walk on the transformed scale,
 
 $$
-  \boldsymbol{\eta}_b^\star
-    = \boldsymbol{\eta}_b + \mathbf{L}_b \boldsymbol{z},
+  \mathbf{\eta}_b^\star
+    = \mathbf{\eta}_b + \mathbf{L}_b \mathbf{z},
   \qquad
-  \boldsymbol{z} \sim N(\boldsymbol{0}, \mathbf{I}).
+  \mathbf{z} \sim N(\mathbf{0}, \mathbf{I}).
 $$
 
-For multivariate blocks, $\mathbf{L}_b\mathbf{L}_b^{\top}=\lambda_b\boldsymbol{\Sigma}_b$, where $\boldsymbol{\Sigma}_b$ is the adaptive empirical covariance shape and $\lambda_b$ is a variance-like multiplier. For scalar blocks, the proposal variance is $\delta_b^2\Sigma_b$, where $\Sigma_b>0$ is a scalar shape and $\delta_b$ is a one-dimensional random-walk scale. The two symbols reflect the implementation: multivariate blocks adapt an empirical covariance shape and a multiplier on that covariance, while scalar blocks adapt a direct step size.
+For multivariate blocks, $\mathbf{L}_b\mathbf{L}_b^{\top}=\lambda_b\mathbf{\Sigma}_b$, where $\mathbf{\Sigma}_b$ is the adaptive empirical covariance shape and $\lambda_b$ is a variance-like multiplier. For scalar blocks, the proposal variance is $\delta_b^2\Sigma_b$, where $\Sigma_b>0$ is a scalar shape and $\delta_b$ is a one-dimensional random-walk scale. The two symbols reflect the implementation: multivariate blocks adapt an empirical covariance shape and a multiplier on that covariance, while scalar blocks adapt a direct step size.
 
-2. Transform $\boldsymbol{\eta}_b^\star$ back to the model scale.
+2. Transform $\mathbf{\eta}_b^\star$ back to the model scale.
 
 3. Rebuild the affected covariance or precision pieces, assemble $\mathbf{M}$, and factorize it. If the proposed covariance or precision isn't valid, reject the proposal.
 
@@ -161,8 +161,8 @@ $$
   \min\left\{
     1,
     \exp\left[
-      \ell(\boldsymbol{\eta}_b^\star)
-      - \ell(\boldsymbol{\eta}_b)
+      \ell(\mathbf{\eta}_b^\star)
+      - \ell(\mathbf{\eta}_b)
     \right]
   \right\}.
 $$
@@ -175,9 +175,9 @@ $$
 $$
 
 $$
-  \boldsymbol{\Sigma}_b \leftarrow \boldsymbol{\Sigma}_b +
+  \mathbf{\Sigma}_b \leftarrow \mathbf{\Sigma}_b +
     (m+1)^{-c_1}
-      (\widehat{\mathrm{Cov}}_b-\boldsymbol{\Sigma}_b),
+      (\widehat{\mathrm{Cov}}_b-\mathbf{\Sigma}_b),
 $$
 
 where $m$ is the completed batch index, $a^\star$ is the target acceptance rate, and the implementation uses $c_0=1$ and $c_1=0.8$.

@@ -133,6 +133,25 @@ test_that("collapsed NNGP process recovery matches the NNGP posterior covariance
 
   expect_lt(max(abs(recovered_cov - target_cov)), 0.025)
   expect_equal(unname(recovered_cov_user), unname(recovered_cov[graph$ord_inv, graph$ord_inv]))
+
+  set.seed(1251)
+  rec_threads_1 <- recover(fit, n_omp_threads = 1, sub_sample = list(start = 1, thin = 20))
+  set.seed(1251)
+  rec_threads_2 <- recover(fit, n_omp_threads = 2, sub_sample = list(start = 1, thin = 20))
+  expect_equal(
+    unname(rec_threads_1$w_samples_ordered$nngp_1),
+    unname(rec_threads_2$w_samples_ordered$nngp_1)
+  )
+  expect_error(recover(fit, n_omp_threads = 0), "n_omp_threads must be a positive integer")
+  progress_messages <- character()
+  withCallingHandlers(
+    recover(fit, n_omp_threads = 1, verbose = TRUE, sub_sample = list(start = 1, thin = 20)),
+    message = function(m){
+      progress_messages <<- c(progress_messages, conditionMessage(m))
+      invokeRestart("muffleMessage")
+    }
+  )
+  expect_true(any(grepl("recover: sampling latent process draws", progress_messages)))
 })
 
 test_that("collapsed NNGP recovery handles repeated observations and orderings", {
