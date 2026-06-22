@@ -328,7 +328,7 @@ predict.stLMM <- function(object,
     pred_backend <- build_existing_support_prediction_backend(
       object,
       newdata,
-      st_scale = 1,
+      st_scale = NULL,
       n_omp_threads = n_omp_threads,
       verbose = verbose
     )
@@ -444,7 +444,7 @@ predict.stLMM_recovery <- function(object,
                                   joint_method = c("full", "vecchia"),
                                   pred_m = NULL,
                                   pred_ordering = "maxmin",
-                                  st_scale = 1,
+                                  st_scale = NULL,
                                   return_w_samples = TRUE,
                                   n_omp_threads = NULL,
                                   verbose = FALSE,
@@ -767,7 +767,7 @@ predict.stLMM_recovery_chains <- function(object,
                                          joint_method = c("full", "vecchia"),
                                          pred_m = NULL,
                                          pred_ordering = "maxmin",
-                                         st_scale = 1,
+                                         st_scale = NULL,
                                          return_w_samples = TRUE,
                                          n_omp_threads = NULL,
                                          verbose = FALSE,
@@ -810,7 +810,7 @@ predict.stLMM_recovery_chains <- function(object,
 
 build_existing_support_prediction_backend <- function(object,
                                                       newdata,
-                                                      st_scale = 1,
+                                                      st_scale = NULL,
                                                       joint_method = c("none", "full", "vecchia"),
                                                       pred_m = NULL,
                                                       pred_ordering = "maxmin",
@@ -943,7 +943,14 @@ build_existing_support_prediction_backend <- function(object,
       }
 
       neighbor_index <- NULL
+      st_scale_i <- NULL
       if(term$term_type == "nngp" && nrow(new_coords) > 0L){
+        st_scale_i <- resolve_prediction_st_scale(
+          st_scale = st_scale,
+          term_name = term$name,
+          graph = graph,
+          cov_model = term$cov_model
+        )
         stlmm_progress(verbose, "predict: finding ", term$name, " fitted-support neighbors")
         if(predict_timing)
           t0_neighbor <- proc.time()[["elapsed"]]
@@ -952,7 +959,7 @@ build_existing_support_prediction_backend <- function(object,
           support = graph$coords_ord,
           m = graph$m,
           cov_model = term$cov_model,
-          st_scale = st_scale,
+          st_scale = st_scale_i,
           term_name = term$name,
           n_omp_threads = n_omp_threads
         )
@@ -971,7 +978,7 @@ build_existing_support_prediction_backend <- function(object,
           m = pred_m %||% graph$m,
           ordering = pred_ordering,
           cov_model = term$cov_model,
-          st_scale = st_scale,
+          st_scale = st_scale_i,
           term_name = term$name,
           n_omp_threads = n_omp_threads
         )
@@ -1030,6 +1037,9 @@ nngp_prediction_neighbors <- function(new_coords,
                                       n_omp_threads = 1L){
 
   st_scale_i <- resolve_st_scale(st_scale, term_name)
+  if(!is_space_time_cov_model(cov_model) && !isTRUE(all.equal(st_scale_i, 1)))
+    stop("error: st_scale is only valid for space-time NNGP covariance models")
+
   k <- min(as.integer(m), nrow(support))
 
   .Call(
@@ -1065,16 +1075,33 @@ nngp_prediction_vecchia_graph <- function(new_coords,
   if(ncol(new_coords) != ncol(support))
     stop("error: prediction and fitted support coordinates have different dimensions")
 
-  ord_info <- compute_nngp_order(new_coords, ordering)
-  new_ord <- new_coords[ord_info$ord, , drop = FALSE]
-  coords_all <- rbind(support, new_ord)
+  space_time <- is_space_time_cov_model(cov_model)
+  st_scale_i <- resolve_st_scale(st_scale, term_name)
+  if(!space_time && !isTRUE(all.equal(st_scale_i, 1)))
+    stop("error: st_scale is only valid for space-time NNGP covariance models")
+  if(space_time && identical(ordering, "hilbert"))
+    stop("error: hilbert prediction ordering is not supported for space-time NNGP covariance models")
 
-  search_coords <- coords_all
-  model_info <- build_cor_model_registry()[[cov_model]]
-  if(!is.null(model_info) && !identical(model_info$distance_mode, 0L)){
-    st_scale_i <- resolve_st_scale(st_scale, term_name)
-    search_coords[, ncol(search_coords)] <- search_coords[, ncol(search_coords)] * st_scale_i
+  new_search <- scale_nngp_search_coords(
+    new_coords,
+    st_scale = st_scale_i,
+    space_time = space_time
+  )
+  support_search <- scale_nngp_search_coords(
+    support,
+    st_scale = st_scale_i,
+    space_time = space_time
+  )
+
+  ord_info <- compute_nngp_order(new_search, ordering)
+  new_ord <- new_coords[ord_info$ord, , drop = FALSE]
+  if(space_time){
+    new_search_ord <- new_search[ord_info$ord, , drop = FALSE]
+    search_coords <- rbind(support_search, new_search_ord)
+  } else {
+    search_coords <- rbind(support, new_ord)
   }
+  coords_all <- rbind(support, new_ord)
 
   n_all <- nrow(search_coords)
   m <- min(as.integer(m), n_all - 1L)
@@ -1117,6 +1144,44 @@ sort_unique_matrix_rows <- function(x){
   x <- unique(x)
   ord <- do.call(order, as.data.frame(x))
   x[ord, , drop = FALSE]
+}
+
+is_space_time_cov_model <- function(cov_model){
+  registry <- build_cor_model_registry()
+  model_info <- registry[[cov_model]]
+  !is.null(model_info) && identical(as.integer(model_info$distance_mode), 2L)
+}
+
+resolve_prediction_st_scale <- function(st_scale, term_name, graph, cov_model){
+
+  space_time <- is_space_time_cov_model(cov_model)
+  fitted_scale <- graph$st_scale %||% 1
+
+  if(is.null(st_scale)){
+    out <- fitted_scale
+  } else if(is.list(st_scale)){
+    if(!term_name %in% names(st_scale)){
+      if(!space_time)
+        return(1)
+      stop("error: st_scale list is missing an entry for ", term_name)
+    }
+    out <- st_scale[[term_name]]
+  } else if(length(st_scale) > 1L){
+    if(is.null(names(st_scale)) || !term_name %in% names(st_scale)){
+      if(!space_time)
+        return(1)
+      stop("error: named st_scale vector must include ", term_name)
+    }
+    out <- st_scale[[term_name]]
+  } else {
+    out <- st_scale
+  }
+
+  out <- resolve_st_scale(out, term_name)
+  if(!space_time && !isTRUE(all.equal(out, 1)))
+    stop("error: st_scale is only valid for space-time NNGP covariance models")
+
+  out
 }
 
 resolve_st_scale <- function(st_scale, term_name){

@@ -15,14 +15,14 @@
 
 \method{predict}{stLMM_recovery}(object, newdata = NULL, y_samples = FALSE,
   joint = FALSE, joint_method = c("full", "vecchia"), pred_m = NULL,
-  pred_ordering = "maxmin", st_scale = 1,
+  pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
   ...)
 
 \method{predict}{stLMM_recovery_chains}(object, newdata = NULL,
   y_samples = FALSE, joint = FALSE, joint_method = c("full", "vecchia"),
-  pred_m = NULL, pred_ordering = "maxmin", st_scale = 1,
+  pred_m = NULL, pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
   ...)
@@ -62,14 +62,19 @@ available history nodes are used.}
 \item{pred_ordering}{Ordering for unique new prediction nodes under
 \code{joint_method = "vecchia"}. May be one of the NNGP ordering options
 \code{"coord"}, \code{"default"}, \code{"maxmin"}, \code{"hilbert"},
-\code{"random"}, or a numeric permutation of the unique new prediction nodes.}
-\item{st_scale}{Positive scalar, or named positive vector/list by process term.
-For space-time NNGP new-node prediction, the final coordinate is multiplied by
-\code{st_scale} before nearest-neighbor ranking. This is not automatic
-standardization: spatial coordinates are left on their original scale and the
-time coordinate is left on its original scale except for this single
-multiplier during neighbor search. The covariance calculation still uses the
-original coordinates.}
+\code{"random"}, or a numeric permutation of the unique new prediction nodes.
+For space-time NNGP terms, \code{"hilbert"} is currently rejected because the
+implemented Hilbert ordering is two-dimensional.}
+\item{st_scale}{\code{NULL}, a positive scalar, or a named positive vector/list
+by process term. For space-time NNGP new-node prediction, \code{NULL} inherits
+the \code{st_scale} stored on the fitted NNGP graph, falling back to \code{1}
+for older objects. A supplied value overrides the fitted scale. The final
+coordinate is multiplied by \code{st_scale} before prediction ordering and
+nearest-neighbor ranking. This is not automatic standardization: spatial
+coordinates are left on their original scale and the time coordinate is left on
+its original scale except for this single multiplier during graph construction.
+The covariance calculation still uses the original coordinates. Non-default
+\code{st_scale} values are valid only for space-time NNGP terms.}
 \item{return_w_samples}{Logical; for recovered process prediction, whether to
 return raw latent process samples for each process term in \code{w_samples}.
 The default \code{TRUE} is useful for diagnostics and process maps. Set to
@@ -177,17 +182,16 @@ posterior means and medians for each prediction location when the neighbor
 sets are adequate. They differ mainly in the cross-location dependence of the
 simulated prediction draws.
 
-For space-time NNGP prediction, \code{st_scale} controls the relative influence
-of the final coordinate when choosing nearest neighbors. The
-neighbor-search distance is equivalent to Euclidean distance after replacing
-\code{time} by \code{st_scale * time}. Larger values make temporal separation
-matter more and tend to choose neighbors closer in time; smaller values make
-spatial separation dominate. Choose \code{st_scale} based on the units of the
-coordinates and the desired space-time neighbor extent. For example, if spatial
-coordinates are kilometers and time is years, \code{st_scale = 50} treats one
-year of time separation like about 50 kilometers for neighbor ranking. This
-choice does not change the covariance parameters or covariance evaluations
-once the neighbors have been selected.
+For space-time NNGP prediction, \code{st_scale} controls the search geometry
+used to order new nodes and choose nearest neighbors. The search distance is
+equivalent to Euclidean distance after replacing the final coordinate by
+\code{st_scale * time}. Thus \code{st_scale = 1} uses the coordinates as
+supplied, while \code{st_scale = s} treats one unit of the final coordinate as
+\code{s} spatial-coordinate units for graph construction. Larger values make
+temporal separation matter more and tend to choose neighbors closer in time;
+smaller values make temporal separation matter less. This choice does not
+change the covariance parameters or covariance evaluations once the neighbors
+have been selected.
 }
 \references{
 Finley, A. O., Datta, A., Cook, B. D., Morton, D. C., Andersen, H. E.,

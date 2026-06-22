@@ -1532,6 +1532,7 @@ stLMM <- function(formula, data = parent.frame(),
                 neighbor_m <- if(!is.null(graph_i$m)) as.integer(graph_i$m) else as.integer(NA)
                 ordering_method <- graph_i$order %||% graph_i$ordering %||% terms[[i]]$order %||% terms[[i]]$ordering
                 repeated_collapsed <- repeated_flag
+                st_scale <- graph_i$st_scale %||% 1
             } else if(type_i == "gp"){
                 repeated_flag <- if(!is.null(terms[[i]]$n_obs) && !is.null(terms[[i]]$n_node)) (terms[[i]]$n_obs > terms[[i]]$n_node) else NA
                 unique_count <- if(!is.null(terms[[i]]$n_node)) as.integer(terms[[i]]$n_node) else as.integer(NA)
@@ -1587,6 +1588,7 @@ stLMM <- function(formula, data = parent.frame(),
                     coord_dim = coord_dim,
                     neighbor_count_m = neighbor_m,
                     ordering = ordering_method,
+                    st_scale = if(type_i == "nngp") st_scale else NA_real_,
                     time_column = time_col,
                     repeated_collapsed = repeated_collapsed,
                     zero_parent_nodes = as.integer(NA),

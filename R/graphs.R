@@ -271,7 +271,18 @@ build_graph_key <- function(spec, defaults = list(), formula_env = NULL){
   ## merge defaults with supplied params
   params <- modifyList(defaults, spec$params)
 
-  ## cov_model does NOT affect graph structure
+  if(identical(fun, "nngp")){
+    cov_model <- params$cov_model %||% "exp"
+    registry <- build_cor_model_registry()
+    if(!is.null(formula_env) &&
+       !(is.character(cov_model) && length(cov_model) == 1L && cov_model %in% names(registry)))
+      cov_model <- eval_process_param(cov_model, formula_env)
+    if(!is.character(cov_model) || length(cov_model) != 1L || !cov_model %in% names(registry))
+      stop("error: nngp(): unknown cov_model '", paste(deparse(cov_model, nlines = 1L), collapse = ""), "'")
+    params$space_time <- identical(as.integer(registry[[cov_model]]$distance_mode), 2L)
+  }
+
+  ## cov_model does NOT otherwise affect graph structure
   params$cov_model <- NULL
 
   if(length(params) == 0L){
@@ -299,6 +310,10 @@ build_graph_key <- function(spec, defaults = list(), formula_env = NULL){
             "]=",
             paste(val, collapse=";")
           )
+
+        } else if(identical(name, "st_scale") && is.numeric(val) && length(val) == 1L) {
+
+          paste0(name, "=", formatC(as.numeric(val), digits = 17L, format = "fg", flag = "#"))
 
         } else {
 
@@ -529,6 +544,25 @@ compute_graph_order <- function(graph, ordering){
   )
 }
 
+scale_nngp_search_coords <- function(coords, st_scale = 1, space_time = FALSE){
+
+  coords <- as.matrix(coords)
+  storage.mode(coords) <- "double"
+
+  if(!is.numeric(st_scale) || length(st_scale) != 1L ||
+     is.na(st_scale) || st_scale <= 0)
+    stop("error: st_scale must be a positive scalar")
+
+  st_scale <- as.numeric(st_scale)
+  if(!isTRUE(space_time) && !isTRUE(all.equal(st_scale, 1)))
+    stop("error: st_scale is only valid for space-time covariance models")
+
+  if(isTRUE(space_time))
+    coords[, ncol(coords)] <- coords[, ncol(coords)] * st_scale
+
+  coords
+}
+
 ############################################################
 # Graph constructors
 ############################################################
@@ -536,6 +570,8 @@ compute_graph_order <- function(graph, ordering){
 make_nngp_graph <- function(coords,
                             m = 15,
                             ordering = "coord",
+                            st_scale = 1,
+                            space_time = FALSE,
                             n_omp_threads = 1,
                             nngp_search = c("fast", "brute")){
 
@@ -556,6 +592,7 @@ make_nngp_graph <- function(coords,
     stop("error: m must be a positive integer")
 
   m <- as.integer(m)
+  space_time <- isTRUE(space_time)
   nngp_search <- match.arg(nngp_search)
 
   if(m >= q)
@@ -565,13 +602,24 @@ make_nngp_graph <- function(coords,
       ") for an NNGP graph"
     )
 
-  ord_info <- compute_nngp_order(coords, ordering)
+  if(space_time && identical(ordering, "hilbert"))
+    stop("error: hilbert ordering is not supported for space-time NNGP graphs")
+
+  search_coords <- scale_nngp_search_coords(
+    coords,
+    st_scale = st_scale,
+    space_time = space_time
+  )
+  st_scale <- as.numeric(st_scale)
+
+  ord_info <- compute_nngp_order(search_coords, ordering)
   coords_ord <- coords[ord_info$ord, , drop = FALSE]
+  search_coords_ord <- search_coords[ord_info$ord, , drop = FALSE]
 
   indx <- switch(
     nngp_search,
-    fast = mkNNIndx(coords_ord, m, n_omp_threads),
-    brute = mkNNIndxBrute(coords_ord, m, n_omp_threads)
+    fast = mkNNIndx(search_coords_ord, m, n_omp_threads),
+    brute = mkNNIndxBrute(search_coords_ord, m, n_omp_threads)
   )
 
   nn_indx <- indx$nnIndx
@@ -589,6 +637,9 @@ make_nngp_graph <- function(coords,
     coords_ord = coords_ord,
     coord_names = colnames(coords) %||% paste0("coord", seq_len(d)),
     m = m,
+    st_scale = st_scale,
+    space_time = space_time,
+    search_coord_scale = if(space_time) c(rep(1, d - 1L), st_scale) else rep(1, d),
     nngp_search = nngp_search,
     ordering = ord_info$ordering_type,
     ordering_type = ord_info$ordering_type,
@@ -596,6 +647,8 @@ make_nngp_graph <- function(coords,
     ord_inv = ord_info$ord_inv,
     params = list(
       m = m,
+      st_scale = st_scale,
+      space_time = space_time,
       nngp_search = nngp_search,
       ordering = ordering
     ),

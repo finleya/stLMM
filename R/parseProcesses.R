@@ -136,7 +136,8 @@ parse_process_call <- function(lbl){
 nngp_graph_defaults <- function(){
   list(
     m = 15L,
-    ordering = "coord"
+    ordering = "coord",
+    st_scale = 1
   )
 }
 
@@ -191,6 +192,7 @@ resolve_nngp_spec <- function(spec,
 
   operator_params$m <- NULL
   operator_params$ordering <- NULL
+  operator_params$st_scale <- NULL
 
   ####################################################
   ## Correlation model
@@ -273,6 +275,20 @@ resolve_nngp_spec <- function(spec,
 
   graph_params$ordering <- ordering
 
+  st_scale <- graph_params$st_scale
+  if(!is.numeric(st_scale) || length(st_scale) != 1L ||
+     is.na(st_scale) || st_scale <= 0)
+    stop("error: nngp(): st_scale must be a positive scalar")
+
+  st_scale <- as.numeric(st_scale)
+  if(dist_mode != 2L && !isTRUE(all.equal(st_scale, 1)))
+    stop("error: nngp(): st_scale is only valid for space-time covariance models")
+
+  if(dist_mode == 2L && identical(ordering, "hilbert"))
+    stop("error: nngp(): hilbert ordering is not supported for space-time covariance models; use coord, default, maxmin, random, or a numeric ordering")
+
+  graph_params$st_scale <- st_scale
+
   ####################################################
 
   list(
@@ -324,10 +340,14 @@ build_nngp_components <- function(spec,
   if(is.numeric(graph_params$ordering) && length(graph_params$ordering) != n_node)
     stop("error: nngp(): custom ordering vector must have length q = ", n_node, " unique spatial nodes")
 
+  space_time <- identical(as.integer(registry[[operator_params$cov_model]]$distance_mode), 2L)
+
   graph <- make_nngp_graph(
     coords = coords_unique,
     m = graph_params$m,
     ordering = graph_params$ordering,
+    st_scale = graph_params$st_scale,
+    space_time = space_time,
     n_omp_threads = n_omp_threads,
     nngp_search = nngp_search
   )

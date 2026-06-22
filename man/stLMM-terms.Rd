@@ -50,14 +50,16 @@ process over unique coordinate rows. Spatial covariance models include
 \code{cov_model = "matern"} with parameters \code{phi} and \code{nu}.
 
 \code{nngp(coord1, coord2, ..., m = 15, ordering = "coord",
-cov_model = "exp")} adds a nearest-neighbor Gaussian process over unique
-coordinate rows. Supported \code{ordering} values are \code{"coord"},
+st_scale = 1, cov_model = "exp")} adds a nearest-neighbor Gaussian process over
+unique coordinate rows. Supported \code{ordering} values are \code{"coord"},
 \code{"default"}, \code{"maxmin"}, \code{"hilbert"}, \code{"random"}, or a
 numeric permutation. The \code{"maxmin"} ordering can be very slow for large
 numbers of unique coordinate rows because it uses an exact iterative
 max-min construction. The \code{"hilbert"} ordering uses only the first two
 coordinate columns to rank nodes; covariance distances still use all coordinate
-columns according to the selected \code{cov_model}.
+columns according to the selected \code{cov_model}. For space-time covariance
+models, \code{"hilbert"} is currently rejected because the implemented Hilbert
+ordering is two-dimensional.
 Space-time covariance models include \code{cov_model = "sep_exp"},
 \code{"multi_res_sep_exp"}, and \code{"gneiting"}.
 
@@ -117,14 +119,17 @@ coordinate is treated as time. For example,
 \code{nngp(lon, lat, time, cov_model = "sep_exp")} is not equivalent to
 \code{nngp(time, lon, lat, cov_model = "sep_exp")}.
 
-For new-node space-time NNGP prediction, \code{\link{predict.stLMM_recovery}}
-has an \code{st_scale} argument that affects nearest-neighbor ranking only.
-It multiplies the final coordinate before ranking fitted-support neighbors; it
-does not standardize spatial and temporal coordinates, does not change the
-fitted NNGP graph, and does not change covariance calculations after the
-neighbor set has been selected. Users should choose \code{st_scale} so the
-spatial and temporal extents are balanced in meaningful units for neighbor
-selection.
+For space-time NNGP terms, \code{st_scale} controls only the search geometry
+used to order nodes and choose nearest neighbors. The search distance is
+equivalent to Euclidean distance after replacing the final coordinate by
+\code{st_scale * time}. Thus \code{st_scale = 1} uses the coordinates as
+supplied, while \code{st_scale = s} treats one unit of the final coordinate as
+\code{s} spatial-coordinate units for graph construction. The original
+coordinates are still stored on the fitted graph and used for covariance
+evaluation, so \code{st_scale} does not change covariance parameter
+interpretation or prior calibration. Prediction from recovered NNGP fits
+inherits the fitted graph's \code{st_scale} by default and can override it via
+\code{\link{predict.stLMM_recovery}}.
 
 Process terms can be covariate-scaled with the same colon convention used for
 spatially varying coefficients, for example \code{x:nngp(lon, lat)} or

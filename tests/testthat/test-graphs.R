@@ -16,6 +16,29 @@ test_that("graph keys preserve coordinate order", {
   expect_false(identical(key_a, key_b))
 })
 
+test_that("NNGP graph keys include canonical space-time scaling", {
+  spec_default <- list(
+    fun = "nngp",
+    args = c("lon", "lat", "time"),
+    params = list(m = 2, cov_model = "sep_exp", ordering = "coord")
+  )
+  spec_one <- spec_default
+  spec_one$params$st_scale <- 1L
+  spec_ten <- spec_default
+  spec_ten$params$st_scale <- 10
+  spec_spatial <- spec_default
+  spec_spatial$params$cov_model <- "exp"
+
+  key_default <- stLMM:::build_graph_key(spec_default, stLMM:::process_graph_defaults("nngp"))
+  key_one <- stLMM:::build_graph_key(spec_one, stLMM:::process_graph_defaults("nngp"))
+  key_ten <- stLMM:::build_graph_key(spec_ten, stLMM:::process_graph_defaults("nngp"))
+  key_spatial <- stLMM:::build_graph_key(spec_spatial, stLMM:::process_graph_defaults("nngp"))
+
+  expect_equal(key_default, key_one)
+  expect_false(identical(key_default, key_ten))
+  expect_false(identical(key_default, key_spatial))
+})
+
 test_that("NNGP graph reuse requires identical coordinate order", {
   set.seed(4)
   dat <- data.frame(
@@ -66,6 +89,106 @@ test_that("NNGP graph reuse requires identical coordinate order", {
 
   expect_equal(shared$term_description$global$n_graphs, 1L)
   expect_equal(distinct$term_description$global$n_graphs, 2L)
+})
+
+test_that("NNGP st_scale is fit-time graph-only search geometry", {
+  coords <- cbind(
+    lon = c(0, 6, 0, 8),
+    lat = c(0, 0, 0, 0),
+    time = c(0, 10, 10, 5)
+  )
+  user_order <- seq_len(nrow(coords))
+
+  g_scaled <- stLMM:::make_nngp_graph(
+    coords,
+    m = 1,
+    ordering = user_order,
+    st_scale = 0.1,
+    space_time = TRUE,
+    nngp_search = "brute"
+  )
+  g_unscaled <- stLMM:::make_nngp_graph(
+    coords,
+    m = 1,
+    ordering = user_order,
+    st_scale = 1,
+    space_time = TRUE,
+    nngp_search = "brute"
+  )
+
+  search <- coords
+  search[, 3] <- search[, 3] * 0.1
+  expected_nn <- stLMM:::mkNNIndxBrute(search[user_order, , drop = FALSE], m = 1, n_omp_threads = 1)
+
+  expect_equal(g_scaled$coords, coords)
+  expect_equal(g_scaled$coords_ord, coords[user_order, , drop = FALSE])
+  expect_equal(g_scaled$st_scale, 0.1)
+  expect_true(g_scaled$space_time)
+  expect_equal(g_scaled$search_coord_scale, c(1, 1, 0.1))
+  expect_equal(g_scaled$nnIndx, expected_nn$nnIndx)
+  expect_false(identical(g_scaled$nnIndx, g_unscaled$nnIndx))
+})
+
+test_that("NNGP st_scale gives equivalent graphs under equivalent space units", {
+  coords_km <- cbind(
+    lon = c(0, 1, 2, 0, 1, 2, 0.5, 1.5),
+    lat = c(0, 0, 0, 1, 1, 1, 2, 2),
+    time = c(0, 1, 2, 0, 1, 2, 0.5, 1.5)
+  )
+  coords_m <- coords_km
+  coords_m[, 1:2] <- coords_m[, 1:2] * 1000
+
+  g_km <- stLMM:::make_nngp_graph(
+    coords_km,
+    m = 3,
+    ordering = "maxmin",
+    st_scale = 10,
+    space_time = TRUE,
+    nngp_search = "brute"
+  )
+  g_m <- stLMM:::make_nngp_graph(
+    coords_m,
+    m = 3,
+    ordering = "maxmin",
+    st_scale = 10000,
+    space_time = TRUE,
+    nngp_search = "brute"
+  )
+
+  expect_equal(g_km$ord, g_m$ord)
+  expect_equal(g_km$nnIndx, g_m$nnIndx)
+  expect_equal(g_km$nnIndxLU, g_m$nnIndxLU)
+})
+
+test_that("NNGP st_scale validation is space-time specific", {
+  spatial_spec <- list(
+    fun = "nngp",
+    args = c("lon", "lat"),
+    params = list(m = 2, cov_model = "exp", st_scale = 2)
+  )
+  space_time_hilbert <- list(
+    fun = "nngp",
+    args = c("lon", "lat", "time"),
+    params = list(m = 2, cov_model = "sep_exp", ordering = "hilbert")
+  )
+
+  expect_error(
+    stLMM:::resolve_nngp_spec(spatial_spec),
+    "space-time"
+  )
+  expect_error(
+    stLMM:::resolve_nngp_spec(space_time_hilbert),
+    "hilbert"
+  )
+  expect_error(
+    stLMM:::make_nngp_graph(
+      matrix(1:9, ncol = 3),
+      m = 1,
+      ordering = "hilbert",
+      space_time = TRUE
+    ),
+    "hilbert"
+  )
 })
 
 test_that("NNGP ordering options create expected graph metadata", {

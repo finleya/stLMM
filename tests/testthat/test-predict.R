@@ -896,7 +896,7 @@ test_that("compiled NNGP prediction neighbor search matches scaled R ordering", 
   expect_false(identical(got_1, got_unscaled))
 })
 
-test_that("NNGP st_scale affects only space-time covariance neighbor ranking", {
+test_that("NNGP st_scale is rejected for spatial covariance neighbor ranking", {
   support <- matrix(
     c(
       0, 0,
@@ -909,9 +909,157 @@ test_that("NNGP st_scale affects only space-time covariance neighbor ranking", {
   new_coords <- matrix(c(0, 4), nrow = 1)
 
   exp_unscaled <- stLMM:::nngp_prediction_neighbors(new_coords, support, 2, "exp", 1, "nngp_1", 1)
-  exp_scaled <- stLMM:::nngp_prediction_neighbors(new_coords, support, 2, "exp", 100, "nngp_1", 1)
+  expect_equal(dim(exp_unscaled), c(1L, 2L))
+  expect_error(
+    stLMM:::nngp_prediction_neighbors(new_coords, support, 2, "exp", 100, "nngp_1", 1),
+    "space-time"
+  )
+})
 
-  expect_equal(exp_scaled, exp_unscaled)
+test_that("Vecchia NNGP prediction graph orders and searches scaled space-time geometry", {
+  support <- matrix(
+    c(
+      -1, 0, 0,
+      12, 0, 10
+    ),
+    ncol = 3,
+    byrow = TRUE,
+    dimnames = list(NULL, c("lon", "lat", "time"))
+  )
+  new_coords <- matrix(
+    c(
+      0, 0, 0,
+      6, 0, 10,
+      0, 0, 10,
+      8, 0, 5
+    ),
+    ncol = 3,
+    byrow = TRUE,
+    dimnames = list(NULL, c("lon", "lat", "time"))
+  )
+  st_scale <- 0.1
+  new_scaled <- new_coords
+  support_scaled <- support
+  new_scaled[, 3] <- new_scaled[, 3] * st_scale
+  support_scaled[, 3] <- support_scaled[, 3] * st_scale
+  expected_ord <- stLMM:::compute_nngp_order(new_scaled, "maxmin")$ord
+
+  graph <- stLMM:::nngp_prediction_vecchia_graph(
+    new_coords = new_coords,
+    support = support,
+    m = 2,
+    ordering = "maxmin",
+    cov_model = "sep_exp",
+    st_scale = st_scale,
+    term_name = "nngp_1",
+    n_omp_threads = 1
+  )
+  search_all <- rbind(support_scaled, new_scaled[expected_ord, , drop = FALSE])
+  nn <- stLMM:::mkNNIndx(search_all, m = 2, n_omp_threads = 1)
+  expected_neighbor_index <- matrix(0L, nrow = nrow(new_coords), ncol = 2)
+  expected_neighbor_count <- integer(nrow(new_coords))
+  n_fit <- nrow(support)
+  n_all <- nrow(search_all)
+  for(j in seq_len(nrow(new_coords))){
+    row <- n_fit + j
+    start <- nn$nnIndxLU[row] + 1L
+    count <- nn$nnIndxLU[n_all + row]
+    expected_neighbor_count[j] <- count
+    if(count > 0L)
+      expected_neighbor_index[j, seq_len(count)] <- nn$nnIndx[start + seq_len(count) - 1L] + 1L
+  }
+
+  expect_equal(graph$ord, expected_ord)
+  expect_equal(graph$coords_all, rbind(support, new_coords[expected_ord, , drop = FALSE]))
+  expect_equal(graph$neighbor_index, expected_neighbor_index)
+  expect_equal(graph$neighbor_count, expected_neighbor_count)
+  expect_error(
+    stLMM:::nngp_prediction_vecchia_graph(
+      new_coords = new_coords,
+      support = support,
+      m = 2,
+      ordering = "hilbert",
+      cov_model = "sep_exp",
+      st_scale = 1,
+      term_name = "nngp_1",
+      n_omp_threads = 1
+    ),
+    "hilbert"
+  )
+})
+
+test_that("predict.stLMM_recovery inherits fitted NNGP st_scale by default", {
+  dat <- data.frame(
+    y = rep(0, 4),
+    lon = c(0, 6, 8, 12),
+    lat = c(0, 0, 0, 0),
+    time = c(0, 10, 5, 10)
+  )
+  newdata <- data.frame(lon = 0, lat = 0, time = 10)
+
+  fit <- suppressWarnings(stLMM(
+    y ~ 0 + nngp(lon, lat, time, m = 1, cov_model = "sep_exp",
+                 ordering = c(1, 2, 3, 4), st_scale = 0.1),
+    data = dat,
+    starting = list(
+      tau_sq = fixed(0.5),
+      nngp_1 = list(sigma_sq = fixed(1), phi = fixed(0.5), lambda = fixed(0.5))
+    ),
+    n_samples = 4,
+    warmup = FALSE,
+    verbose = FALSE
+  ))
+  rec <- recover(fit, sub_sample = list(start = 2, thin = 1))
+
+  inherited <- stLMM:::build_existing_support_prediction_backend(rec, newdata, st_scale = NULL)
+  explicit_fit <- stLMM:::build_existing_support_prediction_backend(rec, newdata, st_scale = 0.1)
+  override <- stLMM:::build_existing_support_prediction_backend(rec, newdata, st_scale = 1)
+
+  expect_equal(rec$backend$graphs[[1]]$st_scale, 0.1)
+  expect_equal(
+    inherited$process_maps[[1]]$neighbor_index,
+    explicit_fit$process_maps[[1]]$neighbor_index
+  )
+  expect_false(identical(
+    inherited$process_maps[[1]]$neighbor_index,
+    override$process_maps[[1]]$neighbor_index
+  ))
+
+  old_rec <- rec
+  old_rec$backend$graphs[[1]]$st_scale <- NULL
+  old_default <- stLMM:::build_existing_support_prediction_backend(old_rec, newdata, st_scale = NULL)
+  expect_equal(
+    old_default$process_maps[[1]]$neighbor_index,
+    override$process_maps[[1]]$neighbor_index
+  )
+
+  expect_equal(
+    stLMM:::resolve_prediction_st_scale(
+      st_scale = c(nngp_1 = 0.2),
+      term_name = "nngp_1",
+      graph = rec$backend$graphs[[1]],
+      cov_model = "sep_exp"
+    ),
+    0.2
+  )
+  expect_equal(
+    stLMM:::resolve_prediction_st_scale(
+      st_scale = list(nngp_1 = 0.3),
+      term_name = "nngp_1",
+      graph = rec$backend$graphs[[1]],
+      cov_model = "sep_exp"
+    ),
+    0.3
+  )
+  expect_error(
+    stLMM:::resolve_prediction_st_scale(
+      st_scale = list(),
+      term_name = "nngp_1",
+      graph = rec$backend$graphs[[1]],
+      cov_model = "sep_exp"
+    ),
+    "missing"
+  )
 })
 
 test_that("predict.stLMM_recovery works for all NNGP ordering options", {
