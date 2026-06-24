@@ -20,3 +20,9 @@
 ^vignettes/scotlip_data/
 ^pkgdown/
 ^docs/
+^cache/
+^vignettes/wa_data/
+^vignettes/scripts/
+^vignettes/wa-.*\.(qmd|R)$
+^vignettes/article-cache\.R$
+^vignettes/article-utils\.R$

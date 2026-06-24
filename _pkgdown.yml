@@ -39,6 +39,12 @@ articles:
   - a09-negative-binomial-counts
   - a10-metropolis-blocking-diagnostics
   - a11-runtime-performance
+- title: "Washington county biomass SAE series"
+  contents:
+  - wa-direct-car-time
+  - wa-direct-car-time-scaled-variance
+  - wa-direct-car-time-scaled-variance-tcc
+  - wa-direct-car-time-scaled-variance-tcc-svc
 - title: "Additional articles"
   contents:
   - a14-lme4-validation

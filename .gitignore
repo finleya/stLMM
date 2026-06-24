@@ -41,3 +41,4 @@ vignettes/.quarto/
 .codex/
 .DS_Store
 __MACOSX/
+cache/

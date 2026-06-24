@@ -1,0 +1,34 @@
+key,value
+created_at,2026-06-24 12:44:59 EDT
+fia_data_dir,/home/andy/Rdevel/stLMM-mee/vignette_prep/wa_vignettes/../data
+stunitco_gpkg,/home/andy/Rdevel/stLMM-public/inst/extdata/stunitco.gpkg
+tcc_input_dir,/mnt/disk1/TCC/tcc_conus_v2025-6-tifs
+tcc_output_dir,/home/andy/Rdevel/stLMM-mee/vignette_prep/wa_vignettes/cache/tcc
+reuse_pnw_tcc_blocks,TRUE
+clip_reused_pnw_tcc_blocks,TRUE
+pnw_block_dir,/mnt/disk2/pnw/tcc_mean_1mi_block_pnw
+prediction_years,1999-2025
+tcc_window_radius_m,1609.344
+tcc_kernel_size_pixels,109
+county_mean_tcc_source,exactextractr_zonal_mean_full_annual_block_raster
+grid_cells_per_county_year,400
+counties,39
+fia_units,Central;Inland Empire;Olympic Peninsula;Puget Sound;Southwest
+unit_plot_rows,20573
+unit_plot_missing_tcc_rows,0
+unit_plot_dropped_missing_tcc_rows,6
+direct_estimate_rows,1053
+direct_estimate_model_rows,859
+direct_estimate_single_plot_excluded_rows,17
+direct_estimate_variance_floor_rows,157
+direct_estimate_missing_county_tcc_rows,0
+direct_estimate_missing_vhat_rows,0
+direct_estimate_missing_model_vhat_rows,0
+prediction_grid_1km_full_rows,4742604
+prediction_grid_2km_full_rows,1186164
+prediction_grid_5km_full_rows,189918
+prediction_grid_10km_full_rows,47574
+prediction_grid_1km_sample_rows,421200
+prediction_grid_2km_sample_rows,398682
+prediction_grid_5km_sample_rows,184491
+prediction_grid_10km_sample_rows,47574
