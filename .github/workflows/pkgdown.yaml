@@ -40,6 +40,10 @@ jobs:
             any::scales
             any::spdep
             any::tidyr
+            any::tidyverse
+            any::kableExtra
+            any::sf
+            any::knitr
           needs: website
 
       - name: Restore article cache
