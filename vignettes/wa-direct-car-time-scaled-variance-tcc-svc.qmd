@@ -46,15 +46,15 @@ This is an **area-response** model: each row represents a county-year, not a plo
 
 Source code and data links for reproducing this article are collected below.
 
-::: {.callout-note icon=false}
-## Source Code
+::: {.stlmm-resource-box .stlmm-resource-source}
+<div class="stlmm-resource-title">Source Code</div>
 
 - [Quarto source](wa-direct-car-time-scaled-variance-tcc-svc.qmd)
 - [Extracted R code](wa-direct-car-time-scaled-variance-tcc-svc.R)
 :::
 
-::: {.callout-tip icon=false}
-## Data Bundle
+::: {.stlmm-resource-box .stlmm-resource-data}
+<div class="stlmm-resource-title">Data Bundle</div>
 
 - [Data manifest](wa_data/DATA_MANIFEST.csv)
 - [Direct-estimate table](wa_data/wa_direct_estimates.csv)
@@ -678,7 +678,7 @@ The practical interpretation is that the same TCC value can imply different biom
 
 The scaled residual variance model remains a separate part of the hierarchy. The supplied direct-estimate variances still describe relative precision across county-years, while the SVC changes how TCC enters the latent mean.
 
-The caveat is that TCC is itself strongly spatially patterned. In this dataset, low TCC, low biomass, and eastern counties often occur together, so the SVC can be partly confounded with broad east-west forest/nonforest structure. That makes the model useful for teaching and exploration, but the coefficient surface should be interpreted with diagnostic care.
+The caveat is that TCC is itself strongly spatially patterned. In this dataset, low TCC, low biomass, and eastern counties often occur together, so the SVC can be partly confounded with broad east-west forest/nonforest structure. That makes the model useful for exploring the software and workflow, but the coefficient surface should be interpreted with diagnostic care.
 
 WAIC can be used to compare this model with the global-TCC scaled-variance model because both use the same likelihood rows. This article leaves that comparison to the series bake-off so the focus stays on the modeling extension itself.
 

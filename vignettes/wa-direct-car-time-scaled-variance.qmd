@@ -46,15 +46,15 @@ This is an **area-response** model: each row represents a county-year, not a plo
 
 Source code and data links for reproducing this article are collected below.
 
-::: {.callout-note icon=false}
-## Source Code
+::: {.stlmm-resource-box .stlmm-resource-source}
+<div class="stlmm-resource-title">Source Code</div>
 
 - [Quarto source](wa-direct-car-time-scaled-variance.qmd)
 - [Extracted R code](wa-direct-car-time-scaled-variance.R)
 :::
 
-::: {.callout-tip icon=false}
-## Data Bundle
+::: {.stlmm-resource-box .stlmm-resource-data}
+<div class="stlmm-resource-title">Data Bundle</div>
 
 - [Data manifest](wa_data/DATA_MANIFEST.csv)
 - [Direct-estimate table](wa_data/wa_direct_estimates.csv)
@@ -626,7 +626,7 @@ The fixed-variance Fay-Herriot formulation treats the supplied direct-estimate v
 
 The scaled residual variance model is a practical relaxation. The supplied direct-estimate variances still describe relative precision across county-years, but the model estimates how strongly those variances should be trusted. With `n_eff_model`, lower-sample-size direct estimates shrink more toward a common variance scale, while higher-sample-size direct estimates stay closer to their supplied variance.
 
-Another option is to estimate one observation variance per direct estimate with `resid(model = "group", variance = ..., prior = "ig")`, or to use the effective-sample-size construction behind a Shannon-style prior [@Shannon2025]. Those models can be useful when there are relatively few direct estimates or when the sampler is configured for a higher-dimensional residual variance block. For this Washington county-year dataset, they add hundreds of variance parameters, so the scaled model is the cleaner teaching example.
+Another option is to estimate one observation variance per direct estimate with `resid(model = "group", variance = ..., prior = "ig")`, or to use the effective-sample-size construction behind a Shannon-style prior [@Shannon2025]. Those models can be useful when there are relatively few direct estimates or when the sampler is configured for a higher-dimensional residual variance block. For this Washington county-year dataset, they add hundreds of variance parameters, so the scaled model is the cleaner example.
 
 WAIC can be used to compare fixed- and scaled-variance formulations only when they are fit to the same likelihood rows. The fixed-variance article deliberately excludes the floored zero-variance rows, so a formal WAIC comparison would require a matched sensitivity fit. This article leaves that comparison to the series bake-off so the focus stays on the variance model itself.
 

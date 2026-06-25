@@ -46,15 +46,15 @@ This is an **area-response** model: each row represents a county-year, not a plo
 
 Source code and data links for reproducing this article are collected below.
 
-::: {.callout-note icon=false}
-## Source Code
+::: {.stlmm-resource-box .stlmm-resource-source}
+<div class="stlmm-resource-title">Source Code</div>
 
 - [Quarto source](wa-direct-car-time-scaled-variance-tcc.qmd)
 - [Extracted R code](wa-direct-car-time-scaled-variance-tcc.R)
 :::
 
-::: {.callout-tip icon=false}
-## Data Bundle
+::: {.stlmm-resource-box .stlmm-resource-data}
+<div class="stlmm-resource-title">Data Bundle</div>
 
 - [Data manifest](wa_data/DATA_MANIFEST.csv)
 - [Direct-estimate table](wa_data/wa_direct_estimates.csv)

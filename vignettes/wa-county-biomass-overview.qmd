@@ -1,0 +1,397 @@
+---
+title: "Washington county biomass SAE overview"
+subtitle: "Data, estimands, and the model tour"
+author: "Andrew O. Finley"
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-overflow: wrap
+    html-math-method: katex
+    css: stlmm-vignette.css
+execute:
+  warning: false
+  message: false
+bibliography: references.bib
+---
+
+```{r setup}
+#| code-summary: "Show setup code"
+library(sf)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "article-utils.R"))
+
+set.seed(1)
+theme_set(theme_bw(base_size = 12))
+```
+
+## Purpose
+
+This article opens a Washington county biomass small-area estimation series. The series uses a single prepared data bundle to show how `stLMM` can fit related area-level and unit-level models for county-level forest inventory inference over time.
+
+The series focuses on `stLMM` model structures and software workflows. It therefore uses a deliberately simplified working target that keeps the area-response and unit-response articles aimed at the same quantity. The model tour below defines that quantity and distinguishes it from FIA's formal forestland biomass estimands.
+
+The articles are tutorial templates. They use modest sampler settings and compact prediction grids so the examples are runnable. Production analyses should use longer chains, broader diagnostics, sensitivity checks, and application-specific validation.
+
+Each vignette in the series is reproducible from its Quarto source or extracted R code. Those source links will appear in a block near the top of each article. The data needed to run the vignettes will be available in a data bundle, along with the script used to generate the data.
+
+::: {.stlmm-resource-box .stlmm-resource-source}
+<div class="stlmm-resource-title">Source Code</div>
+
+- [Quarto source](wa-county-biomass-overview.qmd)
+- [Extracted R code](wa-county-biomass-overview.R)
+:::
+
+::: {.stlmm-resource-box .stlmm-resource-data}
+<div class="stlmm-resource-title">Data Bundle</div>
+
+- [Data manifest](wa_data/DATA_MANIFEST.csv)
+- [County geometry](wa_data/wa_counties.rds)
+- [FIA plot table](wa_data/wa_unit_plots.csv)
+- [Direct-estimate table](wa_data/wa_direct_estimates.csv)
+- [5 km prediction grid](wa_data/wa_unit_prediction_grid_5km.csv)
+- [10 km prediction grid](wa_data/wa_unit_prediction_grid_10km.csv)
+- [Data-prep script](scripts/build_wa_vignette_data.R)
+:::
+
+## Model Tour
+
+### Working Estimand
+
+The main series estimates the county-year mean of one prepared plot-level response, defined for plot row $j$ as
+
+$$
+y_j = \texttt{agb\_live\_mg\_ha}_j.
+$$
+
+This variable is live aboveground tree biomass density in Mg/ha computed from live trees on FIA forest conditions. Plot rows with no live forest-condition biomass are recorded as zero. For county $a$ and year $t$, the series target is the average value of this prepared response over the county-year support used for prediction or aggregation. This target is intentionally simple: it is the mean of the prepared plot response on the analysis support, not a formal FIA forestland ratio estimator.
+
+### Area-Response Models
+
+Area-response articles model county-year direct estimates of this target. The direct estimate is the sample mean of the prepared response among observed FIA plot rows,
+
+$$
+\hat{\theta}_{a,t} =
+\frac{1}{n_{a,t}}\sum_{j \in S_{a,t}} y_j,
+$$
+
+where $S_{a,t}$ is the set of FIA plot rows observed in county $a$ and year $t$, and $n_{a,t}$ is the number of rows in that set. The estimated sampling variance used in these tutorial examples is the usual sample variance of $y_j$ divided by $n_{a,t}$, with the direct-estimate articles documenting the model-ready treatment of zero and missing variance estimates.
+
+The area-response models are Fay-Herriot-style small-area models [@FayHerriot1979]: the direct estimate is noisy, the sampling variance tells the model how noisy it is, and spatial or space-time random effects borrow strength across neighboring counties and nearby years. The series starts with CAR-time smoothing of direct estimates, then adds county mean TCC as a remote-sensing covariate, scaled direct-estimate variances, and a spatially varying TCC effect. County-years with only one FIA plot are retained in the county-year support, but they are not treated as direct estimates because no sampling variance can be estimated from one plot.
+
+### Unit-Response Models
+
+Unit-response articles model the same prepared response at FIA plot locations and then aggregate predictions over a county-year grid using
+
+$$
+\theta_{a,t} =
+\operatorname{avg}_{j \in U_{a,t}} \hat{y}_j,
+$$
+
+where $U_{a,t}$ is the set of prediction-grid rows assigned to county $a$ and year $t$, and $\hat{y}_j$ is the model-based prediction for grid row $j$. The grid provides a common support for summarizing unit-response predictions at the county-year scale.
+
+The unit-response models are BHF-style unit-level SAE models [@BatteseHarterFuller1988]. The series starts with a simple BHF model with county random effects, then moves to spatial county effects, county-time CAR effects, FIA-unit-specific residual variances, and spatially varying TCC slopes.
+
+Because `agb_live_mg_ha` has a point mass at zero and a long positive tail, the unit-response sequence also includes two-stage models. For equivalence with the simplified direct estimates, the binary stage is `agb_live_mg_ha > 0`, and the continuous stage models positive `agb_live_mg_ha`. Predictions combine the two stages draw by draw, following the hurdle-style product used in related forest-biomass applications [@Finley01032011; @MayFinley2025SpatioTemporal].
+
+### FIA Design Deferred
+
+FIA `forested` status and `proportion_forested` describe forestland support, not merely whether the prepared response is positive. A model that uses those variables as the first stage moves the estimand toward an FIA forestland-support target. That is scientifically important, but it is different from the series target above.
+
+Formal FIA estimators use condition proportions, stratification and nonresponse adjustments, domain definitions such as forestland, and ratio estimators for per-acre quantities [@BechtoldPatterson2005; @StankeEtAl2020rFIA]. A final article in the series will focus on those FIA design choices. It will compare the series target with forestland biomass density, total live aboveground biomass on forestland divided by total forestland area, and all-land biomass density, total live aboveground biomass on forestland divided by total county land area.
+
+## Data Bundle
+
+```{r read-data}
+#| code-summary: "Show data-reading code"
+data_dir <- Sys.getenv(
+  "STLMM_WA_DATA_DIR",
+  unset = file.path(dirname(knitr::current_input(dir = TRUE)), "wa_data")
+)
+
+wa_counties <- read_rds(file.path(data_dir, "wa_counties.rds"))
+unit_plots <- read_csv(file.path(data_dir, "wa_unit_plots.csv"), show_col_types = FALSE)
+direct_estimates <- read_csv(file.path(data_dir, "wa_direct_estimates.csv"), show_col_types = FALSE)
+grid_5km <- read_csv(file.path(data_dir, "wa_unit_prediction_grid_5km.csv"), show_col_types = FALSE)
+grid_10km <- read_csv(file.path(data_dir, "wa_unit_prediction_grid_10km.csv"), show_col_types = FALSE)
+manifest <- read_csv(file.path(data_dir, "DATA_MANIFEST.csv"), show_col_types = FALSE)
+
+unit_plots <- unit_plots |>
+  mutate(
+    forested = as.logical(forested),
+    county_fips = as.character(county_fips)
+  )
+
+direct_estimates <- direct_estimates |>
+  mutate(county_fips = as.character(county_fips))
+
+grid_5km <- grid_5km |>
+  mutate(county_fips = as.character(county_fips))
+
+```
+
+The data pack is built from raw FIA tables and annual USDA Forest Service Tree Canopy Cover rasters [@USFSTreeCanopyCover2026]. Plot-level and grid-level TCC values are sampled from the annual TCC raster at each location. County-year mean TCC summarizes the annual TCC raster within each county.
+
+```{r data-pack-table}
+#| code-summary: "Show data-pack summary code"
+data_pack_summary <- tibble(
+  quantity = c(
+    "counties",
+    "FIA units",
+    "direct-estimate years",
+    "unit plot rows",
+    "direct-estimate rows",
+    "model-ready direct-estimate rows",
+    "single-plot rows retained but excluded",
+    "direct-estimate rows using variance floor",
+    "5 km prediction-grid rows",
+    "10 km prediction-grid rows",
+    "plot rows dropped for missing TCC"
+  ),
+  value = c(
+    nrow(wa_counties),
+    n_distinct(unit_plots$fia_unit),
+    n_distinct(direct_estimates$year),
+    nrow(unit_plots),
+    nrow(direct_estimates),
+    manifest_value("direct_estimate_model_rows"),
+    manifest_value("direct_estimate_single_plot_excluded_rows"),
+    manifest_value("direct_estimate_variance_floor_rows"),
+    manifest_value("prediction_grid_5km_full_rows"),
+    nrow(grid_10km),
+    manifest_value("unit_plot_dropped_missing_tcc_rows")
+  )
+) |>
+  mutate(value = fmt_int(as.numeric(value)))
+
+show_table(data_pack_summary, caption = "Washington county biomass vignette data bundle.")
+```
+
+## Data Characteristics
+
+```{r plot-summary-tables}
+#| code-summary: "Show plot summary table code"
+plot_status_summary <- unit_plots |>
+  mutate(status = if_else(forested, "forested", "nonforested")) |>
+  count(status, name = "plot_rows") |>
+  mutate(percent = 100 * plot_rows / sum(plot_rows))
+
+fia_unit_summary <- unit_plots |>
+  mutate(status = if_else(forested, "forested", "nonforested")) |>
+  count(fia_unit, fia_unit_name, status, name = "plot_rows") |>
+  pivot_wider(names_from = status, values_from = plot_rows, values_fill = 0) |>
+  mutate(
+    total = forested + nonforested,
+    forested_percent = 100 * forested / total
+  ) |>
+  arrange(fia_unit)
+
+show_table(
+  plot_status_summary |>
+    mutate(
+      plot_rows = fmt_int(plot_rows),
+      percent = fmt_num(percent, 1)
+    ),
+  caption = "Forested and nonforested FIA plot rows."
+)
+
+show_table(
+  fia_unit_summary |>
+    mutate(
+      across(c(forested, nonforested, total), fmt_int),
+      forested_percent = fmt_num(forested_percent, 1)
+    ),
+  caption = "FIA plot rows by Washington FIA unit."
+)
+```
+
+```{r direct-summary-table}
+#| code-summary: "Show direct-estimate summary code"
+direct_status_summary <- direct_estimates |>
+  count(direct_estimate_status, name = "county_years") |>
+  mutate(
+    status = recode(
+      direct_estimate_status,
+      modeled = "model-ready direct estimate",
+      no_plots = "no FIA plots",
+      single_plot_no_variance = "single plot; no design variance",
+      missing_model_variance = "missing model variance",
+      missing = "missing"
+    ),
+    percent = 100 * county_years / sum(county_years)
+  ) |>
+  select(status, county_years, percent)
+
+show_table(
+  direct_status_summary |>
+    mutate(
+      county_years = fmt_int(county_years),
+      percent = fmt_num(percent, 1)
+    ),
+  caption = "County-year direct-estimate status."
+)
+
+direct_year_summary <- direct_estimates |>
+  group_by(year) |>
+  summarise(
+    counties_with_plots = sum(n > 0),
+    counties_with_model_direct_estimates = sum(direct_estimate_in_model),
+    single_plot_county_years = sum(direct_estimate_status == "single_plot_no_variance"),
+    median_plot_n = median(n[n > 0], na.rm = TRUE),
+    median_direct_biomass = median(direct_biomass_model, na.rm = TRUE),
+    median_direct_se = median(direct_biomass_se_model, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+show_table(
+  direct_year_summary |>
+    filter(year %in% c(1999, 2005, 2010, 2015, 2020, 2024, 2025)) |>
+    mutate(
+      counties_with_model_direct_estimates = fmt_int(counties_with_model_direct_estimates),
+      single_plot_county_years = fmt_int(single_plot_county_years),
+      median_plot_n = fmt_num(median_plot_n, 0),
+      median_direct_biomass = fmt_num(median_direct_biomass, 1),
+      median_direct_se = fmt_num(median_direct_se, 1)
+    ),
+  caption = "Selected-year county direct-estimate characteristics."
+)
+```
+
+## Direct-Estimate Snapshot
+
+The map below shows model-ready direct estimates for selected years. These are county-year sample means of `agb_live_mg_ha` with model-ready variance handling for the area-response articles.
+
+```{r direct-estimate-map, fig.width=10, fig.height=7}
+#| echo: false
+#| fig-cap: "Model-ready county-year direct estimates of live aboveground biomass density for selected years. Grey counties have no model-ready direct estimate in that year."
+panel_years <- c(2005, 2010, 2015, 2020, 2024)
+
+direct_map_dat <- wa_counties |>
+  left_join(
+    direct_estimates |> filter(year %in% panel_years),
+    by = "county_fips"
+  )
+
+ggplot(direct_map_dat) +
+  geom_sf(aes(fill = direct_biomass_model), color = "grey80", linewidth = 0.12) +
+  coord_sf(expand = FALSE) +
+  facet_wrap(~ year, ncol = 3) +
+  scale_fill_gradientn(
+    colors = stlmm_palette(),
+    name = "Mg/ha",
+    na.value = "grey92"
+  ) +
+  labs(fill = "Mg/ha") +
+  theme(plot.margin = margin(0, 0, 0, 0))
+```
+
+## Plot-Value Snapshot
+
+The map below shows the plot-level response used by the unit-response articles. The direct estimates above are county-year sample means of the same variable.
+
+```{r plot-map, fig.width=10, fig.height=7}
+#| echo: false
+#| fig-cap: "FIA plot live aboveground biomass density for selected measurement years. County boundaries show the areal support used for county-level inference."
+plot_map_dat <- unit_plots |>
+  filter(year %in% panel_years)
+
+ggplot() +
+  geom_sf(data = wa_counties, fill = "grey96", color = "grey70", linewidth = 0.12) +
+  geom_point(
+    data = plot_map_dat,
+    aes(x = x, y = y, color = agb_live_mg_ha),
+    alpha = 0.65,
+    size = 0.55
+  ) +
+  coord_sf(crs = st_crs(wa_counties), expand = FALSE) +
+  facet_wrap(~ year, ncol = 3) +
+  scale_color_gradientn(
+    colors = stlmm_palette(),
+    name = "Mg/ha",
+    trans = "sqrt"
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+```
+
+## County Mean TCC
+
+County-year mean TCC is the area-level covariate used in the direct-estimate models. It summarizes the annual TCC raster within each county.
+
+```{r county-tcc-map, fig.width=10, fig.height=7}
+#| echo: false
+#| fig-cap: "County mean TCC for selected years. Values summarize the annual TCC raster over each county."
+tcc_map_dat <- wa_counties |>
+  left_join(
+    direct_estimates |> filter(year %in% panel_years),
+    by = "county_fips"
+  )
+
+ggplot(tcc_map_dat) +
+  geom_sf(aes(fill = county_mean_tcc), color = "grey80", linewidth = 0.12) +
+  coord_sf(expand = FALSE) +
+  facet_wrap(~ year, ncol = 3) +
+  scale_fill_gradientn(
+    colors = stlmm_palette(),
+    name = "% TCC",
+    limits = c(0, 100),
+    na.value = "grey92"
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+```
+
+## Prediction Grid TCC
+
+Unit-level prediction uses grid rows that inherit county and FIA-unit labels. The article data bundle includes 5 km and 10 km grid files. The full grids are systematic in the projected coordinate system. The 5 km grid is the default grid for model articles, and the 10 km grid is useful for faster checks.
+
+```{r grid-tcc-map, fig.width=10, fig.height=7}
+#| echo: false
+#| fig-cap: "Systematic 5 km prediction-grid TCC values for selected years. These are point samples from the annual TCC rasters used for plot-level TCC."
+grid_plot_dat <- grid_5km |>
+  filter(year %in% panel_years)
+
+ggplot() +
+  geom_sf(data = wa_counties, fill = "grey96", color = "grey75", linewidth = 0.12) +
+  geom_point(
+    data = grid_plot_dat,
+    aes(x = x, y = y, color = tcc_mean),
+    size = 0.18,
+    alpha = 0.75
+  ) +
+  coord_sf(crs = st_crs(wa_counties), expand = FALSE) +
+  facet_wrap(~ year, ncol = 3) +
+  scale_color_gradientn(
+    colors = stlmm_palette(),
+    name = "% TCC",
+    limits = c(0, 100)
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 0))
+```
+
+## Comparing Models
+
+The articles that follow build the models as a ladder. Each step changes one part of the analysis, such as the smoothing structure, the TCC covariate, the observation-variance model, or the unit-level response formulation. Reading across the series helps make those choices visible.
+
+Model results will be reported on a common county-year scale so the articles can be compared directly. The main summaries are:
+
+- posterior mean, median, and 95% credible interval for the county-year mean prepared biomass response;
+- direct-estimate information where it is available;
+- posterior uncertainty summaries on the same Mg/ha scale;
+- the response and aggregation target used by the model: area-level direct estimates, single-stage unit responses, or positive-biomass two-stage unit responses.
+
+The final comparison article will look at a few practical questions:
+
+1. How much smoothing does the model add relative to the direct estimates?
+2. How much do TCC covariates change county-year predictions?
+3. Where do spatial and space-time effects matter most?
+4. Does FIA-unit heteroskedasticity change uncertainty in a visible way?
+5. How different are single-stage Gaussian estimates from positive-biomass two-stage estimates for the same prepared-response target?
+
+The comparison is not meant to choose one universal best model. Its purpose is to show what each model assumes, where it borrows strength, what auxiliary information it uses, and how those choices affect county-level forest inventory inference.
+
+The final article will return to a question deferred in this overview: what changes when the target follows FIA forestland definitions rather than the simplified working target used in the model tour? That article will look at forestland support, condition proportions, FIA-style direct estimators, and the corresponding unit-response formulations for forestland and all-land biomass density.

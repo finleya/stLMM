@@ -37,7 +37,7 @@ knitr::purl(input, output = tmp, quiet = TRUE, documentation = 0)
 code <- readLines(tmp, warn = FALSE)
 
 # Quarto chunk options are valid comments, but they distract from the
-# downloadable teaching script.
+# downloadable article script.
 code <- code[!grepl("^#\\|", code)]
 
 writeLines(code, output)
