@@ -52,5 +52,6 @@ Config/Needs/website:
     dplyr,
     lme4,
     nimble,
+    patchwork,
     spdep,
     tidyr

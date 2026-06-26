@@ -44,6 +44,7 @@ jobs:
             any::tidyr
             any::tidyverse
             any::kableExtra
+            any::patchwork
             any::sf
             any::knitr
           needs: website
