@@ -26,3 +26,5 @@
 ^vignettes/wa-.*\.(qmd|R)$
 ^vignettes/article-cache\.R$
 ^vignettes/article-utils\.R$
+^vignettes/colville_data/
+^vignettes/colville-stlmm-vignette\.(qmd|R)$

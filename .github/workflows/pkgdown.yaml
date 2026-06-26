@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache/articles
-          key: ${{ runner.os }}-article-cache-${{ hashFiles('vignettes/wa-*.qmd', 'vignettes/article-cache.R', 'vignettes/article-utils.R', 'vignettes/wa_data/**') }}
+          key: ${{ runner.os }}-article-cache-${{ hashFiles('vignettes/wa-*.qmd', 'vignettes/colville-stlmm-vignette.qmd', 'vignettes/article-cache.R', 'vignettes/article-utils.R', 'vignettes/wa_data/**', 'vignettes/colville_data/**') }}
 
       - name: Install stLMM
         run: R CMD INSTALL .
