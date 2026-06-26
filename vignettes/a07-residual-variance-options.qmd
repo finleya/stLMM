@@ -183,11 +183,11 @@ summary(fit_group_variance)
 ```
 
 ```{r group-variance-summary}
-variance_cols <- group_name
+variance_cols <- paste0("tau_sq_", group_name)
 variance_draws <- as_samples(fit_group_variance, metadata = FALSE)[, variance_cols, drop = FALSE]
 group_variance_summary <- data.frame(
-  group = variance_cols,
-  truth = group_sd[variance_cols]^2,
+  group = group_name,
+  truth = group_sd[group_name]^2,
   posterior_mean = colMeans(variance_draws),
   posterior_lower = NA_real_,
   posterior_upper = NA_real_
