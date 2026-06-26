@@ -274,7 +274,8 @@ test_that("fixed residual group variances do not require priors", {
   )
 
   expect_equal(fit$adaptive_metropolis$parameter_labels, "log(residual_variance_2)")
-  expect_equal(unique(fit$residual_variance_samples[, "a"]), 0.4)
-  expect_equal(unique(fit$residual_variance_samples[, "c"]), 1.2)
-  expect_gt(length(unique(fit$residual_variance_samples[, "b"])), 1)
+  expect_equal(colnames(fit$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
+  expect_equal(unique(fit$residual_variance_samples[, "tau_sq_a"]), 0.4)
+  expect_equal(unique(fit$residual_variance_samples[, "tau_sq_c"]), 1.2)
+  expect_gt(length(unique(fit$residual_variance_samples[, "tau_sq_b"])), 1)
 })

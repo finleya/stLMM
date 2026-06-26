@@ -1913,7 +1913,7 @@ stLMM <- function(formula, data = parent.frame(),
         if(sampled_residual_variance && !is.null(out$residual_variance_samples) &&
            is.matrix(out$residual_variance_samples)){
             if(identical(backend_i$residual_model$type, "group_ig_variance"))
-                colnames(out$residual_variance_samples) <- backend_i$residual_model$groups
+                colnames(out$residual_variance_samples) <- paste0("tau_sq_", backend_i$residual_model$groups)
             else if(identical(backend_i$residual_model$type, "scaled_variance"))
                 colnames(out$residual_variance_samples) <- backend_i$residual_model$parameter_names
         }

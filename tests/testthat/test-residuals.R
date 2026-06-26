@@ -75,7 +75,7 @@ test_that("resid formula term supports grouped and scaled residual variance mode
   )
   expect_identical(fit_group$backend$residual_model$type, "group_ig_variance")
   expect_identical(fit_group$backend$residual_model$method, "prior")
-  expect_equal(colnames(fit_group$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_group$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
 
   fit_shannon <- stLMM(
     y ~ x + resid(model = "group", group = group, variance = vhat, n = n_eff, prior = "shannon"),
@@ -84,7 +84,7 @@ test_that("resid formula term supports grouped and scaled residual variance mode
     verbose = FALSE
   )
   expect_identical(fit_shannon$backend$residual_model$method, "shannon")
-  expect_equal(colnames(fit_shannon$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_shannon$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
 
   fit_scaled <- stLMM(
     y ~ x + resid(model = "scaled", variance = vhat, n = n_eff),
@@ -252,7 +252,7 @@ test_that("group IG residual variance can be fixed and matches fixed residual va
   )
 
   expect_null(fit_group$tau_sq_samples)
-  expect_equal(colnames(fit_group$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_group$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
   expect_equal(unname(fit_group$residual_variance_samples[1, ]), c(0.25, 0.50, 0.90))
   expect_equal(fit_group$beta_samples, fit_fixed$beta_samples, tolerance = 1e-12)
 })
@@ -287,7 +287,7 @@ test_that("generic group residual variance can be fixed and matches fixed residu
   )
 
   expect_null(fit_group$tau_sq_samples)
-  expect_equal(colnames(fit_group$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_group$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
   expect_equal(unname(fit_group$residual_variance_samples[1, ]), unname(group_var))
   expect_equal(fit_group$beta_samples, fit_fixed$beta_samples, tolerance = 1e-12)
 })
@@ -328,7 +328,7 @@ test_that("generic group residual variance accepts half-t and named priors", {
     verbose = FALSE
   )
 
-  expect_equal(colnames(fit_named$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_named$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
 
   fit_default_controls <- stLMM(
     y ~ x + resid(model = "group", group = group),
@@ -338,7 +338,7 @@ test_that("generic group residual variance accepts half-t and named priors", {
     verbose = FALSE
   )
 
-  expect_equal(colnames(fit_default_controls$residual_variance_samples), letters[1:3])
+  expect_equal(colnames(fit_default_controls$residual_variance_samples), paste0("tau_sq_", letters[1:3]))
   expect_true(all(fit_default_controls$residual_variance_samples > 0))
 
   expect_error(
