@@ -46,6 +46,8 @@ articles:
   - wa-direct-car-time-scaled-variance
   - wa-direct-car-time-scaled-variance-tcc
   - wa-direct-car-time-scaled-variance-tcc-svc
+  - wa-unit-bhf-ladder
+  - wa-unit-two-stage-car-time-tcc
 - title: "Additional articles"
   contents:
   - a14-lme4-validation

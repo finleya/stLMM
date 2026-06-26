@@ -20,19 +20,8 @@ if (!file.exists(input)) {
   stop("Input file does not exist: ", input, call. = FALSE)
 }
 
-old_extract <- Sys.getenv("STLMM_EXTRACT_R", unset = NA_character_)
-on.exit({
-  if (is.na(old_extract)) {
-    Sys.unsetenv("STLMM_EXTRACT_R")
-  } else {
-    Sys.setenv(STLMM_EXTRACT_R = old_extract)
-  }
-}, add = TRUE)
-
-Sys.setenv(STLMM_EXTRACT_R = "true")
-
 tmp <- tempfile(fileext = ".R")
-knitr::purl(input, output = tmp, quiet = TRUE, documentation = 0)
+invisible(knitr::purl(input, output = tmp, quiet = TRUE, documentation = 0))
 
 code <- readLines(tmp, warn = FALSE)
 

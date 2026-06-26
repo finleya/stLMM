@@ -20,6 +20,8 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      STLMM_RUN_LONG_ARTICLES: true
+      STLMM_ARTICLE_CACHE_DIR: ${{ github.workspace }}/cache/articles
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +52,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache/articles
-          key: ${{ runner.os }}-article-cache-${{ hashFiles('vignettes/wa-direct-*.qmd', 'vignettes/article-cache.R', 'vignettes/article-utils.R', 'vignettes/wa_data/**') }}
+          key: ${{ runner.os }}-article-cache-${{ hashFiles('vignettes/wa-*.qmd', 'vignettes/article-cache.R', 'vignettes/article-utils.R', 'vignettes/wa_data/**') }}
 
       - name: Install stLMM
         run: R CMD INSTALL .

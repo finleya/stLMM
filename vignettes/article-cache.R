@@ -10,10 +10,14 @@ run_long_articles <- function() {
   identical(tolower(Sys.getenv("STLMM_RUN_LONG_ARTICLES", unset = "false")), "true")
 }
 
+refresh_article_cache <- function() {
+  identical(tolower(Sys.getenv("STLMM_REFRESH_ARTICLE_CACHE", unset = "false")), "true")
+}
+
 use_article_cache <- function(article_id, cache_name, code) {
   cache_file <- article_cache_file(article_id, cache_name)
 
-  if (!run_long_articles() && file.exists(cache_file)) {
+  if (file.exists(cache_file) && !refresh_article_cache()) {
     return(readRDS(cache_file))
   }
 

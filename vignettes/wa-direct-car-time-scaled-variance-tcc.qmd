@@ -26,7 +26,7 @@ library(tidyverse)
 library(knitr)
 library(kableExtra)
 
-source(file.path(dirname(knitr::current_input(dir = TRUE)), "article-utils.R"))
+source("article-utils.R")
 
 set.seed(1)
 theme_set(theme_bw(base_size = 12))
@@ -34,7 +34,7 @@ theme_set(theme_bw(base_size = 12))
 article_id <- "wa-direct-car-time-scaled-variance-tcc"
 data_dir <- Sys.getenv(
   "STLMM_WA_DATA_DIR",
-  unset = file.path(dirname(knitr::current_input(dir = TRUE)), "wa_data")
+  unset = file.path(article_helper_dir, "wa_data")
 )
 ```
 
@@ -56,7 +56,6 @@ Source code and data links for reproducing this article are collected below.
 ::: {.stlmm-resource-box .stlmm-resource-data}
 <div class="stlmm-resource-title">Data Bundle</div>
 
-- [Data manifest](wa_data/DATA_MANIFEST.csv)
 - [Direct-estimate table](wa_data/wa_direct_estimates.csv)
 - [County geometry](wa_data/wa_counties.rds)
 - [Data-prep script](scripts/build_wa_vignette_data.R)
@@ -331,7 +330,7 @@ In the model call below, `direct_biomass_model` is $\hat{y}_i$, `county_mean_tcc
 
 ```{r fit-model}
 #| code-fold: false
-#| eval: !expr identical(Sys.getenv("STLMM_EXTRACT_R"), "true")
+#| eval: false
 #| purl: true
 fit <- stLMM(
   direct_biomass_model ~
@@ -429,7 +428,7 @@ Structured process terms are collapsed during Gaussian model fitting. The `recov
 
 ```{r recover-model}
 #| code-fold: false
-#| eval: !expr identical(Sys.getenv("STLMM_EXTRACT_R"), "true")
+#| eval: false
 #| purl: true
 rec <- recover(
   fit,
@@ -457,7 +456,7 @@ The fitted values are posterior draws of the latent county-year mean for the sam
 ```{r fitted-county-years}
 #| code-summary: "Show fitted-value summary code"
 #| code-fold: true
-#| eval: !expr identical(Sys.getenv("STLMM_EXTRACT_R"), "true")
+#| eval: false
 #| purl: true
 fitted_draws <- as.matrix(as_samples(fitted(rec, summary = FALSE), metadata = FALSE))
 

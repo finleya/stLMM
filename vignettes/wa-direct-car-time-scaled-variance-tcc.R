@@ -4,7 +4,7 @@ library(tidyverse)
 library(knitr)
 library(kableExtra)
 
-source(file.path(dirname(knitr::current_input(dir = TRUE)), "article-utils.R"))
+source("article-utils.R")
 
 set.seed(1)
 theme_set(theme_bw(base_size = 12))
@@ -12,7 +12,7 @@ theme_set(theme_bw(base_size = 12))
 article_id <- "wa-direct-car-time-scaled-variance-tcc"
 data_dir <- Sys.getenv(
   "STLMM_WA_DATA_DIR",
-  unset = file.path(dirname(knitr::current_input(dir = TRUE)), "wa_data")
+  unset = file.path(article_helper_dir, "wa_data")
 )
 
 wa_counties <- read_rds(file.path(data_dir, "wa_counties.rds"))
@@ -185,56 +185,56 @@ summary_parameters <- c(
 
 
 
-fit <- stLMM(
-  direct_biomass_model ~
-    county_mean_tcc_scaled +
-    car_time(county_fips, year, graph = g, car_model = "leroux") +
-    resid(
-      model = "scaled",
-      variance = direct_biomass_vhat_model,
-      n = n_eff_model,
-      shrinkage = 10,
-      kappa_log_prior = c(mean = 0, sd = 1)
-    ),
-  data = direct_estimates,
-  priors = list(
-    car_time_1 = list(
-      sigma_sq = half_t(
-        df = 3,
-        scale = sd(observed_direct$direct_biomass_model, na.rm = TRUE)
-      ),
-      rho = uniform(0.01, 0.99),
-      phi = uniform(-0.99, 0.99)
-    )
-  ),
-  n_samples = n_samples,
-  chains = chains,
-  chain_control = chain_control,
-  warmup = warmup_control,
-  verbose = TRUE,
-  n_report = 500
-)
-
-fit_summary <- summary(fit, burn = burnin, parameters = summary_parameters)
+## fit <- stLMM(
+##   direct_biomass_model ~
+##     county_mean_tcc_scaled +
+##     car_time(county_fips, year, graph = g, car_model = "leroux") +
+##     resid(
+##       model = "scaled",
+##       variance = direct_biomass_vhat_model,
+##       n = n_eff_model,
+##       shrinkage = 10,
+##       kappa_log_prior = c(mean = 0, sd = 1)
+##     ),
+##   data = direct_estimates,
+##   priors = list(
+##     car_time_1 = list(
+##       sigma_sq = half_t(
+##         df = 3,
+##         scale = sd(observed_direct$direct_biomass_model, na.rm = TRUE)
+##       ),
+##       rho = uniform(0.01, 0.99),
+##       phi = uniform(-0.99, 0.99)
+##     )
+##   ),
+##   n_samples = n_samples,
+##   chains = chains,
+##   chain_control = chain_control,
+##   warmup = warmup_control,
+##   verbose = TRUE,
+##   n_report = 500
+## )
+## 
+## fit_summary <- summary(fit, burn = burnin, parameters = summary_parameters)
 
 
 
 fit_summary
 
-rec <- recover(
-  fit,
-  sub_sample = posterior_sub_sample
-)
+## rec <- recover(
+##   fit,
+##   sub_sample = posterior_sub_sample
+## )
 
 
 
-fitted_draws <- as.matrix(as_samples(fitted(rec, summary = FALSE), metadata = FALSE))
-
-county_year_summary <- direct_estimates |>
-  bind_cols(
-    summarize_draw_matrix(fitted_draws, prefix = "theta_") |>
-      select(-prediction_row)
-  )
+## fitted_draws <- as.matrix(as_samples(fitted(rec, summary = FALSE), metadata = FALSE))
+## 
+## county_year_summary <- direct_estimates |>
+##   bind_cols(
+##     summarize_draw_matrix(fitted_draws, prefix = "theta_") |>
+##       select(-prediction_row)
+##   )
 
 
 

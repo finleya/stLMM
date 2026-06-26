@@ -1,4 +1,4 @@
-article_helper_dir <- dirname(knitr::current_input(dir = TRUE))
+article_helper_dir <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 
 source(file.path(article_helper_dir, "utils.R"))
 source(file.path(article_helper_dir, "article-cache.R"))
