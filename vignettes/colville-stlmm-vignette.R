@@ -4,13 +4,12 @@ library(Matrix)
 library(stLMM)
 library(RhpcBLASctl)
 
-source("article-utils.R")
+colville_data_dir <- "colville_data"
+
+source(file.path(colville_data_dir, "utils.R"))
+source(file.path(colville_data_dir, "article-cache.R"))
 
 article_id <- "colville-stlmm-vignette"
-colville_data_dir <- Sys.getenv(
-  "STLMM_COLVILLE_DATA_DIR",
-  unset = file.path(article_helper_dir, "colville_data", "derived")
-)
 
 set.seed(1)
 theme_set(theme_bw(base_size = 12))

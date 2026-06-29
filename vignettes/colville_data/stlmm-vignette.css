@@ -1,0 +1,94 @@
+.stlmm-note {
+  border-left: 4px solid #6C8FB6;
+  padding: 0.6rem 0.9rem;
+  background: #f7f9fb;
+}
+
+.stlmm-resource-box {
+  border: 1px solid #c9d6e5;
+  border-radius: 6px;
+  background: #f7f9fb;
+  margin: 0.85rem 0 1rem 0;
+  overflow: hidden;
+}
+
+.stlmm-resource-title {
+  margin: 0;
+  padding: 0.55rem 0.85rem;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.25;
+  color: #24384f;
+  background: #dfeaf5;
+  border-bottom: 1px solid #c9d6e5;
+}
+
+.stlmm-resource-box > p,
+.stlmm-resource-box > ul,
+.stlmm-resource-box > ol {
+  margin: 0.65rem 0.9rem;
+}
+
+.stlmm-resource-box > ul,
+.stlmm-resource-box > ol {
+  padding-left: 1.35rem;
+}
+
+.stlmm-resource-data {
+  border-color: #c9ddcf;
+  background: #f6faf7;
+}
+
+.stlmm-resource-data .stlmm-resource-title {
+  color: #24452d;
+  background: #dfeee3;
+  border-bottom-color: #c9ddcf;
+
+.stlmm-note {
+  border-left: 4px solid #6C8FB6;
+  padding: 0.6rem 0.9rem;
+  background: #f7f9fb;
+}
+
+.cell-output-display,
+.quarto-figure,
+figure {
+  margin-top: 0.2rem !important;
+  margin-bottom: 0.25rem !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell-output-display > div,
+.cell-output-display figure,
+.cell-output-display p,
+.cell-output-display img,
+.quarto-figure p,
+figure p,
+img.figure-img {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.cell > details.code-fold {
+  margin-bottom: 0.2rem !important;
+}
+
+.cell {
+  margin-bottom: 0.7rem !important;
+}
+
+.stlmm-table {
+  width: 100%;
+  table-layout: auto;
+  margin-top: 0.25rem;
+  margin-bottom: 0.65rem;
+}
+
+.stlmm-table th,
+.stlmm-table td {
+  vertical-align: top;
+  white-space: normal;
+}
