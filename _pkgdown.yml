@@ -48,6 +48,7 @@ articles:
   - wa-direct-car-time-scaled-variance-tcc-svc
   - wa-unit-bhf-ladder
   - wa-unit-two-stage-car-time-tcc
+  - wa-unit-two-stage-car-time-tcc-fiaunit-var
 - title: "Additional articles"
   contents:
   - colville-stlmm-vignette
