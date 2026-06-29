@@ -161,7 +161,7 @@ year_coverage <- direct_estimates |>
 
 show_table(
   year_coverage |>
-    filter(year %in% c(1999, 2005, 2010, 2015, 2020, 2024, 2025)) |>
+    filter(year %in% c(2016, 2018, 2020, 2022, 2024, 2025)) |>
     mutate(
       median_plot_n = fmt_num(median_plot_n, 0),
       median_direct_biomass = fmt_num(median_direct_biomass, 1),
@@ -512,7 +512,7 @@ The next figure compares observed direct estimates with model-smoothed county-ye
 
 ```{r direct-vs-smoothed-map, fig.width=10, fig.height=3.8}
 #| code-summary: "Show direct-versus-smoothed map code"
-panel_years <- c(2005, 2010, 2015, 2020, 2024)
+panel_years <- c(2016, 2018, 2020, 2022, 2024)
 
 map_dat <- wa_counties |>
   left_join(

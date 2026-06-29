@@ -72,7 +72,7 @@ year_coverage <- direct_estimates |>
 
 show_table(
   year_coverage |>
-    filter(year %in% c(1999, 2005, 2010, 2015, 2020, 2024, 2025)) |>
+    filter(year %in% c(2016, 2018, 2020, 2022, 2024, 2025)) |>
     mutate(
       median_plot_n = fmt_num(median_plot_n, 0),
       median_direct_biomass = fmt_num(median_direct_biomass, 1),
@@ -205,7 +205,7 @@ show_table(
   caption = "Highest 2024 model-smoothed county-year biomass means, with 95% posterior credible intervals."
 )
 
-panel_years <- c(2005, 2010, 2015, 2020, 2024)
+panel_years <- c(2016, 2018, 2020, 2022, 2024)
 
 map_dat <- wa_counties |>
   left_join(

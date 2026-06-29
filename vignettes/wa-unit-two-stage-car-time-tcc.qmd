@@ -684,7 +684,7 @@ The maps separate the two model stages before showing the recombined series targ
 ```{r prediction-map, fig.width=10, fig.height=7.2}
 #| code-summary: "Show prediction map code"
 #| eval: !expr identical(tolower(Sys.getenv("STLMM_RUN_LONG_ARTICLES", unset = "false")), "true")
-panel_years <- c(2005, 2010, 2015, 2020, 2024)
+panel_years <- c(2016, 2018, 2020, 2022, 2024)
 
 map_dat <- wa_counties |>
   left_join(

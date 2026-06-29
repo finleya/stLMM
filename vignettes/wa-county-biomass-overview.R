@@ -133,7 +133,7 @@ direct_year_summary <- direct_estimates |>
 
 show_table(
   direct_year_summary |>
-    filter(year %in% c(1999, 2005, 2010, 2015, 2020, 2024, 2025)) |>
+    filter(year %in% c(2016, 2018, 2020, 2022, 2024, 2025)) |>
     mutate(
       counties_with_model_direct_estimates = fmt_int(counties_with_model_direct_estimates),
       single_plot_county_years = fmt_int(single_plot_county_years),
@@ -144,7 +144,7 @@ show_table(
   caption = "Selected-year county direct-estimate characteristics."
 )
 
-panel_years <- c(2005, 2010, 2015, 2020, 2024)
+panel_years <- c(2016, 2018, 2020, 2022, 2024)
 
 direct_map_dat <- wa_counties |>
   left_join(

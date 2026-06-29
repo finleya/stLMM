@@ -327,7 +327,7 @@ aggregate_grid_draws <- function(draws, grid, prefix = "") {
 ##   caption = "Highest 2024 county-year posterior predictive means from the two-stage CAR-time TCC model."
 ## )
 
-## panel_years <- c(2005, 2010, 2015, 2020, 2024)
+## panel_years <- c(2016, 2018, 2020, 2022, 2024)
 ## 
 ## map_dat <- wa_counties |>
 ##   left_join(

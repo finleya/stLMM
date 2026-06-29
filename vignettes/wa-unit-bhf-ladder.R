@@ -134,7 +134,7 @@ year_summary <- unit_plots |>
 
 show_table(
   year_summary |>
-    filter(year %in% c(2002, 2005, 2010, 2015, 2020, 2024)) |>
+    filter(year %in% c(2016, 2018, 2020, 2022, 2024)) |>
     mutate(
       positive_biomass_rate = fmt_num(positive_biomass_rate, 2),
       mean_response = fmt_num(mean_response, 1),
@@ -378,7 +378,7 @@ aggregate_grid_draws <- function(draws, grid, prefix = "") {
 ##   caption = "Highest 2024 county-year posterior predictive means by unit-response model."
 ## )
 
-## panel_years <- c(2005, 2010, 2015, 2020, 2024)
+## panel_years <- c(2016, 2018, 2020, 2022, 2024)
 ## 
 ## map_dat <- wa_counties |>
 ##   left_join(
