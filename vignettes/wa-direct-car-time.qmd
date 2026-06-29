@@ -32,10 +32,7 @@ set.seed(1)
 theme_set(theme_bw(base_size = 12))
 
 article_id <- "wa-direct-car-time"
-data_dir <- Sys.getenv(
-  "STLMM_WA_DATA_DIR",
-  unset = file.path(article_helper_dir, "wa_data")
-)
+data_dir <- "wa_data"
 ```
 
 ## Purpose
@@ -56,9 +53,7 @@ Source code and data links for reproducing this article are collected below.
 ::: {.stlmm-resource-box .stlmm-resource-data}
 <div class="stlmm-resource-title">Data Bundle</div>
 
-- [Direct-estimate table](wa_data/wa_direct_estimates.csv)
-- [County geometry](wa_data/wa_counties.rds)
-- [Data-prep script](scripts/build_wa_vignette_data.R)
+- [Download Washington biomass data](wa_data.zip)
 :::
 
 ## Model

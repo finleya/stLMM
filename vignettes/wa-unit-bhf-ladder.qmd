@@ -32,10 +32,7 @@ set.seed(1)
 theme_set(theme_bw(base_size = 12))
 
 article_id <- "wa-unit-bhf-ladder"
-data_dir <- Sys.getenv(
-  "STLMM_WA_DATA_DIR",
-  unset = file.path(article_helper_dir, "wa_data")
-)
+data_dir <- "wa_data"
 ```
 
 ## Purpose
@@ -57,11 +54,7 @@ This is a **unit-response** workflow: the model is fit to FIA plot rows, predict
 ::: {.stlmm-resource-box .stlmm-resource-data}
 <div class="stlmm-resource-title">Data Bundle</div>
 
-- [FIA plot table](wa_data/wa_unit_plots.csv)
-- [10 km prediction grid](wa_data/wa_unit_prediction_grid_10km.csv)
-- [Direct-estimate table](wa_data/wa_direct_estimates.csv)
-- [County geometry](wa_data/wa_counties.rds)
-- [Data-prep script](scripts/build_wa_vignette_data.R)
+- [Download Washington biomass data](wa_data.zip)
 :::
 
 ## Working Target

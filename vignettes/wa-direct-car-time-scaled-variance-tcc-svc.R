@@ -10,10 +10,7 @@ set.seed(1)
 theme_set(theme_bw(base_size = 12))
 
 article_id <- "wa-direct-car-time-scaled-variance-tcc-svc"
-data_dir <- Sys.getenv(
-  "STLMM_WA_DATA_DIR",
-  unset = file.path(article_helper_dir, "wa_data")
-)
+data_dir <- "wa_data"
 
 wa_counties <- read_rds(file.path(data_dir, "wa_counties.rds"))
 direct_estimates <- read_csv(file.path(data_dir, "wa_direct_estimates.csv"), show_col_types = FALSE)

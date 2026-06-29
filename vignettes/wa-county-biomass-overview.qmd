@@ -39,7 +39,7 @@ The series focuses on `stLMM` model structures and software workflows. It theref
 
 The articles are tutorial templates. They use modest sampler settings and compact prediction grids so the examples are runnable. Production analyses should use longer chains, broader diagnostics, sensitivity checks, and application-specific validation.
 
-Each vignette in the series is reproducible from its Quarto source or extracted R code. Those source links will appear in a block near the top of each article. The data needed to run the vignettes will be available in a data bundle, along with the script used to generate the data.
+Each vignette in the series is reproducible from its Quarto source or extracted R code. Those source links appear near the top of each article. The shared Washington biomass data bundle is linked from each article and is the only data download needed for the series.
 
 ::: {.stlmm-resource-box .stlmm-resource-source}
 <div class="stlmm-resource-title">Source Code</div>
@@ -51,13 +51,31 @@ Each vignette in the series is reproducible from its Quarto source or extracted 
 ::: {.stlmm-resource-box .stlmm-resource-data}
 <div class="stlmm-resource-title">Data Bundle</div>
 
-- [County geometry](wa_data/wa_counties.rds)
-- [FIA plot table](wa_data/wa_unit_plots.csv)
-- [Direct-estimate table](wa_data/wa_direct_estimates.csv)
-- [5 km prediction grid](wa_data/wa_unit_prediction_grid_5km.csv)
-- [10 km prediction grid](wa_data/wa_unit_prediction_grid_10km.csv)
-- [Data-prep script](scripts/build_wa_vignette_data.R)
+- [Download Washington biomass data](wa_data.zip)
 :::
+
+## Running the Articles
+
+Download the Washington biomass data bundle and unzip it before running an article locally. The archive expands to a directory named `wa_data` containing the county geometry, direct-estimate table, FIA plot table, and compact prediction grids used across the series.
+
+Run each Quarto source file or extracted R script from the directory that contains `wa_data`. With that layout, the article setup uses `data_dir <- "wa_data"`, and all data inputs are read with paths such as `file.path(data_dir, "wa_unit_plots.csv")`.
+
+For example, a local working directory for an extracted article should look like this:
+
+```text
+my-wa-article-run/
+  wa-direct-car-time.R
+  article-utils.R
+  article-cache.R
+  wa_data/
+    wa_counties.rds
+    wa_direct_estimates.csv
+    wa_unit_plots.csv
+    wa_unit_prediction_grid_5km.csv
+    wa_unit_prediction_grid_10km.csv
+```
+
+The articles do not read raw FIA tables or TCC rasters. They read only the prepared files in `wa_data`.
 
 ## Model Tour
 
@@ -105,10 +123,7 @@ Formal FIA estimators use condition proportions, stratification and nonresponse 
 
 ```{r read-data}
 #| code-summary: "Show data-reading code"
-data_dir <- Sys.getenv(
-  "STLMM_WA_DATA_DIR",
-  unset = file.path(article_helper_dir, "wa_data")
-)
+data_dir <- "wa_data"
 
 wa_counties <- read_rds(file.path(data_dir, "wa_counties.rds"))
 unit_plots <- read_csv(file.path(data_dir, "wa_unit_plots.csv"), show_col_types = FALSE)
