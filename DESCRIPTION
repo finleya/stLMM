@@ -1,7 +1,7 @@
 Package: stLMM
 Type: Package
 Title: Bayesian Spatial and Space-Time Linear Mixed Models
-Version: 0.0.1
+Version: 0.0.2
 Authors@R: c(
     person("Andrew O.", "Finley", role = c("aut", "cre"),
            email = "finleya@msu.edu"),

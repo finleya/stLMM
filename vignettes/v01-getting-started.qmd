@@ -193,9 +193,9 @@ summary(group_pred)
 
 ## Classical SAE model connection
 
-The grouped random-intercept model above connects to a classical unit-level small area estimation (SAE) model. When the response vector holds sampled units and the grouping variable identifies small areas, `y ~ x + iid(group)` is a Bayesian version of the nested-error regression model used by Battese, Harter, and Fuller (BHF) [@BatteseHarterFuller1988]. In that setting, `iid(group)` is the area random effect, $\sigma_\alpha^2$ is the between-area variance, and the Gaussian residual variance is the unit-level error variance.
+The grouped random-intercept model above connects to a classical unit-level small area estimation (SAE) model. When the response vector holds sampled units and the grouping variable identifies small areas, `y ~ x + iid(group)` is the model component corresponding to a Bayesian version of the nested-error regression model used by Battese, Harter, and Fuller (BHF) [@BatteseHarterFuller1988]. In that setting, `iid(group)` is the area random effect, $\sigma_\alpha^2$ is the between-area variance, and the Gaussian residual variance is the unit-level error variance.
 
-The classical BHF model uses independent area effects. Spatial or space-time unit-level extensions keep the same unit-level response structure but replace `iid(group)` with structured terms such as `car(area, graph = g)` or `car_time(area, time, graph = g)`. Area-level estimates are obtained by predicting over the target population support and averaging or summing those predictions.
+The classical BHF model uses independent area effects. Spatial or space-time SAE extensions keep the same unit-level response structure but replace `iid(group)` with structured terms such as `car(area, graph = g)` or `car_time(area, time, graph = g)`. Area-level estimates are obtained by predicting over the target population support and averaging or summing those predictions.
 
 ## Structured process terms
 

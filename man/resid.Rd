@@ -96,7 +96,8 @@ chosen so either the prior mean or prior mode equals \code{vhat}. With
 \code{prior = "shannon"}, the prior is
 \code{IG(n / 2, (n - 1) * vhat / 2)} and requires \code{n > 1}; larger
 \code{n} gives a more concentrated prior around the supplied direct-estimate
-variance.
+variance. Starting values for this direct-estimate-informed grouped model are
+supplied with the \code{starting} argument inside \code{resid(...)}.
 
 \code{resid(model = "scaled", variance = vhat)} estimates a low-dimensional
 multiplier for direct-estimate variances. Without \code{n}, the model is
@@ -104,7 +105,9 @@ multiplier for direct-estimate variances. Without \code{n}, the model is
 \code{log(tau_i^2) = log(kappa) + w_i log(vhat_i) + (1 - w_i) log(tau0_sq)}
 where \code{w_i = n_i / (n_i + shrinkage)}. The positive parameters
 \code{kappa} and \code{tau0_sq} are sampled on the log scale, so zero or
-negative residual variances are not possible.
+negative residual variances are not possible. Starting values for these
+parameters are supplied with the \code{starting} argument inside
+\code{resid(...)}.
 }
 \examples{
 \dontrun{

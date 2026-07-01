@@ -96,6 +96,73 @@ test_that("resid formula term supports grouped and scaled residual variance mode
   expect_equal(colnames(fit_scaled$residual_variance_samples), c("kappa", "tau0_sq"))
 })
 
+test_that("explicit residual variance starts are not jittered across chains", {
+  set.seed(329)
+  dat <- data.frame(
+    y = rnorm(24),
+    group = rep(letters[1:3], each = 8),
+    vhat = rep(c(0.3, 0.6, 0.9), each = 8),
+    n_eff = rep(c(4, 8, 12), each = 8)
+  )
+  starts <- c(a = 27, b = 25, c = 12)
+
+  fit_generic_group <- stLMM(
+    y ~ 1 + resid(model = "group", group = group),
+    data = dat,
+    starting = list(resid = list(tau_sq = starts)),
+    priors = list(resid = list(tau_sq = half_t(df = 3, scale = 1))),
+    n_samples = 4,
+    chains = 3,
+    warmup = list(batch_length = 1, min_batches = 0, max_batches = 0),
+    verbose = FALSE
+  )
+
+  for(chain in fit_generic_group$chains)
+    expect_equal(chain$backend$residual_model$starting, unname(starts))
+
+  fit_default_group <- stLMM(
+    y ~ 1 + resid(model = "group", group = group),
+    data = dat,
+    priors = list(resid = list(tau_sq = half_t(df = 3, scale = 1))),
+    n_samples = 4,
+    chains = 3,
+    chain_control = list(seed = 991, dispersion = 1),
+    warmup = list(batch_length = 1, min_batches = 0, max_batches = 0),
+    verbose = FALSE
+  )
+
+  default_starts <- lapply(fit_default_group$chains, function(chain)
+    chain$backend$residual_model$starting)
+  expect_false(isTRUE(all.equal(default_starts[[1]], default_starts[[2]])))
+
+  fit_group_ig <- stLMM(
+    y ~ 1 + resid(model = "group", group = group, variance = vhat,
+                  prior = "ig", shape = 5, starting = starts),
+    data = dat,
+    n_samples = 4,
+    chains = 3,
+    warmup = list(batch_length = 1, min_batches = 0, max_batches = 0),
+    verbose = FALSE
+  )
+
+  for(chain in fit_group_ig$chains)
+    expect_equal(chain$backend$residual_model$starting, unname(starts))
+
+  scaled_starts <- c(kappa = 1.1, tau0_sq = 0.4)
+  fit_scaled <- stLMM(
+    y ~ 1 + resid(model = "scaled", variance = vhat, n = n_eff,
+                  starting = scaled_starts),
+    data = dat,
+    n_samples = 4,
+    chains = 3,
+    warmup = list(batch_length = 1, min_batches = 0, max_batches = 0),
+    verbose = FALSE
+  )
+
+  for(chain in fit_scaled$chains)
+    expect_equal(chain$backend$residual_model$starting, unname(scaled_starts))
+})
+
 test_that("resid formula term is restricted to one Gaussian residual model", {
   dat <- data.frame(y = rbinom(8, 1, 0.5), x = rnorm(8), vhat = rep(0.2, 8))
 

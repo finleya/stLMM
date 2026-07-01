@@ -64,7 +64,7 @@ The full Gaussian process covariance is used to simulate the data. The fitted mo
 
 ## Data
 
-We simulate locations in the unit square, then hold out a subset of locations for prediction. The observed response combines a linear mean, a spatial random effect, and independent Gaussian noise.
+We simulate locations in the unit square, then set aside 10 locations for prediction. The observed response combines a linear mean, a spatial random effect, and independent Gaussian noise.
 
 ```{r simulate-data}
 n_train <- 90
@@ -162,7 +162,7 @@ parameter samples and recovered process draws on the same posterior iterations.
 The examples below use `as_samples()` only because data-frame columns are
 convenient for `ggplot2`.
 
-Because this example has one observation at each training location, the recovered `nngp_1` columns correspond to the training rows. The data identify the combined spatially varying intercept, $\beta_0 + w(\mathbf{s}_i)$, more directly than the split between the global intercept and the average level of one realized spatial process. For this diagnostic, we therefore compare $\beta_0 + w(\mathbf{s}_i)$ rather than $w(\mathbf{s}_i)$ alone.
+Because this example has one observation at each training location, the recovered `nngp_1` columns correspond to the training rows. The data identify the combined spatially varying intercept, $\beta_0 + w(\mathbf{s}_i)$, more directly than its split into a global intercept and one realized spatial process. For this diagnostic, we compare $\beta_0 + w(\mathbf{s}_i)$ rather than $w(\mathbf{s}_i)$ alone.
 
 ```{r recovery-plot, fig.width=5.5, fig.height=4.8}
 #| code-fold: true

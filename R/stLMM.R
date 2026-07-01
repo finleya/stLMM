@@ -1843,14 +1843,16 @@ stLMM <- function(formula, data = parent.frame(),
                 storage.mode(b$process_terms_obs[[i]]$x) <- "double"
         }
 
-        if(identical(b$residual_model$type, "group_ig_variance") && is.null(residual$starting) && chains > 1L){
+        if(identical(b$residual_model$type, "group_ig_variance") &&
+           !isTRUE(b$residual_model$starting_supplied) && chains > 1L){
             active <- b$residual_model$tuning > 0
             b$residual_model$starting[active] <- vapply(
                 b$residual_model$starting[active], log_jitter, numeric(1),
                 dispersion = chain_control$dispersion
             )
         }
-        if(identical(b$residual_model$type, "scaled_variance") && is.null(residual$starting) && chains > 1L){
+        if(identical(b$residual_model$type, "scaled_variance") &&
+           !isTRUE(b$residual_model$starting_supplied) && chains > 1L){
             active <- b$residual_model$tuning > 0
             b$residual_model$starting[active] <- vapply(
                 b$residual_model$starting[active], log_jitter, numeric(1),

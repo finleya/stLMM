@@ -6,6 +6,7 @@
 ^\.github$
 ^\.github/
 ^\.gitignore$
+^_pkgdown\.yml$
 ^vignettes/\.gitignore$
 ^\.\.Rcheck$
 ^.*\.Rhistory$
@@ -21,6 +22,7 @@
 ^pkgdown/
 ^docs/
 ^cache/
+^vignettes/cache/
 ^vignettes/wa_data/
 ^vignettes/scripts/
 ^vignettes/wa-.*\.(qmd|R)$
