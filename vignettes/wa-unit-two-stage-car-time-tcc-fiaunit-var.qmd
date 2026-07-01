@@ -126,6 +126,8 @@ positive_plots <- unit_plots |>
   mutate(biomass_sqrt = sqrt(agb_live_mg_ha))
 ```
 
+The plot and grid TCC variables are annual point samples from the USDA Forest Service Tree Canopy Cover raster products [@USFSTreeCanopyCover2026]. This article uses the same plot-based TCC standardization and 5 km prediction support as the previous two-stage CAR-time TCC article.
+
 ```{r data-summary}
 #| code-summary: "Show data summary code"
 data_summary <- tibble(
@@ -419,7 +421,7 @@ show_table(
 
 ## Prediction and Aggregation
 
-Prediction is unchanged: draw-wise occurrence predictions are multiplied by squared positive-biomass predictions, then averaged within county-year.
+Prediction is unchanged: draw-wise occurrence predictions are multiplied by squared positive-biomass predictions, then averaged within county-year. The Gaussian positive-stage predictions use `y_samples = TRUE`, so the squared positive-biomass draws include residual predictive uncertainty before recombination.
 
 ```{r aggregation-helpers}
 #| code-summary: "Show aggregation helper code"

@@ -64,7 +64,7 @@ $$
 \hat{y}_i = \theta_i + e_i,\qquad e_i \sim N(0,\tau_i^2),
 $$
 
-where $\theta_i$ is the latent county-year biomass mean and $\tau_i^2$ is the observation variance for the direct estimate. The latent mean model is
+where $\theta_i = \theta_{a_i,t_i}$ is the latent county-year biomass mean and $\tau_i^2$ is the observation variance for the direct estimate. The latent mean model is
 
 $$
 \theta_i = \beta_0 + \beta_1 x_i + w_{a_i,t_i},
@@ -72,7 +72,7 @@ $$
 
 where $x_i$ is standardized county mean TCC and $w_{a,t}$ is a separable CAR-time process over counties and years. Its spatial component is defined by the county graph, and its temporal component is defined over the annual support.
 
-The supplied direct-estimate variance $\hat{v}_i$ enters through a scaled residual variance model. With effective sample size $n_i$, the observation variance is
+The supplied direct-estimate variance $\hat{v}_i$ enters through a scaled residual variance model. With effective sample size $n_i$ and fixed shrinkage constant $c = 10$, the observation variance is
 
 $$
 \log(\tau_i^2) =
@@ -173,7 +173,7 @@ show_table(
 
 ## County Mean TCC
 
-County mean TCC is computed from the full annual TCC raster for each county-year. The model uses a standardized version of this covariate so the fixed-effect coefficient is measured per one standard deviation increase in county mean TCC.
+County mean TCC is computed from the annual USDA Forest Service Tree Canopy Cover raster products for each county-year [@USFSTreeCanopyCover2026]. The model uses a standardized version of this covariate so the fixed-effect coefficient is measured per one standard deviation increase in county mean TCC.
 
 ```{r tcc-summary}
 #| code-summary: "Show TCC summary code"
@@ -614,7 +614,7 @@ The scaled residual variance model remains a separate part of the hierarchy. The
 
 If TCC explains broad county-year biomass patterns, the CAR-time process should have less large-scale structure to absorb. The variance scaling parameters do not have to move in a predetermined direction, because they describe observation uncertainty in the direct estimates rather than unexplained mean structure.
 
-WAIC can be used to compare this model with the no-TCC scaled-variance model because both use the same likelihood rows. This article leaves that comparison to the series bake-off so the focus stays on the modeling extension itself.
+WAIC can be used to compare this model with the no-TCC scaled-variance model because both use the same likelihood rows. This article leaves that comparison to a targeted model-assessment analysis so the focus stays on the modeling extension itself.
 
 ## Summary
 

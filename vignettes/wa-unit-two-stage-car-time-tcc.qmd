@@ -69,7 +69,7 @@ The county-year target is the mean of `agb_live_mg_ha` over grid rows assigned t
 For equivalence with the area-response direct estimates in this series, the two-stage decomposition is based on `agb_live_mg_ha` itself,
 
 $$
-y_j = z_j y_j^+,\qquad z_j = I(y_j > 0),
+y_j = z_j y_j^+,\qquad z_j = \mathbb{1}(y_j > 0),
 $$
 
 where $y_j^+$ is the positive biomass value for rows with $y_j > 0$.
@@ -104,7 +104,7 @@ and the county-year draw is obtained by averaging these grid-row draws within co
 
 ## Data
 
-The plot and grid TCC variables are annual point samples from the USDA Forest Service TCC raster products [@USFSTreeCanopyCover2026]. The model uses the same standardization for plot rows and prediction-grid rows, with the center and scale estimated from the observed plot rows.
+The plot and grid TCC variables are annual point samples from the USDA Forest Service Tree Canopy Cover raster products [@USFSTreeCanopyCover2026]. The model uses the same standardization for plot rows and prediction-grid rows, with the center and scale estimated from the observed plot rows.
 
 ```{r read-data}
 #| code-summary: "Show data-reading code"
@@ -464,7 +464,7 @@ The fit summaries focus on fixed effects and variance parameters. The many count
 
 ## Prediction and Aggregation
 
-The 5 km grid rows define the county-year prediction support. For each posterior predictive draw, the binary and positive stages are combined on each grid row and then averaged within county-year.
+The 5 km grid rows define the county-year prediction support. For each posterior predictive draw, the binary and positive stages are combined on each grid row and then averaged within county-year. The Gaussian positive-stage predictions use `y_samples = TRUE`, so the squared positive-biomass draws include residual predictive uncertainty before recombination.
 
 ```{r aggregation-helpers}
 #| code-summary: "Show aggregation helper code"

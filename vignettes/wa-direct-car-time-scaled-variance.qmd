@@ -64,7 +64,7 @@ $$
 \hat{y}_i = \theta_i + e_i,\qquad e_i \sim N(0,\tau_i^2),
 $$
 
-where $\theta_i$ is the latent county-year biomass mean and $\tau_i^2$ is the observation variance for the direct estimate. The latent mean model is
+where $\theta_i = \theta_{a_i,t_i}$ is the latent county-year biomass mean and $\tau_i^2$ is the observation variance for the direct estimate. The latent mean model is
 
 $$
 \theta_i = \beta_0 + w_{a_i,t_i},
@@ -72,7 +72,7 @@ $$
 
 where $w_{a,t}$ is a separable CAR-time process over counties and years. Its spatial component is defined by the county graph, and its temporal component is defined over the annual support.
 
-The supplied direct-estimate variance $\hat{v}_i$ enters through a scaled residual variance model. With effective sample size $n_i$, the observation variance is
+The supplied direct-estimate variance $\hat{v}_i$ enters through a scaled residual variance model. With effective sample size $n_i$ and fixed shrinkage constant $c = 10$, the observation variance is
 
 $$
 \log(\tau_i^2) =
@@ -622,7 +622,7 @@ The scaled residual variance model is a practical relaxation. The supplied direc
 
 Another option is to estimate one observation variance per direct estimate with `resid(model = "group", variance = ..., prior = "ig")`, or to use the effective-sample-size construction behind a Shannon-style prior [@Shannon2025]. Those models can be useful when there are relatively few direct estimates or when the sampler is configured for a higher-dimensional residual variance block. For this Washington county-year dataset, they add hundreds of variance parameters, so the scaled model is the cleaner example.
 
-WAIC can be used to compare fixed- and scaled-variance formulations only when they are fit to the same likelihood rows. The fixed-variance article deliberately excludes the floored zero-variance rows, so a formal WAIC comparison would require a matched sensitivity fit. This article leaves that comparison to the series bake-off so the focus stays on the variance model itself.
+WAIC can be used to compare fixed- and scaled-variance formulations only when they are fit to the same likelihood rows. The fixed-variance article deliberately excludes the floored zero-variance rows, so a formal WAIC comparison would require a matched sensitivity fit. This article leaves that comparison to a targeted model-assessment analysis so the focus stays on the variance model itself.
 
 ## Summary
 

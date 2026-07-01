@@ -13,6 +13,29 @@ stlmm_palette <- function(n = 200, palette = "Spectral", reverse = TRUE){
   colors
 }
 
+stlmm_continuous_palette <- function(n = 200, palette = c("navia", "batlowW"), reverse = FALSE){
+  palette <- match.arg(palette)
+
+  anchors <- switch(
+    palette,
+    navia = c(
+      "#021326", "#053059", "#105185", "#236B90", "#327B88", "#408A7F",
+      "#539A74", "#70B369", "#A6D278", "#DCE6AD", "#FCF3D8"
+    ),
+    batlowW = c(
+      "#001959", "#0F3C5F", "#175361", "#2D685D", "#52784C", "#7C8637",
+      "#B19939", "#DAA66B", "#F2B39E", "#FEDBDA", "#FFFEFE"
+    )
+  )
+
+  colors <- grDevices::colorRampPalette(anchors, space = "Lab")(n)
+
+  if(reverse)
+    colors <- rev(colors)
+
+  colors
+}
+
 stlmm_discrete_colors <- function(n, palette = "Spectral", reverse = TRUE){
   if(!is.numeric(n) || length(n) != 1 || n < 1)
     stop("n must be a positive scalar.")

@@ -33,13 +33,13 @@ theme_set(theme_bw(base_size = 12))
 
 ## Purpose
 
-This article opens a Washington county biomass small-area estimation series. The series uses a single prepared data bundle to show how `stLMM` can fit related area-level and unit-level models for county-level forest inventory inference over time.
+This article opens a Washington county biomass small-area estimation series. The series is motivated by USDA Forest Service Forest Inventory and Analysis (FIA) data, the national forest inventory of the United States [@USFSFIADataMart2026; @BechtoldPatterson2005]. It uses a single prepared data bundle to show how `stLMM` can fit related area-level and unit-level models for county-level forest inventory inference over time.
 
 The series focuses on `stLMM` model structures and software workflows. It therefore uses a deliberately simplified working target that keeps the area-response and unit-response articles aimed at the same quantity. The model tour below defines that quantity and distinguishes it from FIA's formal forestland biomass estimands.
 
-The articles are tutorial templates. They use modest sampler settings and compact prediction grids so the examples are runnable. Production analyses should use longer chains, broader diagnostics, sensitivity checks, and application-specific validation.
+The articles use modest sampler settings and compact prediction grids so the examples are runnable. Production analyses should use longer chains, broader diagnostics, sensitivity checks, and application-specific validation.
 
-Each vignette in the series is reproducible from its Quarto source or extracted R code. Those source links appear near the top of each article. The shared Washington biomass data bundle is linked from each article and is the only data download needed for the series.
+Each article in the series is reproducible from its Quarto source or extracted R code. Those source links appear near the top of each article. The shared Washington biomass data bundle is linked from each article and is the only data download needed for the series.
 
 ::: {.stlmm-resource-box .stlmm-resource-source}
 <div class="stlmm-resource-title">Source Code</div>
@@ -117,7 +117,7 @@ Because `agb_live_mg_ha` has a point mass at zero and a long positive tail, the 
 
 FIA `forested` status and `proportion_forested` describe forestland support, not merely whether `agb_live_mg_ha` is positive. A model that uses those variables as the first stage moves the estimand toward an FIA forestland-support target. That is scientifically important, but it is different from the series target above.
 
-Formal FIA estimators use condition proportions, stratification and nonresponse adjustments, domain definitions such as forestland, and ratio estimators for per-acre quantities [@BechtoldPatterson2005; @StankeEtAl2020rFIA]. A final article in the series will focus on those FIA design choices. It will compare the series target with forestland biomass density, total live aboveground biomass on forestland divided by total forestland area, and all-land biomass density, total live aboveground biomass on forestland divided by total county land area.
+Formal FIA estimators use condition proportions, stratification and nonresponse adjustments, domain definitions such as forestland, and ratio estimators for per-acre quantities [@BechtoldPatterson2005; @StankeEtAl2020rFIA]. Model-based inference that remains faithful to complex sampling designs is an active research area, especially when the population units have spatial or multivariate dependence [@Banerjee2024]. The series concludes with a [Colville National Forest capstone](colville-stlmm-vignette.html) that is closer to that target: it estimates biomass on forested land within a user-defined spatial extent in Washington by modeling forestland occurrence and positive biomass before aggregating over the target area [@Finley01032011; @MayFinley2025SpatioTemporal].
 
 ## Data Bundle
 
@@ -180,7 +180,7 @@ data_pack_summary <- tibble(
 ) |>
   mutate(value = fmt_int(as.numeric(value)))
 
-show_table(data_pack_summary, caption = "Washington county biomass vignette data bundle.")
+show_table(data_pack_summary, caption = "Washington county biomass article data bundle.")
 ```
 
 ## Data Characteristics
@@ -383,7 +383,7 @@ ggplot() +
   theme(plot.margin = margin(0, 0, 0, 0))
 ```
 
-## Comparing Models
+## Reading the Model Sequence
 
 The articles that follow build the models as a ladder. Each step changes one part of the analysis, such as the smoothing structure, the TCC covariate, the observation-variance model, or the unit-level response formulation. Reading across the series helps make those choices visible.
 
@@ -394,7 +394,7 @@ Model results will be reported on a common county-year scale so the articles can
 - posterior uncertainty summaries on the same Mg/ha scale;
 - the response and aggregation target used by the model: area-level direct estimates, single-stage unit responses, or positive-biomass two-stage unit responses.
 
-The final comparison article will look at a few practical questions:
+The sequence is meant to support a few practical questions:
 
 1. How much smoothing does the model add relative to the direct estimates?
 2. How much do TCC covariates change county-year predictions?
@@ -402,6 +402,6 @@ The final comparison article will look at a few practical questions:
 4. Does FIA-unit heteroskedasticity change uncertainty in a visible way?
 5. How different are single-stage Gaussian estimates from positive-biomass two-stage estimates for the same series target?
 
-The comparison is not meant to choose one universal best model. Its purpose is to show what each model assumes, where it borrows strength, what auxiliary information it uses, and how those choices affect county-level forest inventory inference.
+The goal is not to choose one universal best model. The series is meant to show what each model assumes, where it borrows strength, what auxiliary information it uses, and how those choices affect county-level forest inventory inference.
 
-The final article will return to a question deferred in this overview: what changes when the target follows FIA forestland definitions rather than the simplified working target used in the model tour? That article will look at forestland support, condition proportions, FIA-style direct estimators, and the corresponding unit-response formulations for forestland and all-land biomass density.
+The Colville capstone returns to part of the question deferred in this overview: what changes when the target follows FIA forestland definitions rather than the simplified working target used in the model tour? That article looks at forestland support, a user-defined spatial extent, and a two-stage unit-response formulation for biomass on forested land rather than a simplified county-year mean.

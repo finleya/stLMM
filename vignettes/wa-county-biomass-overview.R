@@ -60,7 +60,7 @@ data_pack_summary <- tibble(
 ) |>
   mutate(value = fmt_int(as.numeric(value)))
 
-show_table(data_pack_summary, caption = "Washington county biomass vignette data bundle.")
+show_table(data_pack_summary, caption = "Washington county biomass article data bundle.")
 
 plot_status_summary <- unit_plots |>
   mutate(status = if_else(forested, "forested", "nonforested")) |>

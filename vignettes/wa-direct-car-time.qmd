@@ -64,7 +64,7 @@ $$
 \hat{y}_i = \theta_i + e_i,\qquad e_i \sim N(0,\hat{v}_i),
 $$
 
-where $\theta_i$ is the latent county-year biomass mean and $\hat{v}_i$ is the direct-estimate variance. The latent mean model is
+where $\theta_i = \theta_{a_i,t_i}$ is the latent county-year biomass mean and $\hat{v}_i$ is the direct-estimate variance. The latent mean model is
 
 $$
 \theta_i = \beta_0 + w_{a_i,t_i},

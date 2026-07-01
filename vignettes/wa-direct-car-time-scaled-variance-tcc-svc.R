@@ -262,7 +262,10 @@ tcc_coef_map <- wa_counties |>
 ggplot(tcc_coef_map) +
   geom_sf(aes(fill = tcc_coef_mean), color = "grey80", linewidth = 0.12) +
   coord_sf(expand = FALSE) +
-  scale_fill_viridis_c(option = "C", name = "Mg/ha per\nSD TCC") +
+  scale_fill_gradientn(
+    colors = stlmm_continuous_palette(palette = "navia"),
+    name = "Mg/ha per\nSD TCC"
+  ) +
   labs(title = "Posterior mean TCC coefficient")
 
 ## fitted_draws <- as.matrix(as_samples(fitted(rec, summary = FALSE), metadata = FALSE))

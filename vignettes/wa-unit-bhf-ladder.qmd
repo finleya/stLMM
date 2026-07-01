@@ -65,10 +65,10 @@ Let $g$ index a prediction-grid row, with county $a_g$ and year $t_g$. For this 
 
 $$
 \theta_{a,t} =
-\operatorname{avg}_{g \in U_{a,t}} y_g,
+\operatorname{avg}_{g \in U_{a,t}} \tilde{y}_g,
 $$
 
-where $U_{a,t}$ is the county-year prediction support. In this vignette, the grid defines the aggregation support for the unit-response summaries. The unobserved grid-row values $y_g$ are represented by model-based predictions $\tilde{y}_g$.
+where $U_{a,t}$ is the county-year prediction support. In this article, the grid defines the aggregation support for the unit-response summaries. The unobserved grid-row values $y_g$ are represented by model-based predictions $\tilde{y}_g$.
 
 The direct estimates in the area-response articles estimate the same kind of mean from observed FIA plot rows,
 
@@ -83,7 +83,7 @@ The two-stage model keeps the same target by decomposing `agb_live_mg_ha` into a
 
 $$
 y_j = z_j y_j^+,\qquad
-z_j = I(y_j > 0).
+z_j = \mathbb{1}(y_j > 0).
 $$
 
 Here $y_j^+$ is the positive biomass value when $y_j > 0$. For posterior prediction, the superscript $(m)$ indexes one retained posterior predictive draw. The two-stage draw for grid row $g$ is
@@ -147,6 +147,8 @@ positive_plots <- unit_plots |>
   filter(biomass_positive == 1) |>
   mutate(biomass_sqrt = sqrt(agb_live_mg_ha))
 ```
+
+The plot and grid TCC variables are annual point samples from the USDA Forest Service Tree Canopy Cover raster products [@USFSTreeCanopyCover2026]. The model uses the same standardization for plot rows and prediction-grid rows, with the center and scale estimated from the observed plot rows.
 
 The article uses the 10 km prediction grid to keep the opening unit-response ladder compact. Later single-model unit-response articles can use the 5 km grid when the focus is on one model rather than a side-by-side ladder.
 
@@ -557,7 +559,7 @@ The single-stage Gaussian model estimates the mean of `agb_live_mg_ha` directly.
 
 ## Prediction and Aggregation
 
-The 10 km grid rows define the county-year prediction support. For each fitted model, posterior predictive draws are averaged over grid rows within each county-year.
+The 10 km grid rows define the county-year prediction support. For each fitted model, posterior predictive draws are averaged over grid rows within each county-year. The Gaussian predictions use `y_samples = TRUE`, so the aggregated draws include residual predictive uncertainty before county-year averaging.
 
 ```{r aggregation-helpers}
 #| code-summary: "Show aggregation helper code"
@@ -876,7 +878,7 @@ ggplot(profile_dat, aes(year, theta_mean, color = model, fill = model)) +
   theme(legend.position = "bottom")
 ```
 
-The county panels are a useful check on the unit-response summaries because they show how the single-stage and two-stage models respond to sparse county-year direct estimates. In Yakima, the unit-response summaries are consistently lower than many of the direct estimates. We return to this pattern in the next vignette, where the model is better matched to the county-time structure in the data and the lower Yakima predictions persist.
+The county panels are a useful check on the unit-response summaries because they show how the single-stage and two-stage models respond to sparse county-year direct estimates. In Yakima, the unit-response summaries are consistently lower than many of the direct estimates. We return to this pattern in the next article, where the model is better matched to the county-time structure in the data and the lower Yakima predictions persist.
 
 ## Takeaways
 
