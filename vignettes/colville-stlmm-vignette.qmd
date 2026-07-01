@@ -1,6 +1,6 @@
 ---
-title: "Space-time forest biomass prediction for Colville National Forest"
-subtitle: "A stLMM reproduction workflow after May and Finley (2025)"
+title: "Washington forestland biomass capstone"
+subtitle: "Space-time prediction for Colville National Forest"
 author: "Andrew O. Finley"
 format:
   html:
@@ -14,8 +14,6 @@ format:
     html-math-method: katex
     css: colville_data/stlmm-vignette.css
     embed-resources: true
-    theme:
-      light: cosmo
 execute:
   warning: false
   message: false
@@ -43,7 +41,7 @@ theme_set(theme_bw(base_size = 12))
 
 ## Overview
 
-@MayFinley2025SpatialTemporal modeled aboveground biomass density with a semi-continuous space-time response distribution. The response has a point mass at zero and positive continuous support otherwise. Their model has two linked pieces: a binary model for the zero/nonzero part of the response and a Gaussian model for biomass magnitude conditional on being in the nonzero component. In this vignette, the binary indicator is defined using FIA forest-condition status, so the resulting estimates are tied to FIA's forested definition.
+This capstone closes the Washington biomass series by moving from county-year summaries of the simplified `agb_live_mg_ha` response to a forestland-support analysis for a user-defined area in Washington, the Colville National Forest. @MayFinley2025SpatialTemporal modeled aboveground biomass density with a semi-continuous space-time response distribution. The response has a point mass at zero and positive continuous support otherwise. Their model has two linked pieces: a binary model for the zero/nonzero part of the response and a Gaussian model for biomass magnitude conditional on being in the nonzero component. In this article, the binary indicator is defined using FIA forest-condition status, so the resulting estimates are tied to FIA's forested definition.
 
 The inferential target in this reanalysis differs in a mild way from @MayFinley2025SpatialTemporal. Here, a plot's Bernoulli response is 1 if any condition on that plot is forested. @MayFinley2025SpatialTemporal instead set the response to 1 if the plot had positive aboveground biomass; under that definition, a forested plot with zero observed biomass would contribute a zero to the binary model. The FIA-based definition used here more directly targets biomass density on forested land. Section @sec-summary discusses possible extensions that would align the binary stage even more closely with FIA's plot design and condition proportions.
 
@@ -51,7 +49,7 @@ Like the original analysis, posterior predictive draws from the two fitted model
 $$
 b^{(m)}(\mathbf{s}, t) = z^{(m)}(\mathbf{s}, t)\, y^{(m)}(\mathbf{s}, t),
 $$ {#eq-prediction-product}
-where $z^{(m)}$ is a Bernoulli FIA-forested draw and $y^{(m)}$ is a draw from the live biomass process on FIA-defined forested plots. This vignette follows that workflow for the portion of Colville National Forest in the Northern Cascades ecoregion.
+where $z^{(m)}$ is a Bernoulli FIA-forested draw and $y^{(m)}$ is a draw from the live biomass process on FIA-defined forested plots. This article follows that workflow for the portion of Colville National Forest in the Northern Cascades ecoregion.
 
 In addition to this definitional difference for $z$, the implementation differs from @MayFinley2025SpatialTemporal in a few modeling details. The covariance function `multi_res_sep_exp` used in each model is a reparameterization of their two-scale separable exponential covariance, with an `alpha` weight for the broad and local components. The forested-plot biomass model also uses a square-root transformation rather than the cube-root transformation used for the North Cascades analysis in the paper. These choices keep the example aligned with FIA definitions while preserving the paper's two-part posterior predictive product.
 
@@ -240,7 +238,7 @@ The Bernoulli model uses all FIA plot measurements. The response is `forested`, 
 
 The Bernoulli process variance is assigned a tight prior centered near 100 on the logit scale. With one Bernoulli trial per plot, this variance can be weakly identified: once fitted probabilities are close to zero or one, larger latent process variances have little effect on the likelihood. The tight prior regularizes this part of the model while still allowing substantial spatial-temporal variation in forest status.
 
-Longer exploratory runs show good convergence for the model parameters. For the vignette, the code below uses starting values near those long-run posterior densities so shorter chains can run for the documentation build. To recreate the longer exploratory runs, use broader starting values and longer chains, for example `n_samples = 20000`.
+Longer exploratory runs show good convergence for the model parameters. For this article, the code below uses starting values near those long-run posterior densities so shorter chains can run for the documentation build. To recreate the longer exploratory runs, use broader starting values and longer chains, for example `n_samples = 20000`.
 
 ```{r chain-start-function}
 #| code-fold: true
@@ -914,8 +912,8 @@ ggplot(annual_summaries_plot, aes(x = year)) +
 
 ## Summary {#sec-summary}
 
-This vignette reproduced the main modeling workflow of @MayFinley2025SpatialTemporal for the Colville National Forest portion of the Northern Cascades ecoregion. We prepared FIA plot data, fit a Bernoulli space-time model for FIA-defined forest status, fit a Gaussian space-time model for live aboveground biomass density on FIA-defined forested plots, and used draw-matched posterior predictive samples to form the forested-by-biomass product. We then predicted on annual grids for both the ecoregion and National Forest, mapped selected years, summarized annual biomass distributions, and reviewed fitted spatial-temporal ranges and biomass process-to-noise ratios.
+This article reproduced the main modeling workflow of @MayFinley2025SpatialTemporal for the Colville National Forest portion of the Northern Cascades ecoregion. We prepared FIA plot data, fit a Bernoulli space-time model for FIA-defined forest status, fit a Gaussian space-time model for live aboveground biomass density on FIA-defined forested plots, and used draw-matched posterior predictive samples to form the forested-by-biomass product. We then predicted on annual grids for both the ecoregion and National Forest, mapped selected years, summarized annual biomass distributions, and reviewed fitted spatial-temporal ranges and biomass process-to-noise ratios.
 
-This implementation is intentionally close to, but not identical to, the analysis in @MayFinley2025SpatialTemporal. One definitional difference is that this vignette uses FIA forest-condition status for $z(\mathbf{s}, t)$, whereas the paper defines the binary process from whether biomass is positive. This choice makes the estimates consistent with FIA's forested definition and with the way the forested-plot biomass model is fit here. The `stLMM` version also uses the `multi_res_sep_exp` covariance with a single process variance and an `alpha` weight to split broad and local components, rather than two separately scaled process variances. The spatial range bounds are chosen to keep the local and landscape components ordered while matching the paper's scale separation, and the biomass model uses a square-root transformation for a simple nonnegative back-transformation. The NNGP neighbor settings are also lighter than the paper's full analysis. Finally, the prediction code reports both joint Vecchia prediction and the independent NNGP prediction approximation used for the paper's Figure 7. These choices provide a compact vignette implementation while making the main modeling and prediction differences explicit.
+This implementation is intentionally close to, but not identical to, the analysis in @MayFinley2025SpatialTemporal. One definitional difference is that this article uses FIA forest-condition status for $z(\mathbf{s}, t)$, whereas the paper defines the binary process from whether biomass is positive. This choice makes the estimates consistent with FIA's forested definition and with the way the forested-plot biomass model is fit here. The `stLMM` version also uses the `multi_res_sep_exp` covariance with a single process variance and an `alpha` weight to split broad and local components, rather than two separately scaled process variances. The spatial range bounds are chosen to keep the local and landscape components ordered while matching the paper's scale separation, and the biomass model uses a square-root transformation for a simple nonnegative back-transformation. The NNGP neighbor settings are also lighter than the paper's full analysis. Finally, the prediction code reports both joint Vecchia prediction and the independent NNGP prediction approximation used for the paper's Figure 7. These choices provide a compact article implementation while making the main modeling and prediction differences explicit.
 
 In the data preparation, tree biomass from forested conditions was expanded to a per-hectare basis and summed to represent plot-level biomass density. The first-stage response was 1 if the plot had at least one forested condition. Because each plot contributes one 0/1 outcome, this is a Bernoulli observation model, equivalently a binomial model with one trial. That definition is practical, but it discards condition-proportion information. A closer match to FIA's condition structure would model the forested area proportion directly, for example with a fractional-response or compositional model and is likely a good avenue to explore.

@@ -50,8 +50,8 @@ articles:
   - wa-unit-two-stage-car-time-tcc
   - wa-unit-two-stage-car-time-tcc-fiaunit-var
   - wa-unit-two-stage-continuous-space-time-tcc-fiaunit-var-svc
+  - colville-stlmm-vignette
 - title: "Additional articles"
   contents:
-  - colville-stlmm-vignette
   - a14-lme4-validation
   - a13-scottish-lip-cancer-nimble-comparison
