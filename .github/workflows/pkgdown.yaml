@@ -23,7 +23,7 @@ jobs:
       STLMM_RUN_LONG_ARTICLES: true
       STLMM_ARTICLE_CACHE_DIR: ${{ github.workspace }}/cache/articles
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: r-lib/actions/setup-r@v2
         with:
@@ -50,7 +50,7 @@ jobs:
           needs: website
 
       - name: Restore article cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: cache/articles
           key: ${{ runner.os }}-article-cache-${{ hashFiles('vignettes/wa-*.qmd', 'vignettes/colville-stlmm-vignette.qmd', 'vignettes/article-cache.R', 'vignettes/article-utils.R', 'vignettes/wa_data/**', 'vignettes/colville_data/**') }}
@@ -76,14 +76,14 @@ jobs:
           fi
           exit "$status"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pkgdown-build-log
           path: pkgdown-build.log
           if-no-files-found: ignore
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
@@ -95,4 +95,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
