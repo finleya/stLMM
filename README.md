@@ -64,7 +64,7 @@ To build and install it from a local clone with vignettes, run:
 git clone git@github.com:finleya/stLMM.git
 cd stLMM
 R CMD build .
-R CMD INSTALL stLMM_0.0.1.tar.gz
+R CMD INSTALL stLMM_0.0.2.tar.gz
 ```
 
 The vignette build requires Quarto. After installation, start with the installed package vignettes:
