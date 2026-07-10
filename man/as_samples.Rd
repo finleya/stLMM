@@ -1,13 +1,5 @@
 \name{as_samples}
 \alias{as_samples}
-\alias{as_samples.stLMM}
-\alias{as_samples.stLMM_chains}
-\alias{as_samples.stLMM_recovery}
-\alias{as_samples.stLMM_recovery_chains}
-\alias{as_samples.stLMM_prediction}
-\alias{as_samples.stLMM_prediction_chains}
-\alias{as_samples.stLMM_fitted_chains}
-\alias{as_samples.matrix}
 \title{Collect stLMM posterior samples in a data frame}
 \usage{
 as_samples(object, ...)
@@ -53,16 +45,14 @@ When \code{metadata = TRUE}, the first columns are \code{.chain} and
 chain when that metadata is available.
 }
 \examples{
-\dontrun{
-fit <- stLMM(y ~ x, data = dat, n_samples = 1000, chains = 4)
-draws <- as_samples(fit, burn = 500, thin = 2)
+set.seed(1)
+dat <- data.frame(y = rnorm(8), x = seq(-1, 1, length.out = 8))
+fit <- stLMM(y ~ x, data = dat, n_samples = 8, warmup = FALSE, verbose = FALSE)
+draws <- as_samples(fit, burn = 2, thin = 2)
 
-rec <- recover(fit, sub_sample = list(start = 501, thin = 2))
-w_draws <- as_samples(rec, include_w = TRUE)
-
-pred <- predict(rec, newdata = newdat, y_samples = TRUE)
+newdat <- data.frame(x = c(-0.5, 0.5))
+pred <- predict(fit, newdata = newdat, y_samples = TRUE)
 pred_draws <- as_samples(pred, sample = "all")
-}
 }
 \seealso{\code{\link{as_mcmc}}, \code{\link{recover}},
 \code{\link{predict.stLMM_recovery}}, \code{\link{fitted.stLMM}}}

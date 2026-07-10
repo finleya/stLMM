@@ -118,9 +118,9 @@ supported for Polya-Gamma models with structured process terms.}
 \code{1L} returns an ordinary \code{stLMM} object. Values greater than one run
 sequential chains and return an \code{stLMM_chains} object.}
 \item{chain_control}{Optional list controlling multi-chain initialization.
-\code{seed} seeds chain-specific starting values and chain-specific random
-number streams before any chain is sampled. \code{dispersion} controls
-log-scale jitter for omitted positive starting values.}
+\code{seed} initializes reproducible chain-specific random number streams when
+supplied. \code{dispersion} controls log-scale jitter for omitted positive
+starting values.}
 \item{describe_terms}{Logical; print model term diagnostics before sampling.}
 \item{...}{Currently unused.}
 }
@@ -297,14 +297,14 @@ include \code{support = c(lower, upper)}. See
 
 \item \strong{Multiple chains.}
 For \code{chains > 1}, omitted starting values are dispersed automatically
-from the defaults. With \code{chain_control$seed}, dispersed starts and
-chain-specific random number streams are generated before any chain is sampled,
-so corresponding chains are reproducible across different Metropolis blocking
-choices. If a starting value is supplied by the user, it controls that
-parameter: scalar values are recycled to all chains, and vectors with length
-\code{chains} provide chain-specific starts. Other lengths are rejected. For
-process terms, chain-specific starts should be supplied in list blocks, for
-example \code{starting = list(nngp_1 = list(sigma_sq = c(1, 2, 3),
+from the defaults. With \code{chain_control$seed}, chain-specific random
+number streams are generated from the supplied seed, so dispersed starts are
+reproducible across different Metropolis blocking choices. If a starting value
+is supplied by the user, it controls that parameter: scalar values are recycled
+to all chains, and vectors with length \code{chains} provide chain-specific
+starts. Other lengths are rejected. For process terms, chain-specific starts
+should be supplied in list blocks, for example
+\code{starting = list(nngp_1 = list(sigma_sq = c(1, 2, 3),
 phi = c(0.2, 0.4, 0.6)))}.
 
 \item \strong{Warmup and retained-sampling adaptation.}
@@ -348,20 +348,26 @@ See \code{\link{stLMM_terms}} for the package-native formula terms recognized
 by \code{stLMM()}.
 }
 \examples{
-\dontrun{
+set.seed(1)
+dat <- data.frame(
+  y = rnorm(8),
+  x = rnorm(8),
+  time = seq_len(8)
+)
+
 fit <- stLMM(
-  y ~ x + iid(group) + nngp(lon, lat),
+  y ~ x + ar1(time),
   data = dat,
-  n_samples = 1000,
+  n_samples = 8,
   priors = list(
     resid = list(tau_sq = ig(2, 1)),
-    iid_1 = list(sigma_sq = ig(2, 1)),
-    nngp_1 = list(sigma_sq = ig(2, 1), phi = uniform(0.1, 10))
-  )
+    ar1_1 = list(sigma_sq = ig(2, 1), phi = uniform(-0.8, 0.8))
+  ),
+  warmup = FALSE,
+  verbose = FALSE
 )
-rec <- recover(fit, sub_sample = list(start = 501, thin = 5))
+rec <- recover(fit, sub_sample = list(start = 5, thin = 1))
 fitted(rec)
-}
 }
 \seealso{\code{\link{stLMM_terms}}, \code{\link{stLMM_priors}},
 \code{\link{recover}}, \code{\link{fitted.stLMM}},

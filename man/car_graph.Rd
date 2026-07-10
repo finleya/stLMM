@@ -101,35 +101,6 @@ adj <- matrix(
   dimnames = list(paste0("a", 1:4), paste0("a", 1:4))
 )
 g <- car_graph(adj)
-
-\dontrun{
-data(stunitco)
-
-## The bundled polygon layer has disconnected island components, so the
-## conservative default reports the problem.
-try(car_graph(stunitco, id = "COUNTYFIPS"))
-
-## Make the graph-building rule explicit and inspect the artificial bridges.
-g_stunitco <- car_graph(stunitco, id = "COUNTYFIPS", island = "nearest")
-nrow(g_stunitco$island_added_edges)
-head(g_stunitco$island_added_edges)
-
-dat <- data.frame(
-  y = rnorm(4),
-  x = rnorm(4),
-  area = paste0("a", 1:4)
-)
-
-fit <- stLMM(
-  y ~ x + car(area, graph = g),
-  data = dat,
-  priors = list(
-    resid = list(tau_sq = ig(2, 1)),
-    car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95))
-  ),
-  n_samples = 1000
-)
-}
 }
 \seealso{
 \code{\link{stunitco}}, \code{\link{stLMM}}, \code{\link{stLMM-terms}}

@@ -81,11 +81,26 @@ For multi-chain input, the returned object has class
 each chain.
 }
 \examples{
-\dontrun{
-fit <- stLMM(...)
-rec <- recover(fit, sub_sample = list(start = 501, thin = 5))
+set.seed(1)
+dat <- data.frame(
+  y = rnorm(8),
+  x = rnorm(8),
+  time = seq_len(8)
+)
+
+fit <- stLMM(
+  y ~ x + ar1(time),
+  data = dat,
+  n_samples = 8,
+  priors = list(
+    resid = list(tau_sq = ig(2, 1)),
+    ar1_1 = list(sigma_sq = ig(2, 1), phi = uniform(-0.8, 0.8))
+  ),
+  warmup = FALSE,
+  verbose = FALSE
+)
+rec <- recover(fit, sub_sample = list(start = 5, thin = 1))
 fitted(rec)
-}
 }
 \seealso{\code{\link{stLMM}}, \code{\link{fitted.stLMM}},
 \code{\link{predict.stLMM_recovery}}, \code{\link{summary.stLMM_recovery}}}

@@ -39,15 +39,11 @@ sample blocks such as fixed effects, grouped random effects, residual
 variance parameters, process variances, and process correlation parameters.
 }
 \examples{
-\dontrun{
-fit <- stLMM(y ~ x, data = dat, n_samples = 1000, chains = 4)
-m <- as_mcmc(fit, burn = 500)
-coda::gelman.diag(m)
+set.seed(1)
+dat <- data.frame(y = rnorm(8), x = seq(-1, 1, length.out = 8))
+fit <- stLMM(y ~ x, data = dat, n_samples = 8, warmup = FALSE, verbose = FALSE)
+m <- as_mcmc(fit, burn = 2)
 coda::effectiveSize(m)
-
-rec <- recover(fit, sub_sample = list(start = 501, thin = 5))
-rec_m <- as_mcmc(rec, include_w = TRUE)
-}
 }
 \seealso{\code{\link{as_samples}}, \code{\link{recover}},
 \code{\link{stLMM}}, \code{\link{summary.stLMM}}}

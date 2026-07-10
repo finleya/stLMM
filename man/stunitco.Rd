@@ -36,15 +36,6 @@ of very remote island polygons from the original source layer.
 data(stunitco)
 nrow(stunitco)
 names(stunitco)
-
-\dontrun{
-## This errors because the polygon layer has disconnected island components.
-try(car_graph(stunitco, id = "COUNTYFIPS"))
-
-## Add explicit nearest-neighbor bridge edges and inspect them.
-g <- car_graph(stunitco, id = "COUNTYFIPS", island = "nearest")
-head(g$island_added_edges)
-}
 }
 \seealso{
 \code{\link{car_graph}}

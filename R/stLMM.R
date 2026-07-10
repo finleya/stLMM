@@ -121,6 +121,24 @@ stLMM <- function(formula, data = parent.frame(),
         val
     }
 
+    template_starting_value <- function(x, name, where, positive = FALSE,
+                                        lower = -Inf, upper = Inf,
+                                        strict_bounds = FALSE){
+        val <- fixed_parameter_value(x, name, where)
+        if(length(val) == 0L)
+            stop("error: missing starting value for ", name)
+        if(!(length(val) %in% c(1L, chains)))
+            stop("error: starting value for ", name, " must have length 1 or chains")
+        val <- as.numeric(val)
+        if(any(is.na(val)) || any(!is.finite(val)))
+            stop("error: starting value for ", name, " must be finite")
+        if(positive && any(val <= 0))
+            stop("error: starting value for ", name, " must be positive")
+        if(strict_bounds && any(val <= lower | val >= upper))
+            stop("error: starting value for ", name, " must lie in (", lower, ", ", upper, ")")
+        val[1L]
+    }
+
     is_fixed_entry <- function(block, name){
         !is.null(block) && name %in% names(block) && is_fixed_parameter(block[[name]])
     }
@@ -245,9 +263,12 @@ stLMM <- function(formula, data = parent.frame(),
         )
         out <- modifyList(defaults, x)
         if(!is.null(out$seed)){
-            if(!is.numeric(out$seed) || length(out$seed) != 1L || is.na(out$seed))
-                stop("error: chain_control$seed must be a numeric scalar")
-            out$seed <- as.integer(out$seed)
+            if(!is.numeric(out$seed) || length(out$seed) != 1L ||
+               is.na(out$seed) || !is.finite(out$seed) || out$seed < 0 ||
+               out$seed > .Machine$integer.max ||
+               abs(out$seed - round(out$seed)) > sqrt(.Machine$double.eps))
+                stop("error: chain_control$seed must be a nonnegative integer scalar")
+            out$seed <- as.integer(round(out$seed))
         }
         if(!is.numeric(out$dispersion) || length(out$dispersion) != 1L ||
            is.na(out$dispersion) || !is.finite(out$dispersion) || out$dispersion < 0)
@@ -855,9 +876,10 @@ stLMM <- function(formula, data = parent.frame(),
         }
 
         sigma_start_entry <- if(!is.null(start_block) && "sigma_sq" %in% names(start_block)) {
-            require_positive_scalar(
-                fixed_parameter_value(start_block[["sigma_sq"]], "sigma_sq", start_where),
-                "sigma_sq", start_where
+            template_starting_value(
+                start_block[["sigma_sq"]],
+                "sigma_sq", start_where,
+                positive = TRUE
             )
         } else {
             1
@@ -943,7 +965,14 @@ stLMM <- function(formula, data = parent.frame(),
             }
 
             theta_start_entry[nm] <- if(!is.null(start_block) && nm %in% names(start_block)) {
-                fixed_parameter_value(start_block[[nm]], nm, start_where)
+                template_starting_value(
+                    start_block[[nm]],
+                    paste0(term_name, "$", nm),
+                    start_where,
+                    lower = theta_bounds[nm, 1],
+                    upper = theta_bounds[nm, 2],
+                    strict_bounds = theta_tune_entry[nm] > 0
+                )
             } else {
                 mean(theta_bounds[nm, ])
             }
@@ -1985,18 +2014,10 @@ stLMM <- function(formula, data = parent.frame(),
     }
 
     chain_seeds <- sample.int(.Machine$integer.max, chains)
-    chain_backends <- vector("list", chains)
-    chain_rng_states <- vector("list", chains)
-    for(chain in seq_len(chains)){
-        set.seed(chain_seeds[chain])
-        chain_backends[[chain]] <- build_chain_backend(chain)
-        chain_rng_states[[chain]] <- get(".Random.seed", envir = .GlobalEnv)
-    }
-
     chain_fits <- vector("list", chains)
     for(chain in seq_len(chains)){
-        backend_i <- chain_backends[[chain]]
-        assign(".Random.seed", chain_rng_states[[chain]], envir = .GlobalEnv)
+        set.seed(chain_seeds[chain])
+        backend_i <- build_chain_backend(chain)
         if(isTRUE(verbose))
             message("chain ", chain, " of ", chains)
         out_i <- run_collapsed_sampler(backend_i)

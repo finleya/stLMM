@@ -46,10 +46,25 @@ default as \code{save_process = list(start = 1, thin = 1)} and
 \code{recover()} on the fitted object to make those samples available.
 }
 \examples{
-\dontrun{
-fit <- stLMM(...)
+set.seed(1)
+dat <- data.frame(
+  y = rnorm(8),
+  x = rnorm(8),
+  time = seq_len(8)
+)
+
+fit <- stLMM(
+  y ~ x + ar1(time),
+  data = dat,
+  n_samples = 8,
+  priors = list(
+    resid = list(tau_sq = ig(2, 1)),
+    ar1_1 = list(sigma_sq = ig(2, 1), phi = uniform(-0.8, 0.8))
+  ),
+  warmup = FALSE,
+  verbose = FALSE
+)
 rec <- recover(fit)
 mu_hat <- fitted(rec)
 mu_draws <- fitted(rec, summary = FALSE)
-}
 }

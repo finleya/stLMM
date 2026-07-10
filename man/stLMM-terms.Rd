@@ -396,7 +396,13 @@ adj <- matrix(
 )
 g <- car_graph(adj)
 
-\dontrun{
+set.seed(1)
+dat <- data.frame(
+  y = rnorm(3),
+  x = rnorm(3),
+  area = c("a", "b", "c")
+)
+
 fit <- stLMM(
   y ~ x + car(area, graph = g),
   data = dat,
@@ -404,27 +410,12 @@ fit <- stLMM(
     resid = list(tau_sq = ig(2, 1)),
     car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95))
   ),
-  n_samples = 1000
+  n_samples = 8,
+  warmup = FALSE,
+  verbose = FALSE
 )
 rec <- recover(fit)
 fitted(rec)
-}
-
-\dontrun{
-fit_st <- stLMM(
-  y ~ x + car_time(area, time, graph = g),
-  data = dat_st,
-  priors = list(
-    resid = list(tau_sq = ig(2, 1)),
-    car_time_1 = list(
-      sigma_sq = ig(2, 1),
-      rho = uniform(0.05, 0.95),
-      phi = uniform(-0.95, 0.95)
-    )
-  ),
-  n_samples = 1000
-)
-}
 }
 \seealso{
 \code{\link{stLMM}}, \code{\link{recover}}, \code{\link{fitted.stLMM}},

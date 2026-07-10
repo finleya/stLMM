@@ -214,12 +214,29 @@ multi-chain input, the returned object has class
 each chain.
 }
 \examples{
-\dontrun{
+set.seed(1)
+dat <- data.frame(
+  y = rnorm(8),
+  x = rnorm(8),
+  time = seq_len(8)
+)
+
+fit <- stLMM(
+  y ~ x + ar1(time),
+  data = dat,
+  n_samples = 8,
+  priors = list(
+    resid = list(tau_sq = ig(2, 1)),
+    ar1_1 = list(sigma_sq = ig(2, 1), phi = uniform(-0.8, 0.8))
+  ),
+  warmup = FALSE,
+  verbose = FALSE
+)
 rec <- recover(fit)
 pred_fit <- predict(rec)
+newdat <- data.frame(x = c(-0.5, 0.5), time = c(9, 10))
 pred_new <- predict(rec, newdata = newdat, y_samples = TRUE)
 summary(pred_new)
-}
 }
 \seealso{\code{\link{recover}}, \code{\link{fitted.stLMM}},
 \code{\link{summary.stLMM_prediction}}}

@@ -83,14 +83,13 @@ not imported, so ordinary model fitting does not require it.
 produced by \code{loo::waic()}.
 }
 \examples{
-\dontrun{
-fit <- stLMM(y ~ x, data = dat, n_samples = 1000)
-ll <- log_lik(fit, sub_sample = list(start = 501, thin = 2))
-waic(fit, sub_sample = list(start = 501, thin = 2))
+set.seed(1)
+dat <- data.frame(y = rnorm(8), x = seq(-1, 1, length.out = 8))
+fit <- stLMM(y ~ x, data = dat, n_samples = 8, warmup = FALSE, verbose = FALSE)
+ll <- log_lik(fit, sub_sample = list(start = 5, thin = 1))
 
-fit_p <- stLMM(y ~ x + ar1(time), data = dat, n_samples = 1000)
-rec_p <- recover(fit_p, sub_sample = list(start = 501, thin = 2))
-waic(rec_p)
+if (requireNamespace("loo", quietly = TRUE)) {
+  waic(fit, sub_sample = list(start = 5, thin = 1))
 }
 }
 \seealso{\code{\link{stLMM}}, \code{\link{recover}},

@@ -132,33 +132,27 @@ settings, spatial decay parameters can be weakly identified and may be
 sensitive to the chosen support, neighbor size, and coordinate scale; inspect
 trace plots and posterior mass near prior boundaries.
 }
+\value{
+Prior constructors return objects of class \code{stLMM_prior} describing the
+prior family, parameters, support, and scale used by \code{\link{stLMM}}.
+\code{fixed()} returns an object of class \code{stLMM_fixed_parameter} marking
+a covariance or variance parameter as fixed at the supplied numeric value.
+}
 \examples{
-\dontrun{
-fit <- stLMM(
-  y ~ x + nngp(lon, lat, cov_model = "matern"),
-  data = dat,
-  priors = list(
-    beta = normal(mean = 0, sd = 10),
-    resid = list(tau_sq = ig(2, 0.1)),
-    nngp_1 = list(
-      sigma_sq = half_t(df = 4, scale = 1),
-      phi = log_normal(log(5), 0.75, support = c(0.5, 20)),
-      nu = uniform(0.1, 2)
-    )
-  ),
-  n_samples = 1000
+priors <- list(
+  beta = normal(mean = 0, sd = 10),
+  resid = list(tau_sq = ig(2, 0.1)),
+  nngp_1 = list(
+    sigma_sq = half_t(df = 4, scale = 1),
+    phi = log_normal(log(5), 0.75, support = c(0.5, 20)),
+    nu = uniform(0.1, 2)
+  )
 )
 
-fit_fixed <- stLMM(
-  y ~ x + nngp(lon, lat),
-  data = dat,
-  starting = list(
-    resid = list(tau_sq = fixed(0.5)),
-    nngp_1 = list(sigma_sq = fixed(1), phi = fixed(3))
-  ),
-  n_samples = 1000
+starting <- list(
+  resid = list(tau_sq = fixed(0.5)),
+  nngp_1 = list(sigma_sq = fixed(1), phi = fixed(3))
 )
-}
 }
 \seealso{\code{\link{stLMM}}, \code{\link{stLMM_terms}},
 \code{\link{get_cor_models}}}

@@ -109,39 +109,22 @@ negative residual variances are not possible. Starting values for these
 parameters are supplied with the \code{starting} argument inside
 \code{resid(...)}.
 }
-\examples{
-\dontrun{
-fit <- stLMM(
-  yhat ~ x + car(area, graph = g) + resid(model = "fixed", variance = vhat),
-  data = dat,
-  n_samples = 1000,
-  priors = list(car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95)))
-)
-
-fit2 <- stLMM(
-  yhat ~ x + car(area, graph = g) + resid(model = "group", group = area),
-  data = dat,
-  n_samples = 1000,
-  priors = list(
-    resid = list(tau_sq = half_t(df = 3, scale = 1)),
-    car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95))
-  )
-)
-
-fit3 <- stLMM(
-  yhat ~ x + car(area, graph = g) +
-    resid(model = "group", group = area, variance = vhat, prior = "ig", shape = 6),
-  data = dat,
-  n_samples = 1000,
-  priors = list(car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95)))
-)
-
-fit4 <- stLMM(
-  yhat ~ x + car(area, graph = g) + resid(model = "scaled", variance = vhat, n = n_eff),
-  data = dat,
-  n_samples = 1000,
-  priors = list(car_1 = list(sigma_sq = ig(2, 1), rho = uniform(0.05, 0.95)))
-)
+\value{
+An object of class \code{stLMM_residual} that encodes the residual variance
+model selected by the formula term. The object is intended for use inside
+\code{\link{stLMM}} formulas and stores the residual model type plus the
+user-supplied grouping, variance, starting-value, and tuning information needed
+when the model frame is built.
 }
+\examples{
+area <- rep(letters[1:3], each = 2)
+vhat <- rep(c(0.2, 0.4, 0.6), each = 2)
+n_eff <- rep(c(10, 20, 30), each = 2)
+
+resid()
+resid(model = "fixed", variance = vhat)
+resid(model = "group", group = area)
+resid(model = "group", group = area, variance = vhat, prior = "ig", shape = 6)
+resid(model = "scaled", variance = vhat, n = n_eff)
 }
 \seealso{\code{\link{stLMM}}, \code{\link{predict.stLMM_recovery}}}
