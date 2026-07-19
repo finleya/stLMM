@@ -203,7 +203,7 @@ The intended workflow is:
 fit <- stLMM(...)
 summary(fit)
 rec <- recover(fit)
-fitted(rec)
+stats::fitted(rec)
 predict(rec, newdata = ...)
 }
 For models without structured process terms, \code{fitted()} and
@@ -367,8 +367,8 @@ fit <- stLMM(
   verbose = FALSE
 )
 rec <- recover(fit, sub_sample = list(start = 5, thin = 1))
-fitted(rec)
+stats::fitted(rec)
 }
 \seealso{\code{\link{stLMM_terms}}, \code{\link{stLMM_priors}},
-\code{\link{recover}}, \code{\link{fitted.stLMM}},
+\code{\link{recover}}, \code{\link[stats]{fitted}},
 \code{\link{predict.stLMM_recovery}}, \code{\link{summary.stLMM}}}

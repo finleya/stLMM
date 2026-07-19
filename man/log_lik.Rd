@@ -93,4 +93,4 @@ if (requireNamespace("loo", quietly = TRUE)) {
 }
 }
 \seealso{\code{\link{stLMM}}, \code{\link{recover}},
-\code{\link{fitted.stLMM}}, \code{\link{predict.stLMM_recovery}}}
+\code{\link[stats]{fitted}}, \code{\link{predict.stLMM_recovery}}}

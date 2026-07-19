@@ -100,7 +100,7 @@ fit <- stLMM(
   verbose = FALSE
 )
 rec <- recover(fit, sub_sample = list(start = 5, thin = 1))
-fitted(rec)
+stats::fitted(rec)
 }
-\seealso{\code{\link{stLMM}}, \code{\link{fitted.stLMM}},
+\seealso{\code{\link{stLMM}}, \code{\link[stats]{fitted}},
 \code{\link{predict.stLMM_recovery}}, \code{\link{summary.stLMM_recovery}}}

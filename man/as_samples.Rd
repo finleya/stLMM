@@ -55,4 +55,4 @@ pred <- predict(fit, newdata = newdat, y_samples = TRUE)
 pred_draws <- as_samples(pred, sample = "all")
 }
 \seealso{\code{\link{as_mcmc}}, \code{\link{recover}},
-\code{\link{predict.stLMM_recovery}}, \code{\link{fitted.stLMM}}}
+\code{\link{predict.stLMM_recovery}}, \code{\link[stats]{fitted}}}

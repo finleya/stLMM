@@ -238,5 +238,5 @@ newdat <- data.frame(x = c(-0.5, 0.5), time = c(9, 10))
 pred_new <- predict(rec, newdata = newdat, y_samples = TRUE)
 summary(pred_new)
 }
-\seealso{\code{\link{recover}}, \code{\link{fitted.stLMM}},
+\seealso{\code{\link{recover}}, \code{\link[stats]{fitted}},
 \code{\link{summary.stLMM_prediction}}}
