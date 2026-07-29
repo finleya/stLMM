@@ -165,7 +165,7 @@ extern "C" SEXP stLMM_predict_nngp_joint_false(SEXP support_r,
   int n_fit, n_new, dim, n_draw, theta_dim, m, n_threads, total;
   int i, j, k, l, idx, draw, node, tid, info;
   int cov_model_index, distance_mode, error_code, error_info;
-  double one, h, u, mean, rBr, var;
+  double h, u, mean, rBr, var;
   const double *support, *new_coords, *w_fit, *sigma_sq, *theta;
   const int *neighbor_index;
   double *out, *z, *scratch_C, *scratch_c, *scratch_B, *scratch_theta;

@@ -65,7 +65,7 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
   double h, u, rBr;
   double *c, *C, *bk;
   double sigmaRef;
-  int status, statusNode, nThreads, isMatern, spatialDim;
+  int status, statusNode, isMatern, spatialDim;
 
   if(g->type != GRAPH_NNGP)
     return;
@@ -81,12 +81,11 @@ void update_nngp_BF(SamplerState *s, GraphState *g, TermState *term)
   sigmaRef = 1.0;
   status = 0;
   statusNode = -1;
-  nThreads = s->nOmpThreads;
   isMatern = std::strcmp(get_cor_model_info(term->covModelIndex)->name, "matern") == 0;
   spatialDim = graph_spatial_dim(g, term);
 
 #ifdef _OPENMP
-#pragma omp parallel for num_threads(nThreads) private(j, k, l, m, start, info, h, u, rBr, c, C, bk)
+#pragma omp parallel for num_threads(s->nOmpThreads) private(j, k, l, m, start, info, h, u, rBr, c, C, bk)
 #endif
   for(i = 0; i < g->nNode; i++){
     int threadID = 0;

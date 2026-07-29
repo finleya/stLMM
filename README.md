@@ -30,6 +30,20 @@ The R ecosystem already includes strong software for mixed models, spatial stati
 
 That design is especially useful when the scientific question is not only "fit this one model as fast as possible," but also "compare several plausible latent structures, residual variance specifications, likelihoods, and prediction supports using the same inferential framework."
 
+## Documentation
+
+For a short package overview, see the arXiv article [stLMM: Bayesian Spatial and Space-Time Linear Mixed Models for Small-Area Ecological Estimation](https://arxiv.org/abs/2607.02836). It summarizes the package motivation, supported model classes, formula interface, collapsed sampler design, and package-level workflows.
+
+The modeling and software details document is the technical reference for the software design, notation, model terms, collapsed sampler, recovery, and prediction machinery.
+
+The installed package keeps its vignette set intentionally small so package builds and checks stay lightweight. The package vignette sources are:
+
+- Getting started: `vignettes/v01-getting-started.qmd`
+- Point-referenced NNGP: `vignettes/v02-spatial-nngp.qmd`
+- Modeling and software details: `dev/modeling_and_software_details/stLMM.tex`
+
+The broader article set, including areal models, likelihood extensions, diagnostics, runtime notes, applied workflows, and the PDF technical reference, is intended for the package website at <https://finleya.github.io/stLMM/>.
+
 ## Model Terms
 
 Current formula terms include:
@@ -52,7 +66,13 @@ For model-fit diagnostics, `log_lik()` returns observed-row pointwise log-likeli
 
 ## Installation
 
-The package is not on CRAN. To install from GitHub, use:
+Install the released package from CRAN with:
+
+```r
+install.packages("stLMM")
+```
+
+To install the development version from GitHub, use:
 
 ```r
 remotes::install_github("finleya/stLMM")
@@ -64,7 +84,7 @@ To build and install it from a local clone with vignettes, run:
 git clone git@github.com:finleya/stLMM.git
 cd stLMM
 R CMD build .
-R CMD INSTALL stLMM_0.0.2.tar.gz
+R CMD INSTALL stLMM_0.0.3.tar.gz
 ```
 
 The vignette build requires Quarto. After installation, start with the installed package vignettes:
@@ -91,15 +111,3 @@ For a faster install without rebuilding vignettes, install the package source di
 ```sh
 R CMD INSTALL .
 ```
-
-## Documentation
-
-The installed package keeps its vignette set intentionally small so package builds and checks stay lightweight. The package vignette sources are:
-
-- Getting started: `vignettes/v01-getting-started.qmd`
-- Point-referenced NNGP: `vignettes/v02-spatial-nngp.qmd`
-- Modeling and software details: `dev/modeling_and_software_details/stLMM.tex`
-
-The broader article set, including areal models, likelihood extensions, diagnostics, runtime notes, applied workflows, and the PDF technical reference, is intended for the package website at <https://finleya.github.io/stLMM/>.
-
-The modeling and software details document is the technical reference for the software design, notation, model terms, collapsed sampler, recovery, and prediction machinery.

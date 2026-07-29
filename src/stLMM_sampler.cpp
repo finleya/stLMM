@@ -1,4 +1,7 @@
 #include "stLMM_internal.h"
+
+#include <algorithm>
+
 #include <BayesLogit.h>
 
 /* Main collapsed MCMC driver and sampler reporting.
@@ -75,7 +78,7 @@ double sparse_Z_col_dot_dense(SamplerState *s, int col, const double *v)
 
 void update_mean_without_alpha(SamplerState *s, const double *beta, double *out)
 {
-  int i, inc;
+  int inc;
   double one, minusOne;
 
   inc      = 1;
@@ -289,22 +292,23 @@ double log_cov_params_target_collapsed(SamplerState *s, const double *resid)
 
   if(is_pg_likelihood(s)){
     /* No tau_sq term: PG observation precision is the current omega. */
-  } else if(s->residualModel == 0 && s->tauTune > 0.0)
+  } else if(s->residualModel == 0 && s->tauTune > 0.0){
     out += log_prior_kernel_original(s->tauSq, s->tauSqPrior)
          + std::log(s->tauSq);
-  else if(s->residualModel == 2)
+  } else if(s->residualModel == 2){
     for(i = 0; i < s->nResidualGroup; i++)
       if(s->residualVarianceTune[i] > 0.0)
         out += log_prior_kernel_original(s->residualVariance[i],
                                          s->residualVariancePrior[i])
              + std::log(s->residualVariance[i]);
-  else if(s->residualModel == 3)
+  } else if(s->residualModel == 3){
     for(i = 0; i < s->nResidualGroup; i++)
       if(s->residualVarianceTune[i] > 0.0){
         double z = (std::log(s->residualVariance[i]) - s->residualVarianceMeanLog[i]) /
                    s->residualVarianceSdLog[i];
         out += -0.5 * z * z;
       }
+  }
 
   for(i = 0; i < s->nTerms; i++){
     TermState *term = s->terms + i;
@@ -337,22 +341,23 @@ int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, do
 
   if(is_pg_likelihood(s)){
     /* No tau_sq term: PG observation precision is the current omega. */
-  } else if(s->residualModel == 0 && s->tauTune > 0.0)
+  } else if(s->residualModel == 0 && s->tauTune > 0.0){
     *out += log_prior_kernel_original(s->tauSq, s->tauSqPrior)
           + std::log(s->tauSq);
-  else if(s->residualModel == 2)
+  } else if(s->residualModel == 2){
     for(i = 0; i < s->nResidualGroup; i++)
       if(s->residualVarianceTune[i] > 0.0)
         *out += log_prior_kernel_original(s->residualVariance[i],
                                           s->residualVariancePrior[i])
               + std::log(s->residualVariance[i]);
-  else if(s->residualModel == 3)
+  } else if(s->residualModel == 3){
     for(i = 0; i < s->nResidualGroup; i++)
       if(s->residualVarianceTune[i] > 0.0){
         double z = (std::log(s->residualVariance[i]) - s->residualVarianceMeanLog[i]) /
                    s->residualVarianceSdLog[i];
         *out += -0.5 * z * z;
       }
+  }
 
   for(i = 0; i < s->nTerms; i++){
     TermState *term = s->terms + i;
@@ -745,7 +750,7 @@ void update_adaptive_scalar_block_state(SamplerState *s, CovProposalBlock *b, in
 
 int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block, const double *resid)
 {
-  int i, j;
+  int i;
   double logPostOld, logPostProp, logu;
   CovProposalState *p;
   CovBindingSave save;
@@ -1132,7 +1137,7 @@ SEXP char_vector_from_term_labels(SamplerState *s)
 
 SEXP list_B_by_term(SamplerState *s)
 {
-  int t, j, m_i, total_nnbr;
+  int t, j, total_nnbr;
   SEXP out, Bj;
 
   PROTECT(out = Rf_allocVector(VECSXP, s->nTerms));
@@ -2194,7 +2199,7 @@ void print_term_description(SEXP td_r)
 
 SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamplesDone)
 {
-  SEXP meta_r, td_r, global_r, fixed_r, random_r, re_terms_r, process_terms_r;
+  SEXP meta_r, td_r, global_r, random_r, re_terms_r, process_terms_r;
   int t, i;
   double fill;
 
@@ -2205,7 +2210,6 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
   PROTECT(td_r = Rf_duplicate(meta_r));
 
   global_r = getListElement(td_r, "global");
-  fixed_r = getListElement(td_r, "fixed_effects");
   random_r = getListElement(td_r, "random_effects");
   process_terms_r = getListElement(td_r, "process_terms");
   re_terms_r = getListElement(random_r, "terms");
