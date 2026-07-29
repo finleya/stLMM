@@ -34,8 +34,6 @@ That design is especially useful when the scientific question is not only "fit t
 
 For a short package overview, see the arXiv article [stLMM: Bayesian Spatial and Space-Time Linear Mixed Models for Small-Area Ecological Estimation](https://arxiv.org/abs/2607.02836). It summarizes the package motivation, supported model classes, formula interface, collapsed sampler design, and package-level workflows.
 
-The modeling and software details document is the technical reference for the software design, notation, model terms, collapsed sampler, recovery, and prediction machinery.
-
 The installed package keeps its vignette set intentionally small so package builds and checks stay lightweight. The package vignette sources are:
 
 - Getting started: `vignettes/v01-getting-started.qmd`
