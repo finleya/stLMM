@@ -65,7 +65,8 @@ is allowed, and it cannot be used in interactions. The formula term selects
 the residual variance model; corresponding priors, starting values, and tuning
 values are supplied through the \code{resid} block in \code{priors},
 \code{starting}, and \code{tuning}. Gaussian residual variance models are not
-used with Polya-Gamma likelihoods such as \code{family = "binomial"} or
+used with augmented non-Gaussian likelihoods such as
+\code{family = "binomial"}, \code{family = "probit"}, or
 \code{family = "negative_binomial"}.
 
 \code{resid(model = "tau_sq")} estimates one scalar residual variance. Use

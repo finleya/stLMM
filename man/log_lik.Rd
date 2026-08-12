@@ -46,7 +46,7 @@ or corresponding multi-chain object. Models with structured process terms
 require saved or recovered latent process samples.}
 \item{sub_sample}{A list with optional integer entries \code{start} and
 \code{thin}. For ordinary fits these select posterior draw indices. For
-recovered objects and Polya-Gamma process fits with saved process draws, these
+recovered objects and augmented non-Gaussian process fits with saved process draws, these
 select saved or recovered draws through \code{recover_iter}.}
 \item{...}{Additional arguments. For \code{waic()}, these are passed to
 \code{loo::waic()}.}
@@ -65,13 +65,14 @@ The calculation is conditional on the latent model expression. For Gaussian
 models, each entry is evaluated with the fitted linear predictor and the
 draw-specific residual standard deviation. For binomial models, entries are
 computed with the inverse-logit probability and fitted trial count. For
-fixed-size negative-binomial models, entries are computed with the log-mean
+probit models, entries are computed with the standard-normal cdf probability.
+For fixed-size negative-binomial models, entries are computed with the log-mean
 linear predictor and the fitted size parameter.
 
 For models with structured process terms, \code{log_lik()} requires saved or
 recovered latent process samples so that the latent linear predictor can be
 evaluated draw by draw. Gaussian process models should therefore be passed to
-\code{recover()} before calling \code{log_lik()} or \code{waic()}. Polya-Gamma
+\code{recover()} before calling \code{log_lik()} or \code{waic()}. Augmented non-Gaussian
 process fits can be used directly when process draws were saved during
 \code{stLMM()}.
 

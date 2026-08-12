@@ -47,10 +47,10 @@ covariance-coefficient updates are threaded. Other major recovery work,
 including sparse factorization and latent Gaussian random draws, is not
 parallelized by this argument.
 
-For Polya-Gamma process models, process draws are saved during \code{stLMM()}
+For augmented non-Gaussian process models, process draws are saved during \code{stLMM()}
 by default as \code{save_process = list(start = 1, thin = 1)}. In that case,
 \code{recover()} only selects and labels the saved
-in-chain process draws. If a Polya-Gamma process model was fit with
+in-chain process draws. If an augmented non-Gaussian process model was fit with
 \code{save_process = FALSE}, \code{recover()} errors and the model must be
 refit with \code{save_process = TRUE} or
 \code{save_process = list(start = ..., thin = ...)}.
@@ -63,10 +63,10 @@ this recovery step. When the fitted data include rows with missing numeric
 responses, recovered process samples are on the full latent support, including
 latent nodes associated only with those missing-response rows.
 
-For Polya-Gamma process models, the sampler uses warm-running internal
-Polya-Gamma latent-process draws to update the augmentation variables. Those
+For augmented non-Gaussian process models, the sampler uses warm-running internal
+latent-process draws to update the augmentation variables. Those
 same in-chain process draws are the process samples used by \code{recover()}.
-Post-fit Polya-Gamma reconstruction is intentionally not supported.
+Post-fit augmented non-Gaussian process reconstruction is intentionally not supported.
 }
 \value{
 The fitted object with recovered latent process draws added. User-facing

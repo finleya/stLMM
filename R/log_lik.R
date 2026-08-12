@@ -126,6 +126,15 @@ pointwise_log_lik_from_eta <- function(object, eta, draw_index){
       nrow = n_draw,
       ncol = n_obs
     )
+  } else if(identical(family, "probit")){
+    out <- matrix(
+      stats::dbinom(as.vector(y_mat),
+                    size = 1L,
+                    prob = stats::pnorm(as.vector(eta_obs)),
+                    log = TRUE),
+      nrow = n_draw,
+      ncol = n_obs
+    )
   } else if(identical(family, "negative_binomial")) {
     size <- backend$nb_size
     if(is.null(size))

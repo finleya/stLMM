@@ -17,7 +17,7 @@ recover.stLMM <- function(object,
   if(!is.list(sub_sample))
     stop("error: sub_sample must be a list with optional entries 'start' and 'thin'")
   if("pg_iter" %in% names(sub_sample))
-    stop("error: sub_sample$pg_iter is no longer supported; Polya-Gamma process models must save process draws during stLMM() via save_process")
+    stop("error: sub_sample$pg_iter is no longer supported; augmented non-Gaussian process models must save process draws during stLMM() via save_process")
 
   start <- sub_sample$start
   thin <- sub_sample$thin
@@ -46,13 +46,15 @@ recover.stLMM <- function(object,
 
   is_pg_likelihood <- identical(object$backend$family, "binomial") ||
     identical(object$backend$family, "negative_binomial")
+  is_augmented_likelihood <- is_pg_likelihood ||
+    identical(object$backend$family, "probit")
 
-  if(is_pg_likelihood){
+  if(is_augmented_likelihood){
     stlmm_progress(verbose, "recover: selecting saved in-chain process draws")
     if(is.null(object$recover_iter) || !length(object$recover_iter) ||
        is.null(object$w_samples_stacked) || !is.matrix(object$w_samples_stacked))
       stop(
-        "error: Polya-Gamma process recovery requires process draws saved during stLMM(); ",
+        "error: augmented non-Gaussian process recovery requires process draws saved during stLMM(); ",
         "refit with save_process = list(start = ..., thin = ...)"
       )
 

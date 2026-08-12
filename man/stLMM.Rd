@@ -49,10 +49,13 @@ are not required for covariance or residual variance parameters supplied with
 \code{\link{fixed}}.}
 \item{family}{Model likelihood family. Use \code{"gaussian"} for Gaussian
 linear mixed models or \code{"binomial"} for binomial logistic models using
-Polya-Gamma Gibbs updates. Use \code{"negative_binomial"} for fixed-size
+Polya-Gamma Gibbs updates. Use \code{"probit"} for binary probit models using
+Albert-Chib latent-normal augmentation. Use \code{"negative_binomial"} for fixed-size
 negative-binomial log-mean count models using Polya-Gamma Gibbs updates. The
 default is \code{"gaussian"}. For compatibility with familiar R model syntax,
-\code{gaussian()} and \code{binomial()} are also accepted.}
+\code{gaussian()}, \code{binomial()}, \code{binomial(link = "logit")}, and
+\code{binomial(link = "probit")} are also accepted. Other binomial links are
+not currently supported.}
 \item{trials}{Optional binomial trial counts for \code{family = "binomial"}.
 The default \code{NULL} uses one trial per row, i.e. Bernoulli data. A single
 character string names a column in \code{data}; otherwise supply a positive
@@ -105,15 +108,15 @@ also accepted. The \code{postorder} element is logical and defaults to
 \pkg{Matrix} to have been built with METIS/partitioning support.}
 \item{save_process}{Controls whether structured latent process draws are saved
 during MCMC. Use \code{NULL} for the default: process draws are saved
-automatically for Polya-Gamma process models as
+automatically for augmented non-Gaussian process models as
 \code{list(start = 1, thin = 1)} and not saved otherwise. Use
 \code{TRUE} as shorthand for \code{list(start = 1, thin = 1)}, use
 \code{FALSE} to turn saving off, or use a list with \code{start} and
 \code{thin}, for example
-\code{save_process = list(start = 501, thin = 5)}. For Polya-Gamma process
+\code{save_process = list(start = 501, thin = 5)}. For augmented non-Gaussian process
 models, saved in-chain process draws are required for \code{recover()},
 \code{fitted()}, and process prediction. Enabling \code{save_process} is only
-supported for Polya-Gamma models with structured process terms.}
+supported for augmented non-Gaussian models with structured process terms.}
 \item{chains}{Positive integer number of MCMC chains to run. The default
 \code{1L} returns an ordinary \code{stLMM} object. Values greater than one run
 sequential chains and return an \code{stLMM_chains} object.}
@@ -142,11 +145,11 @@ call, \code{term_description}, and the stored \code{backend} used by recovery
 and prediction. Multi-chain fits also include top-level sampler timing by chain
 and total sampler timing across chains.
 
-Latent process draws are saved during fitting only for Polya-Gamma likelihoods
+Latent process draws are saved during fitting only for augmented non-Gaussian likelihoods
 with structured process terms. The default in that case is
 \code{save_process = list(start = 1, thin = 1)}, because those in-chain process
-draws are already needed by the Polya-Gamma augmentation and post-fit
-Polya-Gamma process reconstruction is not used. For Gaussian process models,
+draws are already needed by the likelihood augmentation and post-fit
+augmented process reconstruction is not used. For Gaussian process models,
 the sampler remains fully collapsed with respect to the process terms and
 \code{recover()} is the intended post-fit step for drawing latent process
 samples.
@@ -159,7 +162,7 @@ Fits Bayesian linear mixed models with fixed effects, optional explicit iid
 grouped random effects, and optional structured latent process terms. Structured
 process terms are integrated out during parameter updates. For Gaussian process
 models, their latent draws are recovered afterward with \code{\link{recover}}.
-For Polya-Gamma process models, the in-chain process draws already used by the
+For augmented non-Gaussian process models, the in-chain process draws already used by the
 augmentation step are saved and reused by fitted-value, recovery, and
 prediction methods.
 
@@ -173,6 +176,14 @@ Binomial trials default to one per row and can be supplied through
 used for binomial fits. For structured binomial process models, the sampler
 saves in-chain process draws by default; \code{\link{recover}} selects from
 those saved draws.
+
+For \code{family = "probit"}, the response must be binary 0/1. The sampler
+uses Albert-Chib latent-normal variables with unit latent residual variance.
+Conditional on these latent responses, the model is fit as a Gaussian working
+model with unit observation precision. The Gaussian \code{resid()} residual
+variance term and \code{tau_sq} controls are not used for probit fits. For
+structured probit process models, the sampler saves in-chain process draws by
+default; \code{\link{recover}} selects from those saved draws.
 
 For \code{family = "negative_binomial"}, the response must be non-negative
 integer counts and \code{size} must be supplied as a positive fixed scalar.
@@ -283,7 +294,7 @@ Metropolis proposal blocks.
 
 \item \strong{Priors and parameter transforms.}
 Process terms require priors for parameters that are sampled. The Gaussian
-likelihood defaults to a flat fixed effect prior, while Polya-Gamma likelihoods
+likelihood defaults to a flat fixed effect prior, while augmented non-Gaussian likelihoods
 default to \code{normal(mean = 0, sd = 10)} for fixed effects. The
 \code{flat()} and \code{normal()} constructors are accepted only for
 \code{priors$beta}. Variance parameters are positive. The

@@ -329,7 +329,7 @@ test_that("binomial input checks describe unsupported controls", {
 
   expect_error(
     stLMM(y ~ x, data = dat, family = "binomial", save_process = TRUE, n_samples = 4, verbose = FALSE),
-    "only be enabled for Polya-Gamma models with structured process terms"
+    "only be enabled for augmented non-Gaussian models with structured process terms"
   )
 
   expect_error(
@@ -342,7 +342,7 @@ test_that("binomial input checks describe unsupported controls", {
       priors = list(ar1_1 = list(sigma_sq = ig(2, 1), phi = uniform(-0.9, 0.9))),
       tuning = list(ar1_1 = list(sigma_sq = 0, phi = 0))
     ),
-    "only be enabled for Polya-Gamma models with structured process terms"
+    "only be enabled for augmented non-Gaussian models with structured process terms"
   )
 
   fit <- stLMM(

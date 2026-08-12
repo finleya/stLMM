@@ -109,6 +109,8 @@ fitted.stLMM <- function(object,
   if(identical(scale, "response")){
     if(identical(object$backend$family, "binomial"))
       mu <- stats::plogis(mu)
+    else if(identical(object$backend$family, "probit"))
+      mu <- stats::pnorm(mu)
     else if(identical(object$backend$family, "negative_binomial"))
       mu <- exp(mu)
   }
@@ -118,6 +120,7 @@ fitted.stLMM <- function(object,
 
   attr(mu, "draw_index") <- draw_index
   if(identical(object$backend$family, "binomial") ||
+     identical(object$backend$family, "probit") ||
      identical(object$backend$family, "negative_binomial"))
     attr(mu, "scale") <- scale
   mu

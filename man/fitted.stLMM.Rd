@@ -16,6 +16,9 @@ subsets the saved or recovered latent-process draw indices in
 \code{object$recover_iter}.}
 \item{scale}{For \code{family = "binomial"}, return fitted probabilities on
 the \code{"response"} scale or the linear predictor on the \code{"link"} scale.
+For \code{family = "probit"}, return fitted probabilities on the
+\code{"response"} scale or the probit linear predictor on the \code{"link"}
+scale.
 For \code{family = "negative_binomial"}, return fitted mean counts on the
 \code{"response"} scale or the log mean on the \code{"link"} scale. For
 Gaussian models these scales are identical.}
@@ -27,20 +30,20 @@ the original fitted data rows, including rows whose response was missing at fit
 time. If \code{summary = FALSE}, a matrix with posterior draws in rows and
 original data rows in columns. The matrix has a \code{draw_index}
 attribute giving the original MCMC iteration indices used and, for
-\code{summary = FALSE} Polya-Gamma fits, a \code{scale} attribute.
+\code{summary = FALSE} non-Gaussian fits, a \code{scale} attribute.
 }
 \description{
 Computes posterior fitted values for the original data used to fit an
 \code{stLMM} model. These fitted values include all model components that were
 fit: formula offsets, fixed effects, explicit grouped random effects, and
-saved or recovered structured latent process effects. Binomial fitted values default to
-posterior fitted probabilities, and negative-binomial fitted values default to
+saved or recovered structured latent process effects. Binomial and probit
+fitted values default to posterior fitted probabilities, and negative-binomial fitted values default to
 posterior fitted mean counts.
 }
 \details{
 This method does not predict at new locations. For models with structured
 process terms, fitted values require saved or recovered latent process samples.
-For Polya-Gamma process models, \code{stLMM()} saves in-chain process draws by
+For augmented non-Gaussian process models, \code{stLMM()} saves in-chain process draws by
 default as \code{save_process = list(start = 1, thin = 1)} and
 \code{recover()} subsets them. For Gaussian process models, call
 \code{recover()} on the fitted object to make those samples available.

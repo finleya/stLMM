@@ -52,8 +52,8 @@ stLMM <- function(formula, data = parent.frame(),
         val
     }
 
-    normalize_save_process <- function(x, is_pg_likelihood, has_process){
-        default_enabled <- isTRUE(is_pg_likelihood) && isTRUE(has_process)
+    normalize_save_process <- function(x, is_augmented_likelihood, has_process){
+        default_enabled <- isTRUE(is_augmented_likelihood) && isTRUE(has_process)
         if(is.null(x)){
             return(list(
                 enabled = default_enabled,
@@ -65,8 +65,8 @@ stLMM <- function(formula, data = parent.frame(),
 
         if(is.logical(x) && length(x) == 1L && !is.na(x)){
             enabled <- isTRUE(x)
-            if(enabled && (!isTRUE(is_pg_likelihood) || !isTRUE(has_process)))
-                stop("error: save_process can only be enabled for Polya-Gamma models with structured process terms")
+            if(enabled && (!isTRUE(is_augmented_likelihood) || !isTRUE(has_process)))
+                stop("error: save_process can only be enabled for augmented non-Gaussian models with structured process terms")
             return(list(
                 enabled = enabled,
                 start = 1L,
@@ -81,8 +81,8 @@ stLMM <- function(formula, data = parent.frame(),
         enabled <- x$enabled %||% x$process %||% TRUE
         if(!is.logical(enabled) || length(enabled) != 1L || is.na(enabled))
             stop("error: save_process$enabled must be TRUE or FALSE")
-        if(isTRUE(enabled) && (!isTRUE(is_pg_likelihood) || !isTRUE(has_process)))
-            stop("error: save_process can only be enabled for Polya-Gamma models with structured process terms")
+        if(isTRUE(enabled) && (!isTRUE(is_augmented_likelihood) || !isTRUE(has_process)))
+            stop("error: save_process can only be enabled for augmented non-Gaussian models with structured process terms")
 
         start <- x$start %||% 1L
         thin <- x$thin %||% 1L
@@ -313,15 +313,26 @@ stLMM <- function(formula, data = parent.frame(),
         } else if(is.list(x) && !is.null(x$family)) {
             fam <- tolower(as.character(x$family[1L]))
         } else {
-            stop("error: family must be \"gaussian\", \"binomial\", or a corresponding stats family")
+            stop("error: family must be \"gaussian\", \"binomial\", \"probit\", or a corresponding stats family")
         }
         if(fam %in% c("gaussian", "normal"))
             return("gaussian")
+        if(fam == "binomial" && is.list(x)){
+            link <- tolower(as.character(x$link[1L]))
+            if(length(link) != 1L || is.na(link))
+                stop("error: binomial family objects must include a scalar link; currently use binomial(link = \"logit\") or binomial(link = \"probit\")")
+            if(identical(link, "probit"))
+                return("probit")
+            if(!identical(link, "logit"))
+                stop("error: unsupported binomial link '", link, "'; currently use binomial(link = \"logit\") or binomial(link = \"probit\")")
+        }
         if(fam == "binomial")
             return("binomial")
+        if(fam == "probit")
+            return("probit")
         if(fam %in% c("negative_binomial", "negbin", "nb"))
             return("negative_binomial")
-        stop("error: unsupported family '", fam, "'; currently use \"gaussian\", \"binomial\", or \"negative_binomial\"")
+        stop("error: unsupported family '", fam, "'; currently use \"gaussian\", \"binomial\", \"probit\", or \"negative_binomial\"")
     }
 
     normalize_trials <- function(x, data, n_expected){
@@ -1024,8 +1035,10 @@ stLMM <- function(formula, data = parent.frame(),
 
     likelihood_family <- normalize_family(family)
     is_binomial <- identical(likelihood_family, "binomial")
+    is_probit <- identical(likelihood_family, "probit")
     is_negbin <- identical(likelihood_family, "negative_binomial")
     is_pg_likelihood <- is_binomial || is_negbin
+    is_augmented_likelihood <- is_pg_likelihood || is_probit
 
     resid_info <- build_resid_components(formula = formula, data = data)
     residual <- resid_info$residual
@@ -1092,8 +1105,8 @@ stLMM <- function(formula, data = parent.frame(),
         stop("error: missing data in model predictors")
 
     y <- model.response(mf)
-    if(is_pg_likelihood && is.matrix(y))
-        stop("error: matrix responses are not yet supported for Polya-Gamma likelihoods; use a numeric response vector")
+    if(is_augmented_likelihood && is.matrix(y))
+        stop("error: matrix responses are not yet supported for augmented non-Gaussian likelihoods; use a numeric response vector")
     if(anyNA(y) && !is.numeric(y))
         stop("error: missing response values are only supported for numeric responses")
 
@@ -1145,6 +1158,12 @@ stLMM <- function(formula, data = parent.frame(),
         if(any(abs(y_obs_check - round(y_obs_check)) > sqrt(.Machine$double.eps)))
             stop("error: negative-binomial responses must be integer-valued counts")
     }
+    if(is_probit){
+        y_num <- as.numeric(y)
+        y_obs_check <- y_num[observed_index]
+        if(any(!is.finite(y_obs_check)) || any(!(y_obs_check %in% c(0, 1))))
+            stop("error: probit responses must be binary 0/1 values")
+    }
 
     ####################################################
     ## Normalize user controls
@@ -1155,7 +1174,7 @@ stLMM <- function(formula, data = parent.frame(),
     priors   <- normalize_named_list(priors,   "priors")
 
     residual_model <- list(type = "global_tau", label = "tau_sq")
-    if(is_pg_likelihood && !is.null(residual))
+    if(is_augmented_likelihood && !is.null(residual))
         stop("error: resid() is not used with family = \"", likelihood_family, "\"")
     if(!is.null(residual) && !identical(residual$type, "global_tau")){
         if("tau_sq" %in% names(starting))
@@ -1273,10 +1292,10 @@ stLMM <- function(formula, data = parent.frame(),
         priors$beta,
         p = p,
         where = "priors$beta",
-        default_family = if(is_pg_likelihood) "normal" else "flat"
+        default_family = if(is_augmented_likelihood) "normal" else "flat"
     )
 
-    if(is_pg_likelihood){
+    if(is_augmented_likelihood){
         if("tau_sq" %in% names(starting))
             stop("error: starting$tau_sq is not used with family = \"", likelihood_family, "\"")
         if("resid" %in% names(starting))
@@ -1318,7 +1337,7 @@ stLMM <- function(formula, data = parent.frame(),
 
     tau_sq_starting <- if(fixed_residual_variance || sampled_residual_variance) {
         1
-    } else if(is_pg_likelihood) {
+    } else if(is_augmented_likelihood) {
         1
     } else if(!is.null(tau_sq_start_control)) {
         require_positive_scalar(
@@ -1335,7 +1354,7 @@ stLMM <- function(formula, data = parent.frame(),
 
     tau_sq_tuning <- if(fixed_residual_variance || sampled_residual_variance) {
         0
-    } else if(is_pg_likelihood) {
+    } else if(is_augmented_likelihood) {
         0
     } else if(tau_sq_fixed) {
         0
@@ -1345,7 +1364,7 @@ stLMM <- function(formula, data = parent.frame(),
 
     tau_sq_IG <- if(fixed_residual_variance || sampled_residual_variance) {
         c(1, 1)
-    } else if(is_pg_likelihood) {
+    } else if(is_augmented_likelihood) {
         c(1, 1)
     } else if(!is.null(tau_sq_prior_control)) {
         tau_prior_desc <- validate_variance_prior(tau_sq_prior_control, "priors$resid$tau_sq")
@@ -1354,7 +1373,7 @@ stLMM <- function(formula, data = parent.frame(),
 
     tau_sq_prior <- if(fixed_residual_variance || sampled_residual_variance) {
         encode_prior(ig(1, 1))
-    } else if(is_pg_likelihood) {
+    } else if(is_augmented_likelihood) {
         encode_prior(ig(1, 1))
     } else if(!is.null(tau_sq_prior_control)) {
         validate_variance_prior(tau_sq_prior_control, "priors$resid$tau_sq")
@@ -1458,11 +1477,11 @@ stLMM <- function(formula, data = parent.frame(),
     ## Keep full-data objects for fitted values, recovery, summaries, and
     ## prediction. The sampler sees the observed-row contract below.
     y_obs <- y[observed_index]
-    if(is_pg_likelihood)
+    if(is_augmented_likelihood)
         y_obs <- as.double(round(as.numeric(y_obs)))
     offset_obs <- offset[observed_index]
     y_model_obs <- y_obs
-    if(!is_pg_likelihood)
+    if(!is_augmented_likelihood)
         y_model_obs <- as.double(as.numeric(y_obs) - offset_obs)
     X_obs <- X[observed_index, , drop = FALSE]
     storage.mode(y_obs) <- "double"
@@ -1644,7 +1663,7 @@ stLMM <- function(formula, data = parent.frame(),
     warmup <- normalize_warmup(warmup, metropolis)
     save_process_control <- normalize_save_process(
         save_process,
-        is_pg_likelihood = is_pg_likelihood,
+        is_augmented_likelihood = is_augmented_likelihood,
         has_process = length(terms) > 0L
     )
 
@@ -1704,7 +1723,7 @@ stLMM <- function(formula, data = parent.frame(),
         trials = if(is_binomial) as.integer(trials_vec) else NULL,
         trials_obs = if(is_binomial) as.integer(trials_vec[observed_index]) else NULL,
         nb_size = if(is_negbin) as.double(nb_size) else NULL,
-        beta_starting = if(is_pg_likelihood) {
+        beta_starting = if(is_augmented_likelihood) {
             beta_start <- if("beta" %in% names(starting)) {
                 val <- as.numeric(starting$beta)
                 if(length(val) != p || any(!is.finite(val)))
@@ -1938,7 +1957,7 @@ stLMM <- function(formula, data = parent.frame(),
                 colnames(out$theta_samples) <- theta_sample_names
         }
 
-        if(is_pg_likelihood || fixed_residual_variance || sampled_residual_variance)
+        if(is_augmented_likelihood || fixed_residual_variance || sampled_residual_variance)
             out$tau_sq_samples <- NULL
 
         if(sampled_residual_variance && !is.null(out$residual_variance_samples) &&

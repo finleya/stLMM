@@ -144,9 +144,11 @@ spatial-temporal varying coefficient form.
 Structured process terms are collapsed during parameter updates. Gaussian
 process fits use \code{\link{recover}} after fitting to draw latent process
 samples before using process contributions in \code{\link[stats]{fitted}} or
-\code{\link{predict.stLMM_recovery}}. Polya-Gamma process fits save in-chain
-process draws by default as \code{save_process = list(start = 1, thin = 1)} and
-\code{\link{recover}} selects from those draws.
+\code{\link{predict.stLMM_recovery}}. Augmented non-Gaussian process fits
+save in-chain process draws by default as
+\code{save_process = list(start = 1, thin = 1)}. Polya-Gamma models use these
+draws for logit/count augmentation, probit models use them for Albert-Chib
+latent-normal augmentation, and \code{\link{recover}} selects from those draws.
 }
 
 \section{Covariance functions}{

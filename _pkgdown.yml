@@ -36,6 +36,7 @@ articles:
   - a06-spatial-varying-coefficients
   - a07-residual-variance-options
   - a08-binomial-models
+  - a15-probit-models
   - a09-negative-binomial-counts
   - a10-metropolis-blocking-diagnostics
   - a11-runtime-performance

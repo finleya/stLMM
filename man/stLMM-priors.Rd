@@ -70,8 +70,8 @@ precision. If a fixed parameter also has an explicitly positive tuning value,
 currently accepted only as \code{priors = list(beta = ...)}. A flat beta prior
 is the improper prior used by earlier versions of the sampler. A normal beta
 prior is an independent Gaussian prior on the fixed-effect coefficients. The
-Gaussian likelihood defaults to \code{flat()}; Polya-Gamma likelihoods default
-to \code{normal(mean = 0, sd = 10)}.
+Gaussian likelihood defaults to \code{flat()}; augmented non-Gaussian
+likelihoods default to \code{normal(mean = 0, sd = 10)}.
 
 The \code{_dist} suffix is used only where the natural constructor name would
 conflict with an existing R function or a common model parameter name, as in

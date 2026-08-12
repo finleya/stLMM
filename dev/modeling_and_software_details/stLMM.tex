@@ -127,9 +127,9 @@ rec <- recover(fit, ...)
 fitted(rec)
 predict(rec, newdata = ...)
 \end{verbatim}
-where subsampling of posterior parameter draws can occur at the recovery and prediction steps. For P{\'o}lya-Gamma process models, \texttt{predict(fit, ...)} can also use saved in-chain process draws directly; \texttt{recover()} is then a selection and labeling step rather than a stochastic reconstruction step.
+where subsampling of posterior parameter draws can occur at the recovery and prediction steps. For augmented non-Gaussian process models, \texttt{predict(fit, ...)} can also use saved in-chain process draws directly; \texttt{recover()} is then a selection and labeling step rather than a stochastic reconstruction step.
 
-For models without structured process terms, \texttt{fitted()} and \texttt{predict()} can be called directly on the fit object. For Gaussian-likelihood models with structured process terms, \texttt{recover()} is the explicit post-fit step that samples latent process draws conditional on retained posterior parameter draws. For P{\'o}lya-Gamma process models, the sampler retains in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)} and \texttt{recover()} selects from those saved draws. Enabling \texttt{save\_process} is intentionally limited to P{\'o}lya-Gamma models with structured process terms; Gaussian-likelihood process models remain collapsed and use post-fit recovery.
+For models without structured process terms, \texttt{fitted()} and \texttt{predict()} can be called directly on the fit object. For Gaussian-likelihood models with structured process terms, \texttt{recover()} is the explicit post-fit step that samples latent process draws conditional on retained posterior parameter draws. For augmented non-Gaussian process models, including P{\'o}lya-Gamma logit/count models and Albert-Chib probit models, the sampler retains in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)} and \texttt{recover()} selects from those saved draws. Enabling \texttt{save\_process} is intentionally limited to augmented non-Gaussian models with structured process terms; Gaussian-likelihood process models remain collapsed and use post-fit recovery.
 
 \section{Modeling framework}
 \index{modeling framework}
@@ -188,7 +188,7 @@ and the total latent dimension is
   q_{\mathrm{lat}} = \sum_{k=1}^K q_k.
 \end{equation}
 
-The main sampler is collapsed with respect to $\bw$, i.e., structured latent process draws are integrated out during parameter updates. For Gaussian-likelihood models with structured process terms, process draws may be recovered after fitting by \texttt{recover()}. P{\'o}lya-Gamma process models retain the warm-running in-chain process draws used by the augmentation step, with the default retained grid \texttt{save\_process = list(start = 1, thin = 1)}.
+The main sampler is collapsed with respect to $\bw$, i.e., structured latent process draws are integrated out during parameter updates. For Gaussian-likelihood models with structured process terms, process draws may be recovered after fitting by \texttt{recover()}. Augmented non-Gaussian process models retain the warm-running in-chain process draws used by the augmentation step, with the default retained grid \texttt{save\_process = list(start = 1, thin = 1)}.
 
 This formulation is not the fastest sampler for each individual model class, but it gives one coherent implementation for point-referenced, areal, temporal, and space-time terms.
 
@@ -205,7 +205,7 @@ The user-facing functions are deliberately small:
 \item S3 methods for printing, summaries, and plots.
 \end{itemize}
 
-The \texttt{log\_lik()} calculation is conditional on the latent model expression used by fitted values. Models without structured process terms can be evaluated directly from the fit object. Gaussian-likelihood process models require recovered latent process draws, while P{\'o}lya-Gamma process models can use the saved in-chain process draws when \texttt{save\_process} retained them. The optional \texttt{loo} package is used only when \texttt{waic()} is called.
+The \texttt{log\_lik()} calculation is conditional on the latent model expression used by fitted values. Models without structured process terms can be evaluated directly from the fit object. Gaussian-likelihood process models require recovered latent process draws, while augmented non-Gaussian process models can use the saved in-chain process draws when \texttt{save\_process} retained them. The optional \texttt{loo} package is used only when \texttt{waic()} is called.
 
 Backend helpers such as graph builders, correlation registries, and nearest-neighbor index constructors are internal implementation details, not part of the API.
 
@@ -223,7 +223,7 @@ stLMM(formula, data = parent.frame(), starting = list(), tuning = NULL,
 
 To simplify model specification, not all prior distributions need to be specified by the user. Reasonable defaults are used for some low-level quantities, such as the fixed-effect prior and default starts. Other priors, especially structured-process covariance priors, require explicit user consideration and are therefore required.
 
-The \texttt{family} argument currently supports \texttt{"gaussian"}, \texttt{"binomial"}, and \texttt{"negative\_binomial"}. For \texttt{family = "binomial"}, the response is the number of successes and \texttt{trials} supplies the number of trials. If \texttt{trials} is omitted, each row is treated as one Bernoulli trial. Binomial models use a logit link, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "negative\_binomial"}, the response is a nonnegative integer count and \texttt{size} supplies a fixed positive negative-binomial size parameter. Negative-binomial models use a log-mean link and also omit Gaussian residual variance terms.
+The \texttt{family} argument currently supports \texttt{"gaussian"}, \texttt{"binomial"}, \texttt{"probit"}, and \texttt{"negative\_binomial"}. For \texttt{family = "binomial"}, the response is the number of successes and \texttt{trials} supplies the number of trials. If \texttt{trials} is omitted, each row is treated as one Bernoulli trial. Binomial models use a logit link, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "probit"}, the response is binary 0/1 and the link is the standard-normal cdf. Probit models use Albert-Chib latent-normal augmentation, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "negative\_binomial"}, the response is a nonnegative integer count and \texttt{size} supplies a fixed positive negative-binomial size parameter. Negative-binomial models use a log-mean link and also omit Gaussian residual variance terms.
 
 Standard R formula offsets are supported through \texttt{offset()}. The offset is a known additive component of the linear predictor. For count models with an exposure or expected-count scaling $E_i$, users can write \texttt{offset(log(E))}. Section~\ref{sec:negative-binomial} gives the negative-binomial model and computational rationale.
 
@@ -231,7 +231,7 @@ Standard R formula offsets are supported through \texttt{offset()}. The offset i
 
 \texttt{starting} and \texttt{tuning} are optional. If omitted, the sampler uses conservative defaults, which should be checked against the scale and dependence structure of the fitted model.
 
-Priors are supplied through explicit prior constructors. Fixed effects may use \texttt{flat()} or \texttt{normal(mean, sd)}. The Gaussian likelihood defaults to \texttt{flat()} for $\bbeta$, while P{\'o}lya-Gamma likelihoods default to \texttt{normal(mean = 0, sd = 10)}. The \texttt{normal()} constructor defines independent normal priors and allows scalar or coefficient-specific mean and standard-deviation vectors. The \texttt{flat()} and \texttt{normal()} constructors are accepted only for \texttt{priors\$beta}.
+Priors are supplied through explicit prior constructors. Fixed effects may use \texttt{flat()} or \texttt{normal(mean, sd)}. The Gaussian likelihood defaults to \texttt{flat()} for $\bbeta$, while augmented non-Gaussian likelihoods default to \texttt{normal(mean = 0, sd = 10)}. The \texttt{normal()} constructor defines independent normal priors and allows scalar or coefficient-specific mean and standard-deviation vectors. The \texttt{flat()} and \texttt{normal()} constructors are accepted only for \texttt{priors\$beta}.
 
 The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, except iid grouped random-effect variances, which are currently Gibbs-updated and therefore use \texttt{ig()}. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
 
@@ -908,6 +908,41 @@ The P{\'o}lya-Gamma variables are refreshed at the start of each MCMC iteration 
 
 One practical consideration for binomial logit models is imbalance. When fitted probabilities are close to zero or one for many observations, or when binomial counts are concentrated near zero or near the trial count, standard data-augmentation samplers for logistic models can mix slowly. This issue is not unique to \texttt{stLMM} and is discussed for P{\'o}lya-Gamma and related data-augmentation samplers in \cite{Johndrow2019} and \cite{Zens2024}. \cite{Zens2024} propose ``ultimate'' P{\'o}lya-Gamma samplers that combine latent-utility representations with marginal data augmentation using working location and scale parameters.
 
+\section{Probit observation model}\label{sec:probit}
+\index{probit}
+\index{Albert-Chib}
+
+For \texttt{family = "probit"}, the observed response is binary, $y_i\in\{0,1\}$, and
+\begin{equation}
+  \Pr(y_i=1\mid\eta_i)=\Phi(\eta_i),
+\end{equation}
+where $\Phi(\cdot)$ is the standard normal cdf and
+\begin{equation}
+  \eta_i = o_i + \bx_i\trans \bbeta + \bu_i\trans \balpha
+    + \ba_i\trans \bw .
+\end{equation}
+The sampler uses the Albert-Chib latent-normal representation \citep{AlbertChib1993}. Introduce
+\begin{equation}
+  z_i \mid \eta_i \sim N(\eta_i,1),
+  \qquad
+  y_i = 1(z_i > 0).
+\end{equation}
+Conditional on $y_i$ and the current linear predictor, $z_i$ is sampled from a one-sided truncated normal:
+\begin{equation}
+  z_i \mid y_i=1,\eta_i \sim N(\eta_i,1)\,1(z_i>0),
+  \qquad
+  z_i \mid y_i=0,\eta_i \sim N(\eta_i,1)\,1(z_i<0).
+\end{equation}
+Given the latent responses, the model is a Gaussian working model with fixed unit observation variance. As with the P{\'o}lya-Gamma families, the implementation keeps offsets outside the sampled linear predictor by storing $z_i-o_i$ as the working response and using
+\begin{equation}
+  p_i = 1
+\end{equation}
+in the observed-row precision. Thus the same collapsed coefficient and covariance update machinery is reused with $\bW=\bI$ for the probit working likelihood.
+
+The latent-normal variables are refreshed at the start of each MCMC iteration. For structured process models, the current full linear predictor requires a current latent process draw even though $\bw$ is collapsed during parameter updates. The probit sampler therefore uses the same warm-running in-chain process-draw workflow as the P{\'o}lya-Gamma families: after each retained collapsed update, a fresh conditional $\bw$ draw is generated and carried forward to the next Albert-Chib refresh. These process draws are retained by default as \texttt{save\_process = list(start = 1, thin = 1)} and are the process samples used by fitted values, prediction, and \texttt{recover()}.
+
+\texttt{resid()} terms are not used for probit models. There is no Gaussian residual $\tau^2$ in the observed binary likelihood; the unit variance is the identifying scale of the latent probit utility. Posterior predictive response samples are generated as Bernoulli draws with probability $\Phi(\eta_i)$.
+
 \section{Negative-binomial observation model}\label{sec:negative-binomial}
 \index{negative binomial}
 \index{P{\'o}lya-Gamma}
@@ -1178,7 +1213,7 @@ The main routine is \texttt{stLMM\_collapsed\_sampler()}. After initialization, 
 \end{minipage}
 \end{center}
 
-Step 1 is skipped for Gaussian likelihoods. Under P{\'o}lya-Gamma likelihoods, currently \texttt{family = "binomial"} and \texttt{family = "negative\_binomial"} with fixed size, the iteration begins by refreshing the P{\'o}lya-Gamma variables using the current warm-running latent process draw in the full linear predictor. After the augmentation is refreshed, the sampler uses the same collapsed coefficient and covariance update machinery with $\bW=\mathrm{diag}(\omega_i)$. At the end of the iteration, for structured process models, the sampler draws a fresh conditional $\bw$ using the current factorized $\bM$ and carries it forward to the next P{\'o}lya-Gamma refresh. These internal process draws are retained by default for P{\'o}lya-Gamma process models, avoiding a separate post-fit P{\'o}lya-Gamma/process reconstruction chain.
+Step 1 is skipped for Gaussian likelihoods. Under P{\'o}lya-Gamma likelihoods, currently \texttt{family = "binomial"} and \texttt{family = "negative\_binomial"} with fixed size, the iteration begins by refreshing the P{\'o}lya-Gamma variables using the current warm-running latent process draw in the full linear predictor. After the augmentation is refreshed, the sampler uses the same collapsed coefficient and covariance update machinery with $\bW=\mathrm{diag}(\omega_i)$. Under \texttt{family = "probit"}, Step 1 refreshes Albert-Chib latent normal variables and uses the same collapsed machinery with $\bW=\bI$. At the end of the iteration, for structured augmented non-Gaussian process models, the sampler draws a fresh conditional $\bw$ using the current factorized $\bM$ and carries it forward to the next augmentation refresh. These internal process draws are retained by default for augmented non-Gaussian process models, avoiding a separate post-fit augmented/process reconstruction chain.
 
 \section{Latent process recovery and fitted values}
 
@@ -1207,7 +1242,7 @@ and the conditional mean uses observed-row residual information only:
 \end{equation}
 The conditional mean is obtained by solving with the recovered conditional precision; $\bQ_w^{-1}$ is never formed explicitly. Rows with missing responses do not enter $\bb_w$, but their mapped latent nodes remain in $\bw$. Thus missing-response AR1, GP, NNGP, CAR, DAGAR, CAR-time, and DAGAR-time nodes are recovered at \texttt{recover()} time whenever they are part of the fitted term support. Their posterior information comes from the prior precision and any observed neighboring or repeated nodes, not from an imputed response value.
 
-For P{\'o}lya-Gamma process models, \texttt{stLMM()} saves the in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)}. In this case \texttt{recover()} is a selection and labeling step: it subsets the saved process draws according to \texttt{sub\_sample\$start} and \texttt{sub\_sample\$thin}, preserves the corresponding \texttt{recover\_iter} indices, and returns the usual \texttt{stLMM\_recovery} object. The main posterior parameter matrices are not physically thinned when process draws are saved; downstream methods align parameter rows to \texttt{recover\_iter}. If a P{\'o}lya-Gamma process model was fit with process saving disabled, post-fit recovery is not available and the model should be refit with \texttt{save\_process = TRUE} or an explicit \texttt{save\_process = list(start = ..., thin = ...)}. Enabling \texttt{save\_process} for Gaussian-likelihood process models is disallowed, because drawing and storing $\bw$ in the main Gaussian sampler would undo the collapsed-sampler design.
+For augmented non-Gaussian process models, \texttt{stLMM()} saves the in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)}. In this case \texttt{recover()} is a selection and labeling step: it subsets the saved process draws according to \texttt{sub\_sample\$start} and \texttt{sub\_sample\$thin}, preserves the corresponding \texttt{recover\_iter} indices, and returns the usual \texttt{stLMM\_recovery} object. The main posterior parameter matrices are not physically thinned when process draws are saved; downstream methods align parameter rows to \texttt{recover\_iter}. If an augmented non-Gaussian process model was fit with process saving disabled, post-fit recovery is not available and the model should be refit with \texttt{save\_process = TRUE} or an explicit \texttt{save\_process = list(start = ..., thin = ...)}. Enabling \texttt{save\_process} for Gaussian-likelihood process models is disallowed, because drawing and storing $\bw$ in the main Gaussian sampler would undo the collapsed-sampler design.
 
 Stochastic recovery uses the CHOLMOD factorization of the recovered conditional precision:
 \begin{equation}
@@ -1231,7 +1266,7 @@ Here $\bP$ is the fill-reducing permutation and $\bL$ is the triangular factor. 
 \end{minipage}
 \end{center}
 
-These steps are implemented in \texttt{recover\_w\_draw\_collapsed()}. For P{\'o}lya-Gamma process fits with saved in-chain process draws, \texttt{recover()} subsets and labels the saved draws instead of re-running Algorithm~2.
+These steps are implemented in \texttt{recover\_w\_draw\_collapsed()}. For augmented non-Gaussian process fits with saved in-chain process draws, \texttt{recover()} subsets and labels the saved draws instead of re-running Algorithm~2.
 
 Recovered process samples are returned by term. For NNGP terms, \texttt{w\_samples} is in original support order for users, while \texttt{w\_samples\_ordered} keeps the internal graph order needed by fitted values and prediction. \texttt{recover\_iter} records the original MCMC iteration indices, and prediction/fitted methods use it to align recovered latent draws with parameter samples.
 
@@ -1268,7 +1303,7 @@ The currently implemented behavior is:
 \item \texttt{y\_samples} is returned only when \texttt{y\_samples = TRUE};
 \item \texttt{w\_samples} is returned only by recovered-process prediction when \texttt{return\_w\_samples = TRUE}.
 \end{itemize}
-\texttt{joint}, \texttt{joint\_method}, \texttt{pred\_m}, \texttt{pred\_ordering}, and \texttt{st\_scale} are arguments to \texttt{predict.stLMM\_recovery()} only, because new process-node prediction requires saved or recovered latent process draws. Formula offsets are evaluated in \texttt{newdata} when present and are included in both link-scale and response-scale predictions. For binomial fits, \texttt{scale = "response"} returns probabilities for fitted means, while \texttt{scale = "link"} returns the linear predictor. Posterior predictive \texttt{y\_samples} are binomial draws using fitted or prediction trial counts. For the fixed-size negative-binomial family, \texttt{scale = "response"} returns $\exp(\eta_i)$ and posterior predictive \texttt{y\_samples} are negative-binomial draws using the fixed fitted size.
+\texttt{joint}, \texttt{joint\_method}, \texttt{pred\_m}, \texttt{pred\_ordering}, and \texttt{st\_scale} are arguments to \texttt{predict.stLMM\_recovery()} only, because new process-node prediction requires saved or recovered latent process draws. Formula offsets are evaluated in \texttt{newdata} when present and are included in both link-scale and response-scale predictions. For binomial fits, \texttt{scale = "response"} returns probabilities for fitted means, while \texttt{scale = "link"} returns the linear predictor. Posterior predictive \texttt{y\_samples} are binomial draws using fitted or prediction trial counts. For probit fits, \texttt{scale = "response"} returns $\Phi(\eta_i)$ and posterior predictive \texttt{y\_samples} are Bernoulli draws with those probabilities. For the fixed-size negative-binomial family, \texttt{scale = "response"} returns $\exp(\eta_i)$ and posterior predictive \texttt{y\_samples} are negative-binomial draws using the fixed fitted size.
 
 For process terms, prediction rows are shared but process supports are term-specific. The prediction backend maps each prediction row separately for each fitted process term, preserving that term's graph, coordinate order, support, ordering, and SVC covariate scale. This is essential for models such as
 \begin{verbatim}
@@ -1315,6 +1350,15 @@ If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
   y_i^{(b)} \sim \mathrm{Binomial}(n_i,\pi_i^{(b)}),
 \end{equation}
 where $n_i$ is the fitted or prediction trial count. With \texttt{newdata}, a column named \texttt{trials} is used when present; otherwise one trial per row is assumed.
+
+For probit fits, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
+\begin{equation}
+  \pi_i^{(b)} = \Phi\left(\mu_i^{(b)}\right).
+\end{equation}
+If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
+\begin{equation}
+  y_i^{(b)} \sim \mathrm{Bernoulli}(\pi_i^{(b)}).
+\end{equation}
 
 For the fixed-size negative-binomial family, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
 \begin{equation}

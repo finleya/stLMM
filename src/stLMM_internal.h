@@ -69,7 +69,8 @@ enum PriorFamily {
 enum LikelihoodFamily {
   LIKELIHOOD_GAUSSIAN,
   LIKELIHOOD_BINOMIAL,
-  LIKELIHOOD_NEGATIVE_BINOMIAL
+  LIKELIHOOD_NEGATIVE_BINOMIAL,
+  LIKELIHOOD_PROBIT
 };
 
 typedef struct {
@@ -320,10 +321,10 @@ typedef struct {
   /*
     y is the response used by the current Gaussian working model. For the
     ordinary Gaussian likelihood it points at the observed response from R.
-    For Polya-Gamma likelihoods it is sampler-owned mutable storage containing
-    the pseudo-response for the current iteration. yObserved keeps the original
-    observed successes/counts so the PG weights can be refreshed without losing
-    the data.
+    For augmented non-Gaussian likelihoods it is sampler-owned mutable storage
+    containing the pseudo-response or latent response for the current
+    iteration. yObserved keeps the original observed response so the
+    augmentation can be refreshed without losing the data.
   */
   double *y;
   double *yObserved;
@@ -479,11 +480,17 @@ void update_linear_predictor(SamplerState *s,
                              const double *w,
                              double *eta);
 int is_pg_likelihood(const SamplerState *s);
+int is_probit_likelihood(const SamplerState *s);
+int is_augmented_likelihood(const SamplerState *s);
 void update_pg_working_model(SamplerState *s,
                              BayesLogit_rpg_hybrid_t pg,
                              const double *beta,
                              const double *alpha,
                              const double *w);
+void update_probit_working_model(SamplerState *s,
+                                 const double *beta,
+                                 const double *alpha,
+                                 const double *w);
 
 void init_graph_state_from_backend(GraphState *g, SEXP graph_r);
 void init_term_state_from_backend(TermState *term, GraphState *graphs, int nGraphs, SEXP term_r, int n);

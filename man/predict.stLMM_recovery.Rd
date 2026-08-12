@@ -28,8 +28,8 @@
   ...)
 }
 \arguments{
-\item{object}{An \code{stLMM} fit without structured process terms, a
-Polya-Gamma process fit with saved in-chain process draws, a recovered object
+\item{object}{An \code{stLMM} fit without structured process terms, an
+augmented non-Gaussian process fit with saved in-chain process draws, a recovered object
 returned by \code{recover()}, or the corresponding multi-chain object.}
 \item{newdata}{Optional data frame. Grouped random-effect levels must already
 exist in the fitted model support. For recovered process models, process
@@ -39,7 +39,7 @@ must also use fitted time values.}
 \item{y_samples}{Logical; if \code{TRUE}, also simulate observation-level
 posterior predictive samples. Gaussian fits use the fitted residual variance.
 Binomial fits draw counts from the fitted probabilities and prediction trial
-counts.}
+counts. Probit fits draw binary responses from the fitted probabilities.}
 \item{joint}{Logical; for new GP or NNGP nodes, whether to draw unique new
 nodes with cross-location dependence. The default \code{FALSE} simulates
 unique new nodes independently conditional on the fitted support or
@@ -91,11 +91,14 @@ messages. Progress is reported from R before and after major prediction phases
 rather than from individual OpenMP worker threads.}
 \item{sub_sample}{A list with optional integer entries \code{start} and
 \code{thin}. For \code{predict.stLMM()} without process terms, these select
-posterior draw indices. For Polya-Gamma process fits with saved process draws,
+posterior draw indices. For augmented non-Gaussian process fits with saved process draws,
 and for \code{predict.stLMM_recovery()}, these select saved or recovered draw
 indices through \code{object$recover_iter}.}
 \item{scale}{For \code{family = "binomial"}, return fitted probabilities on
 the \code{"response"} scale or the linear predictor on the \code{"link"} scale.
+For \code{family = "probit"}, return fitted probabilities on the
+\code{"response"} scale or the probit linear predictor on the \code{"link"}
+scale.
 For \code{family = "negative_binomial"}, return fitted mean counts on the
 \code{"response"} scale or the log mean on the \code{"link"} scale. For
 Gaussian models these scales are identical.}
@@ -103,7 +106,7 @@ Gaussian models these scales are identical.}
 }
 \description{
 Returns posterior samples for the mean response at fitted rows or at
-\code{newdata} rows. For binomial models, the default mean response is the
+\code{newdata} rows. For binomial and probit models, the default mean response is the
 posterior fitted probability. For negative-binomial models, the default mean
 response is the posterior fitted mean count.
 }
@@ -141,6 +144,11 @@ of the linear predictor and then applies the inverse-logit transform when
 binomial counts. With \code{newdata = NULL}, the fitted trial counts are used.
 With \code{newdata}, a column named \code{trials} is used when present;
 otherwise prediction defaults to one trial per row.
+
+For \code{family = "probit"}, prediction first constructs posterior samples
+of the linear predictor and then applies the standard-normal cdf when
+\code{scale = "response"}. If \code{y_samples = TRUE}, prediction simulates
+binary responses with those fitted probabilities.
 
 For \code{family = "negative_binomial"}, prediction first constructs posterior
 samples of the log mean and then exponentiates them when

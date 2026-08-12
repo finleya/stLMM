@@ -225,6 +225,30 @@ finish_prediction_samples <- function(object,
     return(out)
   }
 
+  if(identical(object$backend$family, "probit")){
+    prob <- stats::pnorm(eta)
+    mu <- if(identical(scale, "response")) prob else eta
+    out <- list(
+      mu_samples = mu,
+      y_samples = NULL,
+      draw_index = as.integer(draw_index),
+      newdata = !is.null(newdata),
+      joint = isTRUE(joint),
+      joint_method = joint_method,
+      scale = scale,
+      w_samples = w_samples
+    )
+    if(isTRUE(y_samples)){
+      y <- matrix(0L, nrow = n_draw, ncol = n0)
+      colnames(y) <- colnames(eta)
+      for(i in seq_len(n_draw))
+        y[i, ] <- stats::rbinom(n0, size = 1L, prob = prob[i, ])
+      out$y_samples <- y
+    }
+    class(out) <- "stLMM_prediction"
+    return(out)
+  }
+
   if(identical(object$backend$family, "negative_binomial")){
     mean <- exp(eta)
     mu <- if(identical(scale, "response")) mean else eta

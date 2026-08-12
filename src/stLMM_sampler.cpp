@@ -173,6 +173,88 @@ int is_pg_likelihood(const SamplerState *s)
          s->likelihoodFamily == LIKELIHOOD_NEGATIVE_BINOMIAL;
 }
 
+int is_probit_likelihood(const SamplerState *s)
+{
+  return s->likelihoodFamily == LIKELIHOOD_PROBIT;
+}
+
+int is_augmented_likelihood(const SamplerState *s)
+{
+  return is_pg_likelihood(s) || is_probit_likelihood(s);
+}
+
+static double rstdnorm_lower_trunc(double lower)
+{
+  double x, alpha, u, logu;
+
+  if(!R_FINITE(lower))
+    Rf_error("non-finite probit truncation point");
+
+  if(lower <= 0.0){
+    do {
+      x = rnorm(0.0, 1.0);
+    } while(x < lower);
+    return x;
+  }
+
+  alpha = 0.5 * (lower + std::sqrt(lower * lower + 4.0));
+  for(;;){
+    u = runif(0.0, 1.0);
+    if(u <= 0.0)
+      continue;
+    x = lower - std::log(u) / alpha;
+    logu = std::log(runif(0.0, 1.0));
+    if(logu <= -0.5 * (x - alpha) * (x - alpha))
+      return x;
+  }
+}
+
+static double rnorm_probit_latent(double mean, int y)
+{
+  double lower;
+
+  if(!R_FINITE(mean))
+    Rf_error("non-finite probit linear predictor");
+
+  lower = -mean;
+  if(y)
+    return mean + rstdnorm_lower_trunc(lower);
+
+  return mean - rstdnorm_lower_trunc(-lower);
+}
+
+void update_probit_working_model(SamplerState *s,
+                                 const double *beta,
+                                 const double *alpha,
+                                 const double *w)
+{
+  int i, y;
+  double obsOffset, latentFull;
+
+  if(!is_probit_likelihood(s))
+    return;
+
+  /*
+    Albert-Chib augmentation:
+
+      y_i = 1(z_i > 0),  z_i = offset_i + eta_i + e_i, e_i ~ N(0, 1).
+
+    The collapsed Gaussian sampler works on eta_i without the offset, so the
+    mutable response below stores z_i - offset_i and unit observation precision.
+  */
+  update_linear_predictor(s, beta, alpha, w, s->nWork2);
+
+  for(i = 0; i < s->n; i++){
+    obsOffset = (s->offset != NULL) ? s->offset[i] : 0.0;
+    y = s->yObserved[i] > 0.0 ? 1 : 0;
+    latentFull = rnorm_probit_latent(s->nWork2[i] + obsOffset, y);
+    s->y[i] = latentFull - obsOffset;
+    s->obsPrecision[i] = 1.0;
+  }
+
+  refactor_current_M(s, "update_probit_working_model");
+}
+
 void update_pg_working_model(SamplerState *s,
                              BayesLogit_rpg_hybrid_t pg,
                              const double *beta,
@@ -290,8 +372,8 @@ double log_cov_params_target_collapsed(SamplerState *s, const double *resid)
   out = compute_logDetV(s);
   out = -0.5 * (out + quadform_Vinv(s, resid));
 
-  if(is_pg_likelihood(s)){
-    /* No tau_sq term: PG observation precision is the current omega. */
+  if(is_augmented_likelihood(s)){
+    /* No tau_sq term: augmented likelihoods own their observation precision. */
   } else if(s->residualModel == 0 && s->tauTune > 0.0){
     out += log_prior_kernel_original(s->tauSq, s->tauSqPrior)
          + std::log(s->tauSq);
@@ -339,8 +421,8 @@ int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, do
 
   *out = -0.5 * (logdetV + quadform_Vinv(s, resid));
 
-  if(is_pg_likelihood(s)){
-    /* No tau_sq term: PG observation precision is the current omega. */
+  if(is_augmented_likelihood(s)){
+    /* No tau_sq term: augmented likelihoods own their observation precision. */
   } else if(s->residualModel == 0 && s->tauTune > 0.0){
     *out += log_prior_kernel_original(s->tauSq, s->tauSqPrior)
           + std::log(s->tauSq);
@@ -926,6 +1008,8 @@ void run_covariance_warmup(SamplerState *s,
 
       if(is_pg_likelihood(s))
         update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
+      else if(is_probit_likelihood(s))
+        update_probit_working_model(s, betaCurrent, alphaCurrent, wCurrent);
 
       if(s->p > 0)
         update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
@@ -950,7 +1034,7 @@ void run_covariance_warmup(SamplerState *s,
       p->warmupNAccepted += accepted;
       p->warmupNAttempted += p->nBlocks;
 
-      if(is_pg_likelihood(s) && s->qLatTotal > 0){
+      if(is_augmented_likelihood(s) && s->qLatTotal > 0){
         update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
         recover_w_draw_collapsed(s, resid, wCurrent);
       }
@@ -1544,7 +1628,7 @@ extern "C" {
     for(i = 0; i < (s.nRecover > 0 ? s.nRecover : 1); i++) recoverIter[i] = 0;
     
     for(i = 0; i < s.p; i++) betaCurrent[i] = 0.0;
-    if(is_pg_likelihood(&s)){
+    if(is_augmented_likelihood(&s)){
       SEXP beta_start_r = getListElement(backend_r, "beta_starting");
       if(beta_start_r != R_NilValue){
         if(TYPEOF(beta_start_r) != REALSXP || LENGTH(beta_start_r) != s.p)
@@ -1578,6 +1662,8 @@ extern "C" {
       vmax_iter = vmaxget();
       if(is_pg_likelihood(&s))
         update_pg_working_model(&s, pg, betaCurrent, alphaCurrent, wCurrent);
+      else if(is_probit_likelihood(&s))
+        update_probit_working_model(&s, betaCurrent, alphaCurrent, wCurrent);
 
       if(s.p > 0)
 	update_beta_draw_collapsed(&s, alphaCurrent, betaCurrent);
@@ -1600,7 +1686,7 @@ extern "C" {
       }
 
       wCurrentFresh = 0;
-      if(is_pg_likelihood(&s) && s.qLatTotal > 0){
+      if(is_augmented_likelihood(&s) && s.qLatTotal > 0){
         update_resid_for_current_fixed_random(&s, betaCurrent, alphaCurrent, resid);
         recover_w_draw_collapsed(&s, resid, wCurrent);
         wCurrentFresh = 1;
@@ -1636,8 +1722,8 @@ extern "C" {
       iter1 = iter + 1;
       if(should_recover_iteration(&s, iter1)){
         /*
-          Binomial fits need a fresh latent-process draw each iteration for
-          the next Polya-Gamma augmentation. On recovery iterations, reuse
+          Augmented non-Gaussian fits need a fresh latent-process draw each
+          iteration for the next latent-data update. On recovery iterations, reuse
           that draw instead of drawing another iid conditional sample only
           to store it.
         */

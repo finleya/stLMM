@@ -673,6 +673,8 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
       s->likelihoodFamily = LIKELIHOOD_BINOMIAL;
     } else if(std::strcmp(familyName, "negative_binomial") == 0){
       s->likelihoodFamily = LIKELIHOOD_NEGATIVE_BINOMIAL;
+    } else if(std::strcmp(familyName, "probit") == 0){
+      s->likelihoodFamily = LIKELIHOOD_PROBIT;
     } else {
       Rf_error("unsupported backend$family");
     }
@@ -857,6 +859,15 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
         Rf_error("negative-binomial counts must be nonnegative");
       s->y[i] = 0.5 * (s->yObserved[i] - s->nbSize) + std::log(s->nbSize);
     }
+  } else if(s->likelihoodFamily == LIKELIHOOD_PROBIT){
+    s->yObserved = REAL(y_r);
+    s->y = (double*)R_alloc(s->n > 0 ? s->n : 1, sizeof(double));
+    for(i = 0; i < s->n; i++){
+      if(!R_FINITE(s->yObserved[i]) ||
+         !(s->yObserved[i] == 0.0 || s->yObserved[i] == 1.0))
+        Rf_error("probit responses must be binary 0/1 values");
+      s->y[i] = s->yObserved[i] > 0.0 ? 0.5 : -0.5;
+    }
   } else {
     s->y = REAL(y_r);
     s->yObserved = s->y;
@@ -873,13 +884,13 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
     SEXP beta_prior_mean_r = getListElement(backend_r, "beta_prior_mean");
     SEXP beta_prior_precision_r = getListElement(backend_r, "beta_prior_precision");
 
-    s->betaPriorType = is_pg_likelihood(s) ? 1 : 0;
+    s->betaPriorType = is_augmented_likelihood(s) ? 1 : 0;
     s->betaPriorMean = (double*)R_alloc(s->p > 0 ? s->p : 1, sizeof(double));
     s->betaPriorPrecision = (double*)R_alloc(s->p > 0 ? s->p : 1, sizeof(double));
     for(i = 0; i < s->p; i++){
       s->betaPriorMean[i] = 0.0;
       s->betaPriorPrecision[i] =
-        is_pg_likelihood(s) ? 0.01 : 0.0;
+        is_augmented_likelihood(s) ? 0.01 : 0.0;
     }
 
     if(beta_prior_type_r != R_NilValue)
@@ -1001,7 +1012,7 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
 
     if(s->tauTune < 0.0)
       Rf_error("backend$tau_sq_tuning must be nonnegative");
-    if(is_pg_likelihood(s))
+    if(is_augmented_likelihood(s))
       s->tauTune = 0.0;
   }
 
@@ -1165,6 +1176,9 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   } else if(s->likelihoodFamily == LIKELIHOOD_NEGATIVE_BINOMIAL){
     for(i = 0; i < s->n; i++)
       s->obsPrecision[i] = 0.25 * (s->yObserved[i] + s->nbSize);
+  } else if(s->likelihoodFamily == LIKELIHOOD_PROBIT){
+    for(i = 0; i < s->n; i++)
+      s->obsPrecision[i] = 1.0;
   } else {
     refresh_observation_precision(s);
   }

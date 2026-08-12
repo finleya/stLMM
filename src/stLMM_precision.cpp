@@ -1143,6 +1143,12 @@ void refresh_observation_precision(SamplerState *s)
     return;
   }
 
+  if(is_probit_likelihood(s)){
+    for(i = 0; i < s->n; i++)
+      s->obsPrecision[i] = 1.0;
+    return;
+  }
+
   if(s->residualModel == 1){
     for(i = 0; i < s->n; i++)
       s->obsPrecision[i] = s->obsPrecisionFixed[i];
