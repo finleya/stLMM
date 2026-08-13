@@ -35,6 +35,7 @@ vignettes/.quarto/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+dev/modeling_and_software_details/stLMM.pdf
 
 # Local tooling
 .agents/
