@@ -160,9 +160,9 @@ fit <- stLMM(
       phi = uniform(0.05, 0.95)
     )
   ),
-  starting = list(ar1_1 = list(sigma_sq = 0.4, phi = 0.6)),
-  tuning = list(ar1_1 = list(sigma_sq = 0.05, phi = 0.15)),
-  n_samples = 900,
+  starting = list(ar1_1 = list(sigma_sq = 0.5, phi = 0.5)),
+  tuning = list(ar1_1 = list(sigma_sq = 0.05, phi = 0.1)),
+  n_samples = 1000,
   verbose = FALSE
 )
 

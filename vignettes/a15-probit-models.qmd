@@ -24,7 +24,7 @@ library(ggplot2)
 
 source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
 
-set.seed(15)
+set.seed(1)
 ```
 
 ```{r plot-theme, include=FALSE}
@@ -183,9 +183,9 @@ fit <- stLMM(
       phi = uniform(0.05, 0.95)
     )
   ),
-  starting = list(ar1_1 = list(sigma_sq = 0.7, phi = 0.7)),
-  tuning = list(ar1_1 = list(sigma_sq = 0.08, phi = 0.12)),
-  n_samples = 900,
+  starting = list(ar1_1 = list(sigma_sq = 0.5, phi = 0.5)),
+  tuning = list(ar1_1 = list(sigma_sq = 0.05, phi = 0.1)),
+  n_samples = 1000,
   verbose = FALSE
 )
 
