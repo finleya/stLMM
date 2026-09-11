@@ -597,7 +597,7 @@ test_that("predict.stLMM_recovery simulates new dense GP nodes with repeated-row
   ), joint = TRUE)
 
   expect_true(pred_joint$joint)
-  expect_equal(pred_joint$joint_method, "full")
+  expect_equal(pred_joint$joint_method, "vecchia")
   expect_equal(dim(pred_joint$w_samples$gp_1), c(10L, 2L))
 })
 
@@ -702,10 +702,12 @@ test_that("NNGP joint prediction agrees with non-joint margins and adds cross-no
 
   existing <- dat[c(1, 5, 8), , drop = FALSE]
   pred_existing_false <- predict(rec, newdata = existing, joint = FALSE)
-  pred_existing_true <- predict(rec, newdata = existing, joint = TRUE)
+  pred_existing_default <- predict(rec, newdata = existing, joint = TRUE)
   pred_existing_vecchia <- predict(rec, newdata = existing, joint = TRUE, joint_method = "vecchia")
-  expect_equal(pred_existing_true$mu_samples, pred_existing_false$mu_samples)
+  pred_existing_full <- suppressMessages(predict(rec, newdata = existing, joint = TRUE, joint_method = "full"))
+  expect_equal(pred_existing_default$mu_samples, pred_existing_false$mu_samples)
   expect_equal(pred_existing_vecchia$mu_samples, pred_existing_false$mu_samples)
+  expect_equal(pred_existing_full$mu_samples, pred_existing_false$mu_samples)
 
   newdata <- data.frame(
     lon = c(0.5, 0.5, 1.5, 2.5),
@@ -715,31 +717,39 @@ test_that("NNGP joint prediction agrees with non-joint margins and adds cross-no
   set.seed(77)
   pred_false <- predict(rec, newdata = newdata, joint = FALSE)
   set.seed(77)
-  expect_message(
-    pred_true <- predict(rec, newdata = newdata, joint = TRUE),
-    "dense covariance"
-  )
+  pred_default <- predict(rec, newdata = newdata, joint = TRUE)
   set.seed(77)
   pred_vecchia <- predict(rec, newdata = newdata, joint = TRUE, joint_method = "vecchia")
+  set.seed(77)
+  expect_message(
+    pred_full <- predict(rec, newdata = newdata, joint = TRUE, joint_method = "full"),
+    "dense covariance"
+  )
 
-  expect_true(pred_true$joint)
+  expect_true(pred_default$joint)
   expect_true(pred_vecchia$joint)
+  expect_true(pred_full$joint)
+  expect_equal(pred_default$joint_method, "vecchia")
   expect_equal(pred_vecchia$joint_method, "vecchia")
+  expect_equal(pred_full$joint_method, "full")
+  expect_equal(pred_default$mu_samples, pred_vecchia$mu_samples)
   expect_false(pred_false$joint)
-  expect_equal(dim(pred_true$mu_samples), dim(pred_false$mu_samples))
+  expect_equal(dim(pred_default$mu_samples), dim(pred_false$mu_samples))
   expect_equal(dim(pred_vecchia$mu_samples), dim(pred_false$mu_samples))
-  expect_equal(pred_true$mu_samples[, 1], pred_true$mu_samples[, 2])
+  expect_equal(dim(pred_full$mu_samples), dim(pred_false$mu_samples))
+  expect_equal(pred_default$mu_samples[, 1], pred_default$mu_samples[, 2])
   expect_equal(pred_vecchia$mu_samples[, 1], pred_vecchia$mu_samples[, 2])
+  expect_equal(pred_full$mu_samples[, 1], pred_full$mu_samples[, 2])
 
   false_unique <- pred_false$mu_samples[, c(1, 3, 4), drop = FALSE]
-  true_unique <- pred_true$mu_samples[, c(1, 3, 4), drop = FALSE]
+  full_unique <- pred_full$mu_samples[, c(1, 3, 4), drop = FALSE]
   vecchia_unique <- pred_vecchia$mu_samples[, c(1, 3, 4), drop = FALSE]
-  expect_lt(max(abs(colMeans(true_unique) - colMeans(false_unique))), 0.18)
-  expect_lt(max(abs(apply(true_unique, 2, var) - apply(false_unique, 2, var))), 0.25)
+  expect_lt(max(abs(colMeans(full_unique) - colMeans(false_unique))), 0.18)
+  expect_lt(max(abs(apply(full_unique, 2, var) - apply(false_unique, 2, var))), 0.25)
   expect_lt(max(abs(colMeans(vecchia_unique) - colMeans(false_unique))), 0.20)
   expect_lt(max(abs(apply(vecchia_unique, 2, var) - apply(false_unique, 2, var))), 0.30)
 
-  expect_gt(abs(stats::cor(true_unique[, 1], true_unique[, 2])), 0.08)
+  expect_gt(abs(stats::cor(full_unique[, 1], full_unique[, 2])), 0.08)
   expect_gt(abs(stats::cor(vecchia_unique[, 1], vecchia_unique[, 2])), 0.08)
   expect_lt(abs(stats::cor(false_unique[, 1], false_unique[, 2])), 0.25)
 
@@ -1389,11 +1399,21 @@ test_that("predict.stLMM_recovery validates NNGP st_scale", {
   ))
   rec <- recover(fit, sub_sample = list(start = 2, thin = 2))
 
+  pred_joint <- predict(rec, newdata = data.frame(lon = 0.5, lat = 0.5, time = 0.5), joint = TRUE)
+  expect_equal(pred_joint$joint_method, "vecchia")
+  expect_equal(dim(pred_joint$mu_samples), c(2L, 1L))
+
   expect_message(
-    pred_joint <- predict(rec, newdata = data.frame(lon = 0.5, lat = 0.5, time = 0.5), joint = TRUE),
+    pred_joint_full <- predict(
+      rec,
+      newdata = data.frame(lon = 0.5, lat = 0.5, time = 0.5),
+      joint = TRUE,
+      joint_method = "full"
+    ),
     "dense covariance"
   )
-  expect_equal(dim(pred_joint$mu_samples), c(2L, 1L))
+  expect_equal(pred_joint_full$joint_method, "full")
+  expect_equal(dim(pred_joint_full$mu_samples), c(2L, 1L))
 
   expect_error(
     predict(rec, newdata = data.frame(lon = 0.5, lat = 0.5, time = 0.5), st_scale = 0),

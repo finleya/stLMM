@@ -14,14 +14,14 @@
   thin = 1L), scale = c("response", "link"), ...)
 
 \method{predict}{stLMM_recovery}(object, newdata = NULL, y_samples = FALSE,
-  joint = FALSE, joint_method = c("full", "vecchia"), pred_m = NULL,
+  joint = FALSE, joint_method = c("vecchia", "full"), pred_m = NULL,
   pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
   ...)
 
 \method{predict}{stLMM_recovery_chains}(object, newdata = NULL,
-  y_samples = FALSE, joint = FALSE, joint_method = c("full", "vecchia"),
+  y_samples = FALSE, joint = FALSE, joint_method = c("vecchia", "full"),
   pred_m = NULL, pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
@@ -47,13 +47,15 @@ fitted-support neighbors and is recommended when only marginal prediction
 summaries are needed. For dense \code{gp()} terms, \code{joint = TRUE} uses
 the exact dense GP conditional covariance among unique new nodes.}
 \item{joint_method}{Method used for NNGP terms when \code{joint = TRUE}.
-\code{"full"} keeps the historical behavior: fitted-support neighbors are
-used for each new node and the new-node residual covariance is drawn from a
-dense matrix. \code{"vecchia"} orders the unique new prediction nodes and
-simulates them sequentially from a Vecchia/NNGP-style history containing all
-fitted support nodes plus previously simulated prediction nodes. Dense
-\code{gp()} terms ignore \code{joint_method} and use exact joint Gaussian
-conditioning when \code{joint = TRUE}.}
+\code{"vecchia"} is the default and orders the unique new prediction nodes,
+then simulates them sequentially from a Vecchia/NNGP-style history containing
+all fitted support nodes plus previously simulated prediction nodes. This is
+usually more efficient for moderate and large prediction sets. \code{"full"}
+keeps the historical dense behavior: fitted-support neighbors are used for
+each new node and the new-node residual covariance is drawn from a dense
+matrix. This can be useful for small prediction sets. Dense \code{gp()} terms
+ignore \code{joint_method} and use exact joint Gaussian conditioning when
+\code{joint = TRUE}.}
 \item{pred_m}{Optional positive integer neighbor count for
 \code{joint_method = "vecchia"}. The default \code{NULL} uses the fitted
 NNGP term's \code{m}. The first prediction nodes always have the fitted support
@@ -166,24 +168,25 @@ For NNGP terms, \code{joint = FALSE} uses the independent new-node prediction
 approach based on nearest fitted-support neighbors, following the conditional
 NNGP prediction machinery described by Finley et al. (2019). Each unique new
 node is simulated independently conditional on its fitted-support neighbors.
+
+With the default \code{joint = TRUE, joint_method = "vecchia"}, unique new
+NNGP nodes are ordered by \code{pred_ordering}. Neighbors for each ordered
+prediction node are chosen from the combined history made of all fitted
+support nodes and earlier prediction nodes in that ordering. The prediction
+draw is then generated sequentially, so simulated earlier prediction nodes can
+enter the conditional mean of later prediction nodes. This avoids a dense
+new-node covariance matrix and is usually the more scalable joint prediction
+method. This option follows the observed-prediction ordering idea and
+latent-first full-conditioning construction described by Katzfuss et al.
+(2020, Sects. 3.1, 4.2, and 4.3.4), adapted to the package workflow in which
+fitted latent process draws are saved or recovered first and prediction nodes
+are then simulated sequentially conditional on those draws. The method is
+ordering dependent, as in other Vecchia/NNGP approximations.
+
 With \code{joint = TRUE, joint_method = "full"}, nearest neighbors are still
 chosen only from the fitted support, but unique new NNGP nodes are drawn
-jointly from a dense residual covariance. This can require substantial memory
-for large prediction sets.
-
-With \code{joint = TRUE, joint_method = "vecchia"}, unique new NNGP nodes are
-ordered by \code{pred_ordering}. Neighbors for each ordered prediction node are
-chosen from the combined history made of all fitted support nodes and earlier
-prediction nodes in that ordering. The prediction draw is then generated
-sequentially, so simulated earlier prediction nodes can enter the conditional
-mean of later prediction nodes. This avoids a dense new-node covariance matrix
-and is usually the more scalable joint prediction method. This option follows
-the observed-prediction ordering idea and latent-first full-conditioning
-construction described by Katzfuss et al. (2020, Sects. 3.1, 4.2, and 4.3.4),
-adapted to the package workflow in which fitted latent process draws are
-saved or recovered first and prediction nodes are then simulated sequentially
-conditional on those draws. The method is ordering dependent, as in other
-Vecchia/NNGP approximations.
+jointly from a dense residual covariance. This can be useful for small
+prediction sets but can require substantial memory for larger prediction sets.
 
 The independent, dense-joint, and Vecchia-joint approaches should have similar
 posterior means and medians for each prediction location when the neighbor
