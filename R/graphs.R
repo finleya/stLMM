@@ -733,20 +733,25 @@ car_connected_components <- function(adj){
 
   comp <- integer(n)
   comp_id <- 0L
+  # Each node is queued at most once. Reuse this storage across components
+  # rather than copying a growing queue for every newly discovered node.
+  queue <- integer(n)
   for(start in seq_len(n)){
     if(comp[start] != 0L)
       next
     comp_id <- comp_id + 1L
-    queue <- start
+    queue[1L] <- start
+    tail <- 1L
     comp[start] <- comp_id
     head <- 1L
-    while(head <= length(queue)){
+    while(head <= tail){
       node <- queue[head]
       head <- head + 1L
       for(next_node in nb[[node]]){
         if(comp[next_node] == 0L){
           comp[next_node] <- comp_id
-          queue <- c(queue, next_node)
+          tail <- tail + 1L
+          queue[tail] <- next_node
         }
       }
     }

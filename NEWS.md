@@ -1,3 +1,12 @@
+# stLMM 0.0.5
+
+## Changes
+
+- CAR graph connectivity checks now preallocate their traversal queue, avoiding
+  repeated vector copying on large graphs while preserving component labels
+  and graph validation. This also benefits DAGAR and space-time models that
+  use the same graph constructor.
+
 # stLMM 0.0.4
 
 ## New features
