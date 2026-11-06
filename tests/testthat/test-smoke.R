@@ -15,9 +15,9 @@ test_that("fixed-effect model fits with underscore API", {
   expect_null(fit$alpha_samples)
   expect_null(fit$samples$alpha)
   expect_equal(ncol(fit$tau_sq_samples), NULL)
-  expect_true(all(c("user.self", "sys.self", "elapsed") %in% names(fit$timing$sampler)))
-  expect_true(is.finite(fit$timing$sampler[["elapsed"]]))
-  expect_gte(fit$timing$sampler[["elapsed"]], 0)
+  expect_true(all(c("user.self", "sys.self", "elapsed") %in% names(fit$timing$backend)))
+  expect_true(is.finite(fit$timing$backend[["elapsed"]]))
+  expect_gte(fit$timing$backend[["elapsed"]], 0)
 })
 
 test_that("starting values are optional", {

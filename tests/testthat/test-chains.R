@@ -15,11 +15,11 @@ test_that("multi-chain fits keep ordinary fit objects and support coda", {
   expect_length(fit$chains, 3)
   expect_true(all(vapply(fit$chains, inherits, logical(1), "stLMM")))
   expect_equal(dim(fit$chains[[1]]$beta_samples), c(12L, 2L))
-  expect_true(all(vapply(fit$chains, function(z) "elapsed" %in% names(z$timing$sampler), logical(1))))
-  expect_equal(dim(fit$timing$sampler_by_chain)[1], 3L)
-  expect_true(all(c("user.self", "sys.self", "elapsed") %in% colnames(fit$timing$sampler_by_chain)))
-  expect_equal(unname(fit$timing$sampler_total[["elapsed"]]),
-               sum(fit$timing$sampler_by_chain[, "elapsed"]))
+  expect_true(all(vapply(fit$chains, function(z) "elapsed" %in% names(z$timing$backend), logical(1))))
+  expect_equal(dim(fit$timing$backend_by_chain)[1], 3L)
+  expect_true(all(c("user.self", "sys.self", "elapsed") %in% colnames(fit$timing$backend_by_chain)))
+  expect_equal(unname(fit$timing$backend_total[["elapsed"]]),
+               sum(fit$timing$backend_by_chain[, "elapsed"]))
   expect_s3_class(as_mcmc(fit), "mcmc.list")
 
   s <- summary(fit)

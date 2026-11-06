@@ -140,10 +140,31 @@ model components are \code{NULL}. Covariance Metropolis diagnostics are
 returned as \code{covariance_acceptance} and \code{adaptive_metropolis}. The
 default is one global covariance block; optional blocking and scalar-update
 diagnostics are stored in \code{adaptive_metropolis$blocks}. The object also
-contains \code{timing}, with CPU and elapsed wall time for the compiled sampler
-call, \code{term_description}, and the stored \code{backend} used by recovery
-and prediction. Multi-chain fits also include top-level sampler timing by chain
-and total sampler timing across chains.
+contains \code{term_description} and the stored \code{backend} used by recovery
+and prediction.
+
+\code{timing$backend} contains \code{proc.time()} CPU and elapsed wall-time
+differences around the entire compiled call. \code{timing$phases} is a named
+numeric vector of monotonic elapsed seconds for compiled \code{initialization},
+proposal-calibration \code{warmup}, and post-warmup \code{sampling}. The sampling
+timer surrounds exactly the \code{n_samples} MCMC iterations, including repeated
+covariance updates, factorizations, sample storage, and any in-chain latent-effect
+recovery. It excludes R-side preparation, graph construction, compiled
+initialization, calibration warmup, and final result assembly. Later user-side
+burn-in or thinning does not change the recorded duration. A skipped warmup may
+record a very small duration for the warmup function's bookkeeping. These are
+wall times, not CPU times or effective-sample-size measurements.
+
+Multi-chain fits provide \code{timing$backend_by_chain},
+\code{timing$backend_total}, \code{timing$phases_by_chain}, and
+\code{timing$phases_total}. Totals sum the durations across chains. The backend
+timer includes finalization, which is outside the three reported phases.
+In earlier builds without phase timing, the backend fields were named \code{sampler},
+\code{sampler_by_chain}, and \code{sampler_total}; those names did not denote
+sampling-only time and are no longer used. Earlier saved fits must be refitted
+to obtain phase timings. The DESCRIPTION field
+\code{Config/stLMM/Timing: phases-v1} identifies this capability; an earlier
+0.0.5 installation may lack it.
 
 Latent process draws are saved during fitting only for augmented non-Gaussian likelihoods
 with structured process terms. The default in that case is

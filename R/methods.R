@@ -186,9 +186,11 @@ print.stLMM <- function(x, ...){
   else if(length(x$backend$process_terms) && !is.null(x$w_samples))
     cat("  latent process samples: retained (", length(x$recover_iter), " draws)\n", sep = "")
 
-  sampler_time <- x$timing$sampler
-  if(!is.null(sampler_time) && "elapsed" %in% names(sampler_time))
-    cat("  sampler elapsed: ", round(unname(sampler_time[["elapsed"]]), 3), " seconds\n", sep = "")
+  if(!is.null(x$timing$phases))
+    cat("  post-warmup sampling elapsed: ", round(unname(x$timing$phases[["sampling"]]), 3), " seconds\n", sep = "")
+  if(!is.null(x$timing$backend))
+    cat("  backend elapsed (includes initialization and warmup): ",
+        round(unname(x$timing$backend[["elapsed"]]), 3), " seconds\n", sep = "")
 
   invisible(x)
 }
@@ -218,9 +220,11 @@ print.stLMM_chains <- function(x, ...){
   if(length(accept))
     cat("  covariance acceptance: ", paste(round(accept, 3), collapse = ", "), "\n", sep = "")
 
-  sampler_time <- x$timing$sampler_total
-  if(!is.null(sampler_time) && "elapsed" %in% names(sampler_time))
-    cat("  sampler elapsed: ", round(unname(sampler_time[["elapsed"]]), 3), " seconds total\n", sep = "")
+  if(!is.null(x$timing$phases_total))
+    cat("  post-warmup sampling elapsed: ", round(unname(x$timing$phases_total[["sampling"]]), 3), " seconds total\n", sep = "")
+  if(!is.null(x$timing$backend_total))
+    cat("  backend elapsed (includes initialization and warmup): ",
+        round(unname(x$timing$backend_total[["elapsed"]]), 3), " seconds total\n", sep = "")
 
   invisible(x)
 }

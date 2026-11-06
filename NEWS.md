@@ -2,6 +2,20 @@
 
 ## Changes
 
+- Fits now record monotonic elapsed seconds for compiled initialization,
+  proposal-calibration warmup, and the post-warmup MCMC loop separately, in
+  `fit$timing$phases`. Sampling time includes all work in the loop, including
+  repeated factorizations and any requested in-chain latent-effect recovery.
+- The former `timing$sampler` field is renamed `timing$backend` to describe
+  its existing scope accurately: the entire compiled call. Multi-chain fits
+  use `backend_by_chain`/`backend_total` and add
+  `phases_by_chain`/`phases_total`. The old timing names are not aliases.
+  Saved fits from builds without phase timing cannot supply sampling-only
+  timings. `Config/stLMM/Timing: phases-v1` identifies this capability in
+  DESCRIPTION; the package version remains 0.0.5 during development.
+- Updated printed timing labels and the runtime, blocking-diagnostics, and
+  NIMBLE-comparison articles to distinguish sampling from broader elapsed times.
+
 - CAR graph connectivity checks now preallocate their traversal queue, avoiding
   repeated vector copying on large graphs while preserving component labels
   and graph validation. This also benefits DAGAR and space-time models that

@@ -1,6 +1,7 @@
 #include "stLMM_internal.h"
 
 #include <algorithm>
+#include <chrono>
 
 #include <BayesLogit.h>
 
@@ -1544,8 +1545,13 @@ extern "C" {
   
   SEXP stLMM_collapsed_sampler(SEXP backend_r)
   {
+    // Read the monotonic wall clock only at phase boundaries. No timer enters
+    // an MCMC update or changes the random-number stream.
+    typedef std::chrono::steady_clock SamplerClock;
+    const SamplerClock::time_point initialization_start = SamplerClock::now();
     SamplerState s;
     SEXP out, outNames, term_description_r;
+    SEXP phase_seconds_r, phase_names_r;
     SEXP beta_samples_r, alpha_samples_r, tau_samples_r, residual_variance_samples_r, sigma_re_samples_r, theta_samples_r, process_sigma_samples_r;
     SEXP term_labels_r, theta_accept_r, covariance_acceptance_r, w_samples_r, recover_iter_r, adaptive_metropolis_r;
     double *betaSamples, *alphaSamples, *tauSamples, *residualVarianceSamples, *sigmaSqRESamples, *thetaSamples, *processSigmaSamples;
@@ -1647,8 +1653,10 @@ extern "C" {
     }
     
     GetRNGstate();
+    const SamplerClock::time_point warmup_start = SamplerClock::now();
     run_covariance_warmup(&s, betaCurrent, alphaCurrent, resid, wCurrent, pg, doVerbose, nReport);
 
+    const SamplerClock::time_point sampling_start = SamplerClock::now();
     for(iter = 0; iter < s.nSamples; iter++){
       R_CheckUserInterrupt();
       /*
@@ -1741,6 +1749,7 @@ extern "C" {
       }
       vmaxset(vmax_iter);
     }
+    const SamplerClock::time_point sampling_end = SamplerClock::now();
     if(recoverIdx != s.nRecover)
       Rf_error("internal error: recovered sample count mismatch");
     PutRNGstate();
@@ -1750,8 +1759,8 @@ extern "C" {
     UNPROTECT(1);
     PROTECT(term_description_r = build_term_description_object(&s, backend_r, s.nSamples));
     
-    PROTECT(out = Rf_allocVector(VECSXP, 14));
-    PROTECT(outNames = Rf_allocVector(STRSXP, 14));
+    PROTECT(out = Rf_allocVector(VECSXP, 15));
+    PROTECT(outNames = Rf_allocVector(STRSXP, 15));
     PROTECT(beta_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.p > 0 ? s.p : 0));
     PROTECT(alpha_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.q > 0 ? s.q : 0));
     PROTECT(sigma_re_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nRE > 0 ? s.nRE : 0));
@@ -1765,6 +1774,15 @@ extern "C" {
     PROTECT(w_samples_r = Rf_allocMatrix(REALSXP, s.nRecover, s.qLatTotal > 0 ? s.qLatTotal : 0));
     PROTECT(recover_iter_r = Rf_allocVector(INTSXP, s.nRecover));
     PROTECT(adaptive_metropolis_r = build_adaptive_metropolis_object(&s));
+    PROTECT(phase_seconds_r = Rf_allocVector(REALSXP, 3));
+    PROTECT(phase_names_r = Rf_allocVector(STRSXP, 3));
+    REAL(phase_seconds_r)[0] = std::chrono::duration<double>(warmup_start - initialization_start).count();
+    REAL(phase_seconds_r)[1] = std::chrono::duration<double>(sampling_start - warmup_start).count();
+    REAL(phase_seconds_r)[2] = std::chrono::duration<double>(sampling_end - sampling_start).count();
+    SET_STRING_ELT(phase_names_r, 0, Rf_mkChar("initialization"));
+    SET_STRING_ELT(phase_names_r, 1, Rf_mkChar("warmup"));
+    SET_STRING_ELT(phase_names_r, 2, Rf_mkChar("sampling"));
+    Rf_namesgets(phase_seconds_r, phase_names_r);
     
     for(i = 0; i < s.nSamples * s.p; i++) REAL(beta_samples_r)[i] = betaSamples[i];
     for(i = 0; i < s.nSamples * s.q; i++) REAL(alpha_samples_r)[i] = alphaSamples[i];
@@ -1793,6 +1811,7 @@ extern "C" {
     SET_VECTOR_ELT(out, 11, w_samples_r);
     SET_VECTOR_ELT(out, 12, recover_iter_r);
     SET_VECTOR_ELT(out, 13, adaptive_metropolis_r);
+    SET_VECTOR_ELT(out, 14, phase_seconds_r);
     
     SET_STRING_ELT(outNames, 0, Rf_mkChar("beta_samples"));
     SET_STRING_ELT(outNames, 1, Rf_mkChar("alpha_samples"));
@@ -1808,9 +1827,10 @@ extern "C" {
     SET_STRING_ELT(outNames, 11, Rf_mkChar("w_samples"));
     SET_STRING_ELT(outNames, 12, Rf_mkChar("recover_iter"));
     SET_STRING_ELT(outNames, 13, Rf_mkChar("adaptive_metropolis"));
+    SET_STRING_ELT(outNames, 14, Rf_mkChar("phase_seconds"));
     Rf_namesgets(out, outNames);
     
-    UNPROTECT(16);
+    UNPROTECT(18);
     free_sampler_state(&s);
     return out;
   }

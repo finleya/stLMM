@@ -28,6 +28,47 @@ initial guidance rather than fixed rules. Users are encouraged to run small
 timing experiments on their own analyses, and feedback about configurations that
 help or hurt is very welcome.
 
+## What Is Timed
+
+In the updated GitHub build of stLMM 0.0.5, distinguish post-warmup sampling from the complete
+fit. Check `packageDescription("stLMM")[["Config/stLMM/Timing"]]`: the value
+`"phases-v1"` identifies builds with these timers. The version number alone
+is insufficient because the update remains within 0.0.5. For one chain:
+
+```{r timing-fields, eval=FALSE}
+fit$timing$phases
+# Named elapsed seconds: initialization, warmup, sampling.
+
+sampling_seconds <- fit$timing$phases[["sampling"]]
+seconds_per_iteration <- sampling_seconds / fit$backend$n_samples
+fit$timing$backend  # CPU and elapsed time around the entire compiled call.
+```
+
+The sampling timer surrounds exactly the returned MCMC iterations. It includes
+parameter updates, repeated covariance calculations and factorizations, sample
+storage, and any requested in-chain latent recovery. It excludes data and graph
+preparation, one-time initialization, calibration warmup, and final output
+assembly. Subsequent user-side burn-in or thinning does not change this timer.
+A monotonic wall clock is read at phase boundaries, not on every iteration.
+
+For multiple chains, `fit$timing$phases_by_chain` gives elapsed seconds by chain
+and `fit$timing$phases_total` sums them. `backend_by_chain` and `backend_total`
+record the broader compiled-call costs. `system.time(stLMM(...))` additionally
+includes R-side preparation and finalization. CAR graphs built before the fit
+require their own timer; NNGP neighbor construction occurs inside the fit but
+outside the sampling loop.
+
+Earlier builds called the compiled-call duration `timing$sampler`, or
+`sampler_by_chain`/`sampler_total` for multiple chains. These names are replaced
+by `backend`, `backend_by_chain`, and `backend_total`. Old saved fits and timing
+tables cannot supply sampling-only durations without rerunning. Never divide
+an old backend duration by the iteration count and label it sampling time.
+
+Report the measured sampling duration and iteration count together. Use enough
+iterations that repeat-to-repeat variation is small relative to the duration.
+Any projection to 1,000 iterations must be labeled as a projection, and short
+runs do not establish convergence or effective sample size.
+
 ## Runtime Layers
 
 There are three computational layers to keep separate.
@@ -225,9 +266,17 @@ run_fit <- function(omp_threads) {
   )
 }
 
-system.time(run_fit(1))
-system.time(run_fit(4))
-system.time(run_fit(8))
+lapply(c(1, 4, 8), function(threads) {
+  set.seed(1)
+  fit <- run_fit(threads)
+  data.frame(
+    threads,
+    iterations = fit$backend$n_samples,
+    sampling_seconds = fit$timing$phases[["sampling"]],
+    warmup_seconds = fit$timing$phases[["warmup"]],
+    backend_seconds = fit$timing$backend[["elapsed"]]
+  )
+})
 ```
 
 For more reproducible comparisons, use separate R processes so thread

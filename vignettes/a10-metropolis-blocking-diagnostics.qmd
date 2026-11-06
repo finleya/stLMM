@@ -20,6 +20,7 @@ bibliography: references.bib
 #| code-fold: true
 #| code-summary: "Show preliminaries"
 library(stLMM)
+stopifnot(identical(packageDescription("stLMM")[["Config/stLMM/Timing"]], "phases-v1"))
 library(ggplot2)
 
 source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
@@ -119,7 +120,9 @@ The default Metropolis update is one joint block containing the covariance and r
 
 The retained adaptive Metropolis strategy used in `stLMM` adapts ideas from unpublished adaptive Metropolis notes by Benjamin Shaby and from the broader adaptive MCMC literature [@andrieu2008tutorial].
 
-`stLMM` records sampler timing in the returned fit object. For a single-chain fit, `fit$timing$sampler` gives the usual `proc.time()` CPU and elapsed wall-clock differences around the compiled sampler call. For a multi-chain fit, `fit$timing$sampler_by_chain` gives those values by chain and `fit$timing$sampler_total` gives the total across chains. We'll use those values below to compare the computational cost of blocking schemes.
+In development builds of stLMM 0.0.5 with phase timing, `fit$timing$phases[["sampling"]]` records elapsed seconds for the post-warmup MCMC loop. It includes all updates, repeated factorizations, and sample storage in that loop, while excluding preparation and calibration. Multi-chain fits provide `fit$timing$phases_by_chain` and `fit$timing$phases_total`. We use the summed sampling time as the denominator for ESS per second below; this measures sampling efficiency after calibration, not efficiency including setup and warmup. The table also reports warmup and the broader backend duration.
+
+`fit$timing$backend` retains the CPU and elapsed times around the entire compiled call; its multi-chain counterparts are `backend_by_chain` and `backend_total`. In earlier builds these broader durations were named `sampler`, `sampler_by_chain`, and `sampler_total`. Old fits and previously rendered tables must be recomputed to obtain sampling-only durations; their values cannot be relabeled.
 
 ## What Enters the Metropolis Update
 
@@ -363,7 +366,7 @@ coda_diagnostics <- function(run, label){
 
   rhat <- coda::gelman.diag(chains, multivariate = FALSE)$psrf[, "Point est."]
   ess <- coda::effectiveSize(chains)
-  elapsed <- run$timing$sampler_total[["elapsed"]]
+  elapsed <- run$timing$phases_total[["sampling"]]
 
   data.frame(
     Blocking = label,
@@ -390,7 +393,9 @@ runtime_summary <- function(run, label){
 
   data.frame(
     Blocking = label,
-    `Sampler elapsed seconds` = round(run$timing$sampler_total[["elapsed"]], 2),
+    `Sampling seconds` = round(run$timing$phases_total[["sampling"]], 2),
+    `Warmup seconds` = round(run$timing$phases_total[["warmup"]], 2),
+    `Backend seconds` = round(run$timing$backend_total[["elapsed"]], 2),
     `Worst Rhat` = max(diag$Rhat, na.rm = TRUE),
     `Minimum ESS` = min(diag$ESS, na.rm = TRUE),
     `Minimum ESS per second` = min(diag$`ESS per second`, na.rm = TRUE),

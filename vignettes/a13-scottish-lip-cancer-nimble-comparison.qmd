@@ -33,6 +33,7 @@ params:
 ```{r setup}
 #| include: false
 library(stLMM)
+stopifnot(identical(packageDescription("stLMM")[["Config/stLMM/Timing"]], "phases-v1"))
 library(sf)
 library(spdep)
 library(ggplot2)
@@ -159,7 +160,7 @@ data.frame(
 )
 ```
 
-The two samplers use different implementations, but the comparison below uses the same number of chains, the same total chain length, and the same number of retained posterior draws per chain for each fitted model. Each chain runs for 10,000 total iterations, with the first 5,000 discarded and every 25th remaining draw retained for summaries.
+For posterior comparisons, each implementation runs 10,000 iterations per chain, discards the first 5,000, and retains every 25th remaining draw for summaries. The number of chains and retained draws match. stLMM additionally performs its automatically discarded proposal-calibration warmup before those 10,000 iterations; that extra work is included in backend time and reported separately by the phase timer.
 
 ```{r mcmc-settings}
 data.frame(
@@ -506,8 +507,9 @@ The intercepts are broadly comparable because they are global log-risk terms. Th
 
 ## Runtime Summary
 
-The table below gives a simple runtime summary for the fitted models. These values are useful for checking the computational scale of the example, but they should not be read as a formal benchmark. Total elapsed time is measured around each high-level model fit call, so it is the wall-clock time for all three chains run by that call. Differences across NIMBLE and stLMM reflect both model implementation and what each timer includes; NIMBLE uses a general model compiler and samples the ICAR latent field directly, while stLMM uses package-specific compiled samplers for these model classes.
+The table below describes the computational scale of this example; the timing scopes differ across implementations. NIMBLE's elapsed time surrounds the high-level `nimbleMCMC()` call, including model compilation and all chains. For stLMM, backend time sums the compiled calls across chains, including initialization, calibration warmup, and result assembly but excluding R-side setup. A separate stLMM column reports only the post-warmup sampling loops, including iterations later discarded as burn-in. No sampling-only NIMBLE timer is collected here, so that entry is left missing. These columns do not establish a cross-package sampling-speed ranking.
 
+The phase timings require the updated GitHub build of stLMM 0.0.5, identified by `Config/stLMM/Timing: phases-v1` in DESCRIPTION. Earlier tables used compiled-call durations under the name `sampler_total`; obtaining the sampling column requires fresh fits.
 ```{r runtime-summary}
 elapsed_seconds <- function(x) {
   if (is.null(x) || !"elapsed" %in% names(x))
@@ -516,9 +518,9 @@ elapsed_seconds <- function(x) {
   unname(as.numeric(x[["elapsed"]]))
 }
 
-stlmm_fit_time_proper_car <- fit_proper_car$timing$sampler_total
-stlmm_fit_time_leroux_car <- fit_leroux_car$timing$sampler_total
-stlmm_fit_time_dagar <- fit_dagar$timing$sampler_total
+stlmm_fit_time_proper_car <- fit_proper_car$timing$backend_total
+stlmm_fit_time_leroux_car <- fit_leroux_car$timing$backend_total
+stlmm_fit_time_dagar <- fit_dagar$timing$backend_total
 
 runtime_rows <- bind_rows(
   if (exists("nimble_fit_time")) {
@@ -527,7 +529,9 @@ runtime_rows <- bind_rows(
       Ch = n_chains,
       Iter = niter_nimble,
       Draws = n_chains * n_keep_per_chain,
-      Time_s = elapsed_seconds(nimble_fit_time)
+      Timing_scope = "High-level call, including compilation",
+      Elapsed_s = elapsed_seconds(nimble_fit_time),
+      Sampling_s = NA_real_
     )
   },
   data.frame(
@@ -535,10 +539,16 @@ runtime_rows <- bind_rows(
     Ch = n_chains,
     Iter = niter_stlmm,
     Draws = n_chains * n_keep_per_chain,
-    Time_s = c(
+    Timing_scope = "Compiled backend, including initialization and warmup",
+    Elapsed_s = c(
       elapsed_seconds(stlmm_fit_time_proper_car),
       elapsed_seconds(stlmm_fit_time_leroux_car),
       elapsed_seconds(stlmm_fit_time_dagar)
+    ),
+    Sampling_s = c(
+      fit_proper_car$timing$phases_total[["sampling"]],
+      fit_leroux_car$timing$phases_total[["sampling"]],
+      fit_dagar$timing$phases_total[["sampling"]]
     )
   )
 )

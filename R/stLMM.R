@@ -1913,10 +1913,11 @@ stLMM <- function(formula, data = parent.frame(),
     }
 
     run_collapsed_sampler <- function(backend_i){
-        sampler_start <- proc.time()
+        backend_start <- proc.time()
         out <- .Call("stLMM_collapsed_sampler", backend_i, PACKAGE = "stLMM")
-        sampler_time <- proc.time() - sampler_start
-        out$timing <- list(sampler = sampler_time)
+        backend_time <- proc.time() - backend_start
+        out$timing <- list(backend = backend_time, phases = out$phase_seconds)
+        out$phase_seconds <- NULL
         out
     }
 
@@ -2044,11 +2045,12 @@ stLMM <- function(formula, data = parent.frame(),
     }
     names(chain_fits) <- paste0("chain_", seq_len(chains))
 
-    sampler_timing <- do.call(
+    backend_timing <- do.call(
         rbind,
-        lapply(chain_fits, function(z) as.numeric(z$timing$sampler))
+        lapply(chain_fits, function(z) as.numeric(z$timing$backend))
     )
-    colnames(sampler_timing) <- names(chain_fits[[1L]]$timing$sampler)
+    colnames(backend_timing) <- names(chain_fits[[1L]]$timing$backend)
+    phase_timing <- do.call(rbind, lapply(chain_fits, function(z) z$timing$phases))
 
     out <- list(
         chains = chain_fits,
@@ -2058,8 +2060,10 @@ stLMM <- function(formula, data = parent.frame(),
         backend = backend,
         term_description = chain_fits[[1]]$term_description,
         timing = list(
-            sampler_by_chain = sampler_timing,
-            sampler_total = structure(colSums(sampler_timing), class = "proc_time")
+            backend_by_chain = backend_timing,
+            backend_total = structure(colSums(backend_timing), class = "proc_time"),
+            phases_by_chain = phase_timing,
+            phases_total = colSums(phase_timing)
         )
     )
     class(out) <- "stLMM_chains"
