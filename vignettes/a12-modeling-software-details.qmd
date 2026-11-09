@@ -5,11 +5,12 @@ author: "Andrew O. Finley"
 description: "Technical reference for stLMM notation, model terms, likelihoods, collapsed sampling, sparse linear algebra, recovery, and prediction."
 format:
   html:
-    toc: false
+    toc: true
     number-sections: false
     code-fold: show
     code-overflow: wrap
     html-math-method: katex
+bibliography: references.bib
 execute:
   warning: false
   message: false
@@ -20,3 +21,52 @@ The package vignettes focus on runnable examples. The technical reference provid
 [Download the PDF technical reference](../stLMM-modeling-and-software-details.pdf).
 
 The document is intended for readers who want implementation-level detail beyond the user-facing examples. It is most useful when checking how a model formula maps to the latent process representation, how the collapsed sampler is constructed, or how recovery and prediction use the sampled parameters and retained process draws.
+
+
+## Innovation representations for separable space-time models
+
+An alternative to working with a complete space-time precision is to express
+latent states through spatial innovations. @OrdonezEtAl2026Innovations develop
+an innovation-form representation for censored and missing areal tensor data,
+including DAGAR spatial dependence and autoregressive temporal dependence, with
+Bayesian computation in Stan. This provides a useful direction for specialized
+space-time implementations.
+
+For example, let $Q_s$ be the marginal spatial precision of a CAR or DAGAR state,
+including its variance scale. A stationary separable AR(1) model with $|a|<1$ can
+be written as
+
+$$
+w_1\sim N(0,Q_s^{-1}),\qquad
+w_t=a w_{t-1}+\eta_t,\qquad
+\eta_t\stackrel{\mathrm{ind}}{\sim}N(0,(1-a^2)Q_s^{-1}).
+$$
+
+The factor $(1-a^2)$ ensures that every time slice has marginal covariance
+$Q_s^{-1}$. Stacking the states by time gives the prior precision
+$Q_t(a)\otimes Q_s$, where $Q_t(a)$ is the inverse AR(1) correlation matrix.
+Thus the recursive and joint representations describe the same prior under
+these assumptions. Conditional prior evaluations can operate on spatial
+innovations rather than factorizing a full space-time matrix. For DAGAR,
+its triangular parent representation further supplies spatial conditional
+operations. Irregular time gaps require the corresponding gap-dependent
+transition and innovation variances.
+
+### Relationship to stLMM's collapsed computation
+
+stLMM currently integrates structured latent effects out during parameter updates
+and works with $M=Q_w+A^\mathsf{T}WA$ across supported terms. Augmented non-Gaussian
+models also draw and retain latent effects within the chain for the augmentation
+updates, as described in the technical reference. The recursion above
+is a representation of the **prior**, not by itself a replacement for this
+collapsed likelihood. Using innovations as explicit latent variables changes
+the sampled state; retaining a collapsed approach requires a suitable sequential
+marginalization algorithm. Coupled process terms and observation mappings also
+need to be handled in such an implementation.
+
+An innovation formulation could therefore motivate an additional inference
+engine for models with suitable temporal structure. The present implementation
+favors a common precision-based calculation across point, areal, temporal,
+space-time, and varying-coefficient terms. We have not implemented or benchmarked
+an innovation engine, so neither the runtime article nor the spatial benchmarks
+establish a speed comparison between these approaches.
