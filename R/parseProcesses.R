@@ -591,7 +591,8 @@ build_car_components <- function(spec, data, formula_env){
       coef_name = spec$coef_name,
       cov_model = NULL,
       params = list(car_model = car_model),
-      data = data
+      data = data,
+      n_node = length(ids)
     )
   )
 }

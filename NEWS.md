@@ -2,6 +2,12 @@
 
 ## Changes
 
+- CAR terms now retain every node in a supplied graph even when some areas
+  have no rows in the fitting data. Missing-response placeholder rows are no
+  longer required for these areas; recovery and prediction retain the full
+  graph support. This applies to proper and Leroux CAR terms, including
+  spatially varying coefficients.
+
 - Fits now record monotonic elapsed seconds for compiled initialization,
   proposal-calibration warmup, and the post-warmup MCMC loop separately, in
   `fit$timing$phases`. Sampling time includes all work in the loop, including
