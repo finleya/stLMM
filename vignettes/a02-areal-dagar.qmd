@@ -59,7 +59,7 @@ N\left(
 \right).
 $$
 
-If an ordered area has no parents, the conditional mean is zero and the conditional variance is $\sigma^2$. The parameter $\sigma^2$ controls the marginal scale of the areal process, while $\rho$ controls positive spatial association along the directed parent graph. The implemented model supports $0 \le \rho < 1$; in this example we use a prior bounded away from the endpoints.
+If an ordered area has no parents, the conditional mean is zero and the conditional variance is $\sigma^2$. The parameter $\sigma^2$ scales the process covariance, while $\rho$ controls positive spatial association along the directed parent graph. Marginal variances and neighbor correlations also depend on the graph and its ordering. The implemented model supports $0 \le \rho < 1$; in this example we use a prior bounded away from the endpoints.
 
 The equivalent precision matrix can be written as
 
@@ -69,7 +69,7 @@ $$
 \sigma^{-2}\mathbf{L}_{\pi}^{\top}\mathbf{F}_{\pi}\mathbf{L}_{\pi},
 $$
 
-where $\mathbf{L}_{\pi}$ contains the directed parent coefficients and $\mathbf{F}_{\pi}$ contains the conditional precisions. This is the sparse precision used internally by `stLMM`.
+where $\mathbf{L}_{\pi}$ is unit lower triangular, with entry $-\rho/\{1+(m_i-1)\rho^2\}$ for each parent in row $i$, and $\mathbf{F}_{\pi}$ is diagonal with entries $\{1+(m_i-1)\rho^2\}/(1-\rho^2)$. For a node with no parents, the corresponding diagonal entry of $\mathbf{F}_{\pi}$ is one. This is the sparse precision used internally by `stLMM`.
 
 ## County graph and ordering
 
@@ -87,9 +87,7 @@ g$island_added_edges
 
 The undirected graph defines which counties can become DAGAR parent-child pairs. The ordering determines the direction of each eligible edge. For areal graphs built from `sf` polygons, `ordering = "coord"` orders the counties by their point-on-surface coordinates, `ordering = "maxmin"` uses a spatial max-min ordering, `ordering = "hilbert"` uses a Hilbert curve ordering, and `ordering = "random"` samples an ordering.
 
-For user-supplied orderings and a comparison across alternatives, see
-[Ordering choices and sensitivity](#ordering-choices-and-sensitivity) near the end
-of this article.
+For user-supplied orderings and a comparison across alternatives, see [Ordering choices and sensitivity](#ordering-choices-and-sensitivity) near the end of this article.
 
 The plot below shows the undirected adjacency graph. Bridge edges added for the island county are shown as dashed lines.
 
@@ -193,12 +191,11 @@ ggplot(wa_plot) +
 
 ## Fit
 
-Rows with `y = NA` are included in the fitting data so that the fitted graph still contains the held-out counties. They do not contribute to the likelihood, but they remain available for recovery and prediction because their county IDs are part of the DAGAR support.
+We mark the six held-out responses with `y = NA`. These rows do not contribute to the likelihood. All counties in `g` remain in the latent support, including counties without any rows in the fitting data, so their effects can be recovered and their responses predicted.
 
 The residual and process variances use half-$t$ priors on their corresponding standard deviations. The DAGAR association parameter `rho` uses a bounded uniform prior over positive spatial association values.
 
-We use four chains and inspect the post-burn summaries before comparing orderings.
-The diagnostics in `summary()` are provided by coda [@PlummerEtAl2006Coda].
+We use four chains and inspect the post-burn summaries before comparing orderings. The diagnostics in `summary()` are provided by coda [@PlummerEtAl2006Coda].
 
 ```{r fit-dagar}
 #| cache: true
@@ -224,7 +221,7 @@ summary(fit, burn = burn)
 
 ## Recover
 
-Like other structured process terms, DAGAR effects are integrated out during fitting. Calling `recover()` draws the county-level DAGAR effects conditional on the posterior parameter samples.
+For this Gaussian response model, DAGAR effects are integrated out during parameter sampling. Calling `recover()` draws the county-level DAGAR effects conditional on the posterior parameter samples.
 
 ```{r recover-dagar}
 set.seed(301)
@@ -361,56 +358,29 @@ fit_dagar_time_exp <- stLMM(
 )
 ```
 
-Point observations can also be linked to an areal DAGAR or DAGAR-time support. In that case, each point-level row carries the associated area ID, and multiple point observations can share the same areal latent effect. If you want a random effect or prediction for an area, time, or area-time cell with no observed point rows, include a row with `y = NA` and the associated area, time, and covariate values.
+Point observations can also be linked to a DAGAR or DAGAR-time support. Each row carries its area ID, and multiple observations can share the same areal latent effect. A `dagar()` term retains every area in the supplied graph, including areas without observation rows. A `dagar_time()` term retains every graph area at each time represented in the fitting data. To include a time with no observed responses, add a row with `y = NA` and the corresponding time, area ID, and covariate values. Prediction rows identify the desired areas and times and supply their covariates.
 
 ## Ordering choices and sensitivity {#ordering-choices-and-sensitivity}
 
-This optional section examines the choice of spatial ordering. We keep the
-simulated data, county graph, covariate, priors, and six held-out counties fixed,
-and compare parameters and county means across orderings.
+Different spatial orderings turn the same county adjacency graph into different directed parent graphs. This section explores how those changes affect parameter estimates and county means, holding the simulated data, covariate, priors, and six held-out counties fixed.
 
 ### What changes with ordering?
 
-Changing the ordering changes which adjacent counties are parents, and therefore
-changes the DAGAR prior. This differs from `cholmod_control`, which reorders the
-same precision matrix for sparse factorization without changing the model.
+Changing the ordering changes which adjacent counties are parents, and therefore changes the DAGAR prior. This differs from `cholmod_control`, which reorders the same precision matrix for sparse factorization without changing the model.
 
-@DattaDAGAR2019 compare four diagonal sweeps across a map and report similar
-latent-effect errors and inference for $\rho$ in their sensitivity experiment
-(Section 3.2). Their theoretical variance and neighbor-correlation results apply
-to particular tree and grid orderings (Sections 2.3–2.4); they do not establish
-invariance under arbitrary orderings on irregular graphs. They also construct an
-order-free model by averaging precision matrices. That is a distinct prior,
-not an average of fitted predictions, and is not implemented by `dagar()`.
+@DattaDAGAR2019 compare four diagonal sweeps across a map and report similar latent-effect errors and inference for $\rho$ in their sensitivity experiment (Section 3.2). Their theoretical variance and neighbor-correlation results apply to particular tree and grid orderings (Sections 2.3–2.4); they do not establish invariance under arbitrary orderings on irregular graphs. They also construct an order-free model by averaging precision matrices. That is a distinct prior, not an average of fitted predictions, and is not implemented by `dagar()`.
 
-@OrdonezEtAl2026Innovations retain a spatial ordering in their space-time
-innovation representation and refer to Datta et al.'s sensitivity findings
-(Section 2.3, following equation 13). Thus the ordering question also applies
-to space-time DAGAR models. Their innovation representation is discussed in the
-[technical article](a12-modeling-software-details.html).
+@OrdonezEtAl2026Innovations retain a spatial ordering in their space-time innovation representation and refer to Datta et al.'s sensitivity findings (Section 2.3, following equation 13). Thus the ordering question also applies to space-time DAGAR models. Their innovation representation is discussed in the [technical article](a12-modeling-software-details.html).
 
-Max-min ordering has a different motivation in Vecchia GP approximations
-[@Guinness2018Vecchia]. Those approximation results do not establish an optimal
-DAGAR ordering. Here we focus on diagonal sweeps and the package default.
+Max-min ordering has a different motivation in Vecchia GP approximations [@Guinness2018Vecchia]. Those approximation results do not establish an optimal DAGAR ordering. Here we focus on diagonal sweeps and the package default.
 
 ### Default and user-supplied orderings
 
-The default is `ordering = "coord"`. For an `sf` graph, it orders polygon
-point-on-surface coordinates lexicographically: first by the first coordinate,
-then by the second to break ties. For an adjacency-matrix graph without geometry,
-it preserves the supplied graph-node order. This is a reproducible starting point,
-not a universally optimal statistical choice.
+The default is `ordering = "coord"`. For an `sf` graph, it orders polygon point-on-surface coordinates lexicographically: first by the first coordinate, then by the second to break ties. For an adjacency-matrix graph without geometry, it preserves the supplied graph-node order. The examples below compare this default with four geographic sweeps.
 
-Both `dagar()` and `dagar_time()` also accept a numeric permutation of `1:g$n`.
-The numbers identify nodes in the order of `g$ids`, not county identifiers or
-observation-row indices. There is one index per graph node, including counties
-without responses. The same spatial ordering is used across times in
-`dagar_time()`.
+Both `dagar()` and `dagar_time()` also accept a numeric permutation of `1:g$n`. The numbers identify nodes in the order of `g$ids`, not county identifiers or observation-row indices. There is one index per graph node, including counties without responses. The same spatial ordering is used across times in `dagar_time()`.
 
-For this Washington example, use projected coordinates in meters (EPSG:5070).
-The four sweeps below are geographic analogs of the diagonal orderings studied
-by Datta et al. Point-on-surface coordinates follow the graph's node order.
-The default lexicographic ordering is kept as a fifth reference fit.
+We construct four diagonal sweeps using projected county coordinates in meters (EPSG:5070), following the geographic approach studied by Datta et al. The point-on-surface coordinates follow the graph's node order. The default lexicographic ordering provides a fifth reference fit.
 
 ```{r diagonal-orderings}
 coords <- sf::st_coordinates(sf::st_point_on_surface(
@@ -431,21 +401,11 @@ orders <- list(
 )
 ```
 
-The named options `"maxmin"`, `"hilbert"`, and `"random"` remain available.
-Max-min and Hilbert require an `sf` graph; random ordering should be generated
-once with a recorded seed and reused across chains. An explicit permutation can
-also encode an application-motivated order. Edge directions alone do not imply
-causal relationships.
+The named options `"maxmin"`, `"hilbert"`, and `"random"` provide other ways to construct an ordering. Max-min and Hilbert require an `sf` graph; random ordering should be generated once with a recorded seed and reused across chains. An explicit permutation can also encode an application-motivated order. Edge directions alone do not imply causal relationships.
 
 ### Fit the same model under each ordering
 
-We reuse the default fit above and fit four alternatives. Each has four chains
-of `r format(n_samples, big.mark = ",")` returned iterations, discards
-`r format(burn, big.mark = ",")` per chain, and uses every remaining parameter
-draw for diagnostics. Only recovery of county means is thinned. These data were
-generated under the default ordering; the exercise demonstrates sensitivity for
-one dataset rather than ranking the orderings or estimating repeated-sample
-performance.
+We reuse the default fit above and fit four alternatives. Each has four chains of `r format(n_samples, big.mark = ",")` returned iterations, discards `r format(burn, big.mark = ",")` per chain, and uses every remaining parameter draw for diagnostics. Only recovery of county means is thinned. The data were generated under the default ordering, and the comparison describes sensitivity for this dataset.
 
 ```{r ordering-diagonal-fits}
 #| cache: true
@@ -475,10 +435,7 @@ for (i in 2:length(orders)) {
 
 ### Compare parameters
 
-The intervals below show how regression and covariance parameter estimates
-change with ordering. Process scale and $\rho$ describe the specified DAGAR
-prior; their relationship to marginal variances and correlations can also change
-with the ordering on an irregular graph.
+The intervals below show how regression and covariance parameter estimates change with ordering. Process scale and $\rho$ describe the specified DAGAR prior; their relationship to marginal variances and correlations can also change with the ordering on an irregular graph.
 
 ```{r ordering-parameters}
 #| code-fold: true
@@ -515,18 +472,11 @@ ggplot(ordering_table, aes(mean, ordering, color = ordering)) +
   theme(legend.position = "none")
 ```
 
-The covariate's 95% interval remains below zero for every ordering, but its
-estimated magnitude changes. Process-scale and association estimates also shift;
-their intervals show the uncertainty remaining in this small dataset.
+The covariate's 95% interval remains below zero for every ordering, but its estimated magnitude changes. Process-scale and association estimates also shift; their intervals show the uncertainty remaining in this small dataset.
 
-The largest parameter R-hat is `r round(max(ordering_table$rhat), 4)` and the
-smallest ESS is `r round(min(ordering_table$ESS))`, using `summary()` and coda
-[@PlummerEtAl2006Coda]. Inspect mixing before interpreting differences across
-fits. Diagnostics describe these chains, separately from sensitivity to the
-assumed spatial model.
+The largest parameter R-hat is `r round(max(ordering_table$rhat), 4)` and the smallest ESS is `r round(min(ordering_table$ESS))`, using `summary()` and coda [@PlummerEtAl2006Coda]. Checking chain mixing helps distinguish Monte Carlo variability from differences associated with the spatial ordering.
 
-<details>
-<summary>Parameter estimates, ESS, R-hat, and chain traces</summary>
+<details> <summary>Parameter estimates, ESS, R-hat, and chain traces</summary>
 
 ```{r ordering-summary, echo=FALSE}
 knitr::kable(ordering_table, digits = c(0, 0, 3, 3, 3, 4, 0))
@@ -560,11 +510,7 @@ ggplot(trace_data, aes(iteration, value, color = chain)) +
 
 ### Compare county means
 
-For every county, compare the latent mean $\mu_a=\beta_0+x_a\beta_1+w_a$.
-These are mean responses, including the covariate contribution. We do not add
-residual noise here: the comparison is intended to reveal changes in estimated
-county means that wider response-prediction intervals could obscure. All fits
-use the same 33 observed counties and retain the same six held-out counties.
+For every county, we compare the latent mean response $\mu_a=\beta_0+x_a\beta_1+w_a$, including the covariate contribution. All fits use the same 33 observed counties and predict the same six held-out counties.
 
 ```{r ordering-area-means}
 #| cache: true
@@ -603,8 +549,7 @@ ggplot(comparison, aes(default_mean, mean, color = ordering, shape = sample)) +
   theme(legend.position = "bottom")
 ```
 
-The following plot adds uncertainty for the six held-out counties. Dashed lines
-show their generating latent means, not their noisy held-out responses.
+The following plot shows posterior uncertainty for the six held-out county means, with dashed lines marking their true values.
 
 ```{r ordering-heldout-intervals, fig.width=9, fig.height=6}
 #| code-fold: true
@@ -620,8 +565,7 @@ ggplot(heldout, aes(mean, ordering, color = ordering)) +
   labs(x = "County latent mean: posterior mean and 95% credible interval", y = NULL)
 ```
 
-<details>
-<summary>Estimates and intervals for every county</summary>
+<details> <summary>Estimates and intervals for every county</summary>
 
 ```{r ordering-area-table, echo=FALSE}
 knitr::kable(area_estimates[, c("county", "sample", "ordering", "mean", "lower", "upper")],
@@ -630,26 +574,12 @@ knitr::kable(area_estimates[, c("county", "sample", "ordering", "mean", "lower",
 
 </details>
 
-The largest absolute shift in a county's posterior mean from the default is
-`r sprintf("%.2f", max(abs(area_estimates$mean - area_estimates$default_mean)[area_estimates$sample == "Observed"]))`
-among observed counties and
-`r sprintf("%.2f", max(abs(area_estimates$mean - area_estimates$default_mean)[area_estimates$sample == "Held out"]))`
-among held-out counties, in response units. The held-out intervals overlap across
-orderings, but their centers and widths differ. This illustrates why checking
-area estimates can be informative even when a regression conclusion is unchanged.
-It does not establish a generally preferable ordering.
+The largest absolute shift in a county's posterior mean from the default is `r sprintf("%.2f", max(abs(area_estimates$mean - area_estimates$default_mean)[area_estimates$sample == "Observed"]))` among observed counties and `r sprintf("%.2f", max(abs(area_estimates$mean - area_estimates$default_mean)[area_estimates$sample == "Held out"]))` among held-out counties, in response units. The held-out intervals overlap across orderings, but their centers and widths differ. Area estimates can therefore change even when the conclusion about the covariate effect is unchanged.
 
 ### Practical guidance
 
-Use a recorded, reproducible ordering and check a few plausible alternatives
-while keeping the remaining model specification fixed. Compare parameters and
-the area means or aggregates that matter for the application, relative to their
-posterior uncertainty. Similar answers in this example would not establish
-insensitivity for another graph or dataset. If substantive conclusions change,
-report that sensitivity and revisit the spatial assumptions. The package
-provides general chain diagnostics and prediction tools, but no automatic
-ordering-sensitivity score or statistically optimal ordering selector.
+Record the ordering and compare a few plausible alternatives while keeping the remaining model specification fixed. Examine parameters and the area means or aggregates relevant to the application alongside their posterior uncertainty. Sensitivity can differ across graphs and datasets; if substantive conclusions change, report those differences and revisit the spatial assumptions. The package's ordering options, chain diagnostics, and prediction tools support this comparison, while the choice of ordering remains part of the model specification.
 
 ## What this example illustrates
 
-The `dagar()` term is for areal data where the latent process is indexed by graph nodes and the graph is converted into an ordered directed parent graph. Prediction is for existing areas in the fitted graph, including areas whose responses were held out with `NA`. The main DAGAR-specific choices are the areal graph and the ordering used to orient that graph.
+The `dagar()` term is for areal data where the latent process is indexed by graph nodes and the graph is converted into an ordered directed parent graph. Prediction is for existing areas in the fitted graph, including areas without observed responses. The main DAGAR-specific choices are the areal graph and the ordering used to orient that graph.
