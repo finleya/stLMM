@@ -292,7 +292,8 @@ int small_chol_solve_lower(const double *L, const double *b, double *x, int n)
 double logDetFactor(cholmod_factor *L)
 {
   double det;
-  int i, j;
+  size_t i;
+  int j;
   int *lpi, *lsup, *lpx;
   double *x;
   int nrp1, nc;

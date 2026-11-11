@@ -2,6 +2,8 @@
 
 ## Changes
 
+- Use a size_t counter when iterating over CHOLMOD supernodes, removing a signed/unsigned comparison warning.
+
 - CRAN source builds exclude local article caches and the data downloads used only by website articles.
 
 - CAR terms now retain every node in a supplied graph even when some areas
