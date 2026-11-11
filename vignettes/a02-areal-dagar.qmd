@@ -370,7 +370,7 @@ Changing the ordering changes which adjacent counties are parents, and therefore
 
 @DattaDAGAR2019 compare four diagonal sweeps across a map and report similar latent-effect errors and inference for $\rho$ in their sensitivity experiment (Section 3.2). Their theoretical variance and neighbor-correlation results apply to particular tree and grid orderings (Sections 2.3–2.4); they do not establish invariance under arbitrary orderings on irregular graphs. They also construct an order-free model by averaging precision matrices. That is a distinct prior, not an average of fitted predictions, and is not implemented by `dagar()`.
 
-@OrdonezEtAl2026Innovations retain a spatial ordering in their space-time innovation representation and refer to Datta et al.'s sensitivity findings (Section 2.3, following equation 13). Thus the ordering question also applies to space-time DAGAR models. Their innovation representation is discussed in the [technical article](a12-modeling-software-details.html).
+@OrdonezEtAl2026Innovations retain a spatial ordering in their space-time innovation representation and refer to Datta et al.'s sensitivity findings (Section 2.3, following equation 13). Thus the ordering question also applies to space-time DAGAR models.
 
 Max-min ordering has a different motivation in Vecchia GP approximations [@Guinness2018Vecchia]. Those approximation results do not establish an optimal DAGAR ordering. Here we focus on diagonal sweeps and the package default.
 
