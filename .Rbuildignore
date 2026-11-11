@@ -14,6 +14,7 @@
 ^.*\.so$
 ^.*~$
 ^src/symbols\.rds$
+^inst/extdata/stunitco\.gpkg$
 ^vignettes/.*\.html$
 ^vignettes/.*_files/
 ^vignettes/.*_cache($|/)
