@@ -2,6 +2,8 @@
 
 ## Changes
 
+- CRAN source builds exclude local article caches and the data downloads used only by website articles.
+
 - CAR terms now retain every node in a supplied graph even when some areas
   have no rows in the fitting data. Missing-response placeholder rows are no
   longer required for these areas; recovery and prediction retain the full

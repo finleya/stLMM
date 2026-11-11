@@ -20,6 +20,7 @@ docs/
 # Quarto/R Markdown outputs
 vignettes/*.html
 vignettes/*_files/
+vignettes/*_cache/
 vignettes/.quarto/
 
 # LaTeX generated files

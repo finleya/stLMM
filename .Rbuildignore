@@ -16,6 +16,7 @@
 ^src/symbols\.rds$
 ^vignettes/.*\.html$
 ^vignettes/.*_files/
+^vignettes/.*_cache($|/)
 ^vignettes/.*\.rmarkdown$
 ^vignettes/\.quarto/
 ^vignettes/a[0-9][0-9]-.*\.qmd$
@@ -25,9 +26,11 @@
 ^cache/
 ^vignettes/cache/
 ^vignettes/wa_data/
+^vignettes/wa_data\.zip$
 ^vignettes/scripts/
 ^vignettes/wa-.*\.(qmd|R)$
 ^vignettes/article-cache\.R$
 ^vignettes/article-utils\.R$
 ^vignettes/colville_data/
+^vignettes/colville_data\.zip$
 ^vignettes/colville-stlmm-vignette\.(qmd|R)$
