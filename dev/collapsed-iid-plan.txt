@@ -15,8 +15,10 @@ status and record the relevant commit and validation results here.
 
 Algebra note: dev/collapsed-iid-algebra.tex and its rendered PDF,
 dev/collapsed-iid-algebra.pdf. It derives the separate and jointly collapsed
-systems and allows both H(theta) and Q(theta). A fixed design is the initial
-centered representation, not a restriction on future unknown loadings. Known
+systems. The selected representation keeps H fixed and covariance parameters
+in Q for the four full-rank model settings below. The more general H(theta)
+identities document equivalent representations; unknown observation loadings
+and reduced-rank factor models are outside this extension's scope. Known
 misalignment uses fixed observation selection. The note is a development
 specification for review, not a claim that the proposed sampler is implemented.
 To rebuild from the package root without leaving auxiliary files in dev/:
@@ -30,6 +32,10 @@ parameterizations, determinants, quadratic forms, Schur complements, conditional
 moments, triangular recovery, selection, and NB working kernels. Matrix identities
 agreed within 1e-14 relative error; Jacobians within 8e-11. These validate the
 equations only; sampler implementation and its tests remain separate stages.
+Additional observation-layout checks cover all four agreed targets plus unequal
+coefficient counts by outcome. Fixed sparse row mappings with repeated locations
+and partially observed outcomes matched direct IID-plus-spatial covariance and
+marginal precision calculations within 2e-15 relative error.
 
 Scope and decisions
 -------------------
@@ -100,21 +106,21 @@ prove that the separate path remains unchanged before adding the new algorithm.
 Warmup and retained sampling must call the same strategy-specific update logic;
 there should not be independent copies that can drift apart.
 
-Numerical representation to review
-----------------------------------
-For an initial centered representation, stack v=(alpha,w), set H=[Z,A], and use
+Agreed numerical representation
+-------------------------------
+Use a centered representation: stack v=(alpha,w), set fixed H=[Z,A], and use
   Q = blockdiag(D_alpha^{-1}, Q_w),
   M = Q + H' W H.
 The blocks of M are
   [ D_alpha^{-1}+Z'WZ     Z'WA       ]
   [ A'WZ                  Q_w+A'WA   ].
 
-Recommend this as the first implementation because it extends existing design
-and precision machinery directly. Correlated IID blocks do not require changing
-the observation weights. Keep the responsibilities of observation mappings and
-prior blocks distinct so later parameter-dependent loadings can be supported.
-Whether to move IID scales/correlations into A is an explicit design decision;
-there is no need to move all current structured variances at the same time.
+This extends existing design and precision machinery directly. Covariance
+parameters for IID and structured effects enter Q, including correlation among
+coefficients and outcomes within a term. Z and A contain supplied covariates,
+membership indices, and observation selections. Do not move covariance scales
+or correlations into these mappings or implement unknown factor loadings in
+this extension. Keep mapping operations and prior assembly separate.
 
 Required operations: apply H/H', add H'WH, assemble prior blocks, evaluate prior
 log determinants, factor M, apply marginal precision, and recover coefficients.
@@ -176,8 +182,9 @@ an undocumented blocking rule. Test both joint and small-block proposals.
 
 Staged implementation and review
 --------------------------------
-1. Agree on the interface, latent representation, prior specification, parameter
-   transforms, blocking meanings, and exact Gaussian/augmented update schedules.
+1. The centered latent representation and four compatibility targets below are
+   agreed. Settle the interface, prior specification, parameter transforms,
+   blocking meanings, and exact Gaussian/augmented update schedules.
    The branch currently contains this plan and its mathematical specification.
    Use small commits and review the result of each implementation stage before
    proceeding to the next.
@@ -224,24 +231,48 @@ Staged implementation and review
 
 Longer-term design requirements
 -------------------------------
-The common algebra should allow observation mappings and prior precision blocks
-to vary independently. An observation may select or combine multiple latent
-coefficients. Do not require all responses to share observation locations,
-covariates, or a complete response vector at every location.
+The agreed compatibility targets, in increasing scope, are:
+  1. Univariate responses with the existing repeated-measure and missing-response
+     mappings, including multiple observations sharing a latent location/group.
+  2. Univariate responses combining correlated latent coefficients within IID
+     or structured terms, such as a correlated intercept and slope.
+  3. Multivariate responses with within-term cross-outcome covariance, unequal
+     observation locations, and partially observed outcome vectors.
+  4. Multivariate responses with several correlated coefficients per outcome
+     and within-term covariance both within and across outcomes.
+
+All four use fixed H and covariance in Q. A term can contain a coefficient
+vector, and an observation can select or combine its components. Keep observation
+row indices, group/location support indices, outcome identities, and coefficient
+indices distinct. Support different covariates and coefficient counts by outcome.
+The current scalar-per-term mapping needs a focused extension for vector terms;
+the common factorization and marginal calculations must not assume one response
+or one coefficient per latent location.
+
+For a term, the component dimension is the sum of its coefficient counts over
+outcomes. Six outcomes with an intercept and slope give 12 components and 78
+free entries in an unrestricted covariance matrix. Do not impose an arbitrary
+small dimension limit. Unrestricted versus structured covariance is a modeling
+choice; priors, proposal blocks, and numerical costs must reflect the resulting
+dimension. Full-rank vector terms do not require reduced-rank factor models.
 
 Structured processes nested within parent groups remain the next substantive
-modeling extension after the IID work. They can use independent prior blocks for
-each parent, with shared versus parent-specific process parameters specified
-separately. Multivariate LMC and conditional multivariate CAR/DAGAR can follow.
+modeling extension after the IID work, together with the planned progression to
+correlated structured coefficients and then multivariate responses. Nested
+processes can use independent prior blocks for each parent, with shared versus
+parent-specific process parameters specified separately. Cross-outcome process
+models must supply a valid joint spatial covariance/precision, not only a
+same-location covariance matrix.
 
 For multivariate misalignment, observed (response, location) pairs map to latent
-supports through selection/loading operators. Missing outcomes do not require
-dummy observed responses. Missing predictors require separate treatment. Keep
+supports through fixed selection and covariate weights. Missing outcomes omit
+likelihood rows without requiring removal of their latent support or dummy
+observed responses. Missing predictors require separate treatment. Keep
 latent process cross-covariance distinct from correlated measurement errors;
 independent response-specific errors preserve diagonal observation precision,
 whereas full residual correlation needs additional block-precision machinery.
 
-Future covariance loadings, cross-response prior blocks, and response metadata
-should fit these responsibilities. Do not implement multivariate likelihoods,
-residual covariance, spatially varying loadings, or structured nesting as part of
-the first collapsed-IID branch merely to anticipate those future capabilities.
+Later multivariate work still needs outcome-aware model setup, likelihood and
+augmentation handling, prediction, and summaries. The four targets guide the
+current design; they are not all implementation tasks for the first collapsed-IID
+increment. Factor models and unknown observation loadings remain outside scope.

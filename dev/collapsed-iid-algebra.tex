@@ -103,6 +103,13 @@ For independent IID and structured prior blocks, the centered specification is
 The block-diagonal prior expresses independence between these components given
 parameters. Their posterior distributions generally are dependent.
 
+The representation selected for this extension keeps $\bH=[\bZ\ \bA]$ fixed
+and puts covariance parameters in $\bQ$. It targets full-rank vector-valued IID
+and structured terms, including multivariate responses with partial observation.
+The parameter-dependent mapping identities describe alternative representations;
+reduced-rank factor models and unknown observation loadings are outside this
+extension's scope.
+
 \section{Correlated IID coefficients with a fixed design}
 For a grouped term with $G$ groups and $k$ coefficients per group, write
 \begin{equation}\label{eq:iid}
@@ -377,8 +384,82 @@ relationships. The separate-IID schedule instead uses explicit IID coefficients
 in the coefficient and structured-covariance conditionals, with conditional IID
 covariance updates as in \eqref{eq:conditional-covariance-target}.
 
-\section{Multivariate processes and misalignment}
-\subsection{Loadings may be unknown}
+\section{Vector-valued terms and multivariate observations}
+\subsection{Four observation settings}
+The same latent system covers the following observation layouts:
+\begin{enumerate}
+\item A univariate response with repeated observations sharing latent locations
+or groups, and missing responses omitted from the likelihood.
+\item A univariate response combining correlated coefficients within an IID or
+structured term, such as an intercept and slope.
+\item Multiple responses with correlated outcome-specific effects within a term,
+including different observation locations and partially observed outcome vectors.
+\item Multiple responses with several coefficients per outcome and within-term
+correlation both within and across outcomes.
+\end{enumerate}
+Each actual observed scalar response supplies a row of $\by$, $\bX$, and $\bH$.
+Observation rows, latent support points, outcomes, and coefficient components
+are distinct indices. Repeated observations may reuse latent columns with
+different covariate weights. Missing responses omit observation rows without
+requiring removal of the corresponding latent support. No common set of
+covariates or equal coefficient count across outcomes is required.
+
+For example, two outcomes with a spatial intercept and slope have
+\begin{equation}\label{eq:multivariate-svc-map}
+ \bw(s)=\begin{pmatrix}w_{10}(s)\\w_{11}(s)\\w_{20}(s)\\w_{21}(s)\end{pmatrix},
+ \qquad
+ \bB_i=\begin{pmatrix}1&x_{i1}&0&0\\0&0&1&x_{i2}\end{pmatrix}.
+\end{equation}
+Their latent contribution is $\bB_i\bw(s_i)$. If only outcome 1 is observed,
+only row 1 contributes to the likelihood. A $4\times4$ same-location covariance
+can correlate intercepts and slopes within and across outcomes; the spatial
+cross-covariance function additionally specifies dependence between locations.
+For an IID term, analogous coefficient vectors are independent across groups.
+
+If outcome $j$ has $k_j$ coefficients in a term, its total component dimension
+is $d=\sum_j k_j$. An unrestricted covariance has $d(d+1)/2$ free parameters.
+Six outcomes with intercepts and slopes therefore have $d=12$ and 78 covariance
+parameters. The algebra imposes no small fixed dimension limit. Unrestricted
+versus structured covariance, prior specifications, and proposal blocking are
+modeling and computational choices at the resulting dimension.
+
+\subsection{Correlated IID and spatial intercepts and slopes}
+For a univariate response containing both terms, write
+\begin{equation}
+ y_i=\mu_i+\alpha_{0,g(i)}+x_i\alpha_{1,g(i)}
+              +w_0(s_i)+x_iw_1(s_i)+\epsilon_i,
+\end{equation}
+where $\mu_i$ contains the fixed effects and offset. With
+$\balpha_g\sim N_2(\bzero,\bSigma_{\mathrm{iid}})$ independently across groups,
+the IID precision is $\bI_G\otimes\bSigma_{\mathrm{iid}}^{-1}$.
+For an illustrative separable spatial specification,
+\begin{equation}\label{eq:separable-svc}
+ \Cov\{\bw(s),\bw(t)\}=r(s,t;\phi)\bSigma_{\mathrm{sp}},\qquad
+ \bQ_w=\bR_s^{-1}\otimes\bSigma_{\mathrm{sp}}^{-1},
+\end{equation}
+where $\bw(s)=(w_0(s),w_1(s))\trans$, $r(s,s;\phi)=1$, and $\bR_s$ is the
+spatial correlation matrix over distinct latent locations. The precision formula
+uses location-major stacking of coefficient pairs. $\bR_s$ is distinct from the
+observation-error covariance $\bR$.
+The fixed design row places $[1\ \ x_i]$ in the group columns of $\bZ$ and in
+the location columns of $\bA$. Thus the combined prior is
+\begin{equation}\label{eq:iid-spatial-prior}
+ \bQ=\blockdiag\{\bI_G\otimes\bSigma_{\mathrm{iid}}^{-1},
+                 \bQ_w(\bSigma_{\mathrm{sp}},\phi)\}.
+\end{equation}
+These are the two prior blocks in \eqref{eq:M-blocks}. Each $2\times2$ covariance
+has three free parameters shared across its groups or locations. The observation
+cross-block $\bZ\trans\bW\bA$ creates posterior dependence between the terms;
+it introduces no additional prior cross-covariance parameter between them.
+
+The shared spatial correlation in \eqref{eq:separable-svc} is an example, not
+a general requirement. Different component kernels require a valid joint
+cross-covariance/precision construction, such as the one below. A same-location
+covariance matrix alone does not specify the complete spatial model. Sparse
+spatial formulations supply their appropriate precision construction; these
+identities do not require explicitly inverting a large spatial covariance.
+
+\subsection{Alternative covariance factorizations}
 A linear model of coregionalization writes a response-specific spatial vector as
 \begin{equation}\label{eq:lmc}
  \bw(s)=\bC\bu(s),\qquad
@@ -411,21 +492,24 @@ lower-triangular $\bB$ and innovation precision $\bLambda$ gives
  \bQ_w=(\bI-\bB)\trans\bLambda(\bI-\bB).
 \end{equation}
 This includes the conditional construction used by multivariate DAGAR models
-\cite{Gao2022}. It illustrates why both the observation mapping and the prior
-precision must be allowed to carry parameters.
+\cite{Gao2022}. Such models express cross-component dependence directly in the
+prior precision while keeping the observation mapping fixed.
 
 \subsection{Known misalignment is an observation-selection problem}
 Suppose response $j$ is observed only on locations $S_j$. Stack the actual
 observations and let $\bS_{\mathrm{obs}}$ select the relevant response--location
-pairs from a latent construction. If $\bL(\btheta)$ maps component fields to the
-full response-specific field vector, then
+pairs from a latent construction. For the selected centered representation, let
+$\bH_{\mathrm{full}}$ contain the fixed selection and covariate weights for
+the full observation layout. Then
 \begin{equation}\label{eq:misalignment}
- \bH(\btheta)=\bS_{\mathrm{obs}}\bL(\btheta).
+ \bH_{\mathrm{obs}}=\bS_{\mathrm{obs}}\bH_{\mathrm{full}}.
 \end{equation}
 For known locations and observation patterns, $\bS_{\mathrm{obs}}$ is fixed.
-Misalignment alone does not make its entries stochastic. Unknown loadings can
-still make $\bH$ parameter-dependent. A model with uncertain locations or unknown
-alignment would introduce additional unknowns and is a different specification.
+The row selections can also be constructed directly without storing unobserved
+rows. Misalignment alone does not make the mapping stochastic. In an alternative
+loading representation, $\bH_{\mathrm{full}}$ may depend on loading parameters.
+A model with uncertain locations or unknown alignment would introduce additional
+unknowns and is a different specification.
 Response-specific designs and unequal observation counts fit this framework
 \cite{Finley2014}; no fabricated observed outcomes are needed to create a complete
 rectangular data array. Missing covariates require separate treatment.
@@ -461,6 +545,9 @@ observation covariance;
 \item transformed covariance-prior Jacobians and scalar special cases;
 \item unchanged observation covariance when known misalignment is expressed by
 selection rather than by direct row construction;
+\item vector-valued terms covering all four observation layouts, including
+different covariates by outcome, repeated measurements, and partially observed
+outcome vectors;
 \item restoration of all affected matrices and caches after rejected proposals.
 \end{enumerate}
 Explicit matrix inverses in such small reference calculations are mathematical
