@@ -36,6 +36,10 @@ Additional observation-layout checks cover all four agreed targets plus unequal
 coefficient counts by outcome. Fixed sparse row mappings with repeated locations
 and partially observed outcomes matched direct IID-plus-spatial covariance and
 marginal precision calculations within 2e-15 relative error.
+The complete log-Cholesky Jacobian matched finite differences at 50 points
+across covariance dimensions 1, 2, 3, 6, and 12; maximum absolute log-Jacobian
+error was below 9e-10. The expression was checked against the local spBayes
+spMvLM.cpp implementation and the Banerjee et al. (2008) reference below.
 
 Scope and decisions
 -------------------
@@ -142,15 +146,30 @@ how to generate them efficiently. A joint conditional draw may be used internall
 without retaining all of w; benchmark that cost rather than assuming it is free.
 Non-Gaussian augmentation requires a current compatible latent realization.
 
-Prior and parameterization proposal
------------------------------------
+Priors and covariance proposal coordinates
+------------------------------------------
 Scalar and independent coefficient variances: use the existing ig(),
 log_normal(), gamma_dist(), half_normal(), and half_t() conventions. The half
 priors remain priors on standard deviations even when the parameter is named
 sigma_sq. Retain named coefficient lists and the existing by-parent reuse of
 prior hyperparameters. Require explicit priors; do not introduce hidden scaling.
 
-Correlated coefficients: retain covariance=iw(...) and add a mutually exclusive
+Correlated coefficients retain covariance=iw(df, scale). The agreed initial IW
+Metropolis coordinates follow spBayes: Sigma=L L', with a lower triangular L,
+log diagonal entries, and unrestricted off-diagonal entries. For dimension k,
+  log J = k log(2) + sum_{i=1}^k (k-i+2) log(L_ii).
+The k log(2) constant cancels in fixed-dimension Metropolis ratios. The target
+combines the marginal likelihood, the IW density on Sigma, and this adjustment.
+Our IW(df, scale) uses the same convention as spBayes. Apply one Jacobian per
+estimated covariance matrix, not per group sharing that matrix. Forming Sigma's
+inverse for Q requires no additional change-of-variable adjustment. The existing
+direct IW Gibbs draw remains unchanged.
+
+Reference: Banerjee, Gelfand, Finley, and Sang (2008), Gaussian predictive process
+models for large spatial data sets, JRSS B 70(4), 825-848, Section 3.
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC2741335/
+
+Broader correlated priors remain a proposal: add a mutually exclusive
 separation specification Sigma=D R D, where D contains marginal standard
 deviations and R is a correlation matrix. Candidate interface:
   priors=list(iid_1=list(
@@ -158,14 +177,14 @@ deviations and R is a correlation matrix. Candidate interface:
     correlation=lkj(shape=2)))
 This is proposed syntax, not an implemented function or a default prior choice.
 
-Use valid unconstrained covariance coordinates, such as log scales and transformed
-partial correlations defining a Cholesky factor. Independent unconstrained
-pairwise correlations are not sufficient for dimension greater than two.
-Derive the complete Jacobian for the chosen coordinates and prior measure.
-An IW density on Sigma and separate densities on variances/R require different
-change-of-variable accounting. Check the scalar reduction and two-dimensional
-case analytically before the general case. No automatic covariance jitter should
-silently change the posterior target.
+For a separation prior, settle the proposal coordinates and complete Jacobian
+independently. Log scales and transformed partial correlations defining a
+Cholesky factor are a candidate; independent unconstrained pairwise correlations
+are not sufficient beyond dimension two. An IW density on Sigma and separate
+densities on variances/R require different change-of-variable accounting. The
+two-dimensional scale/correlation identity in the algebra note is an alternative
+coordinate example, not an extra correction to the agreed IW log-Cholesky target.
+No automatic covariance jitter should silently change the posterior target.
 
 LKJ is a candidate correlation prior, with density proportional to
 det(R)^(shape-1). A flat density on correlation matrices at shape=1 is not a flat
@@ -182,9 +201,10 @@ an undocumented blocking rule. Test both joint and small-block proposals.
 
 Staged implementation and review
 --------------------------------
-1. The centered latent representation and four compatibility targets below are
-   agreed. Settle the interface, prior specification, parameter transforms,
-   blocking meanings, and exact Gaussian/augmented update schedules.
+1. The centered latent representation, four compatibility targets below, and IW
+   log-Cholesky proposal coordinates are agreed. Settle the interface, broader
+   prior specification and transforms, blocking meanings, and exact
+   Gaussian/augmented update schedules.
    The branch currently contains this plan and its mathematical specification.
    Use small commits and review the result of each implementation stage before
    proceeding to the next.

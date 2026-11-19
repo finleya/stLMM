@@ -64,7 +64,8 @@ multivariate processes, and spatial misalignment. The jointly IID-collapsed
 sampler is a proposed extension to the version 0.0.6 baseline. The equations do
 not imply that every model construction discussed here is already implemented.
 \end{abstract}
-\tableofcontents
+{\small\tableofcontents}
+\clearpage
 
 \section{Observation model and notation}
 For the $n$ observed responses, consider
@@ -316,6 +317,42 @@ $\btheta=t(\bxi)$, the target density with respect to $\bxi$ is
 The prior measure must be specified. A prior on a full covariance matrix differs
 from independent priors on its marginal variances and correlation matrix.
 
+\subsection{Log-Cholesky proposals for an IW covariance}
+The selected IW proposal coordinates use $\bSigma=\bL\bL\trans$ with a lower
+triangular $\bL$, positive diagonal, $\xi_{ii}=\log L_{ii}$, and
+$\xi_{ij}=L_{ij}$ for $i>j$. The Jacobian from the distinct entries of
+$\bL$ to the distinct covariance entries is \cite{Banerjee2008}
+\begin{equation}
+ J_{\Sigma\leftarrow L}=2^k\prod_{i=1}^k L_{ii}^{\,k-i+1}.
+\end{equation}
+Exponentiating the diagonal contributes another $\prod_i L_{ii}$. Thus
+\begin{equation}\label{eq:log-cholesky-jacobian}
+ \log J_{\Sigma\leftarrow\xi}
+ =k\log 2+\sum_{i=1}^k(k-i+2)\log L_{ii}.
+\end{equation}
+The collapsed log target for an IW covariance, up to constants in the proposal,
+is therefore
+\begin{equation}\label{eq:iw-log-cholesky-target}
+ \ell(\bSigma,\ldots)-\frac{\nu+k+1}{2}\log|\bSigma|
+ -\frac12\tr(\bm{\Psi}\bSigma^{-1})
+ +\sum_{i=1}^k(k-i+2)\log L_{ii}.
+\end{equation}
+The constant $k\log2$ cancels for fixed dimension. For $k=1$ the full Jacobian
+is $2L_{11}^2$, and for $k=2$ it is $4L_{11}^3L_{22}^2$.
+These are covariance proposal coordinates; $\bL$ is not inserted into the fixed
+observation mapping.
+
+The Jacobian depends on the coordinate transformation and the measure used for
+the prior density. Changing the IW degrees-of-freedom or scale convention changes
+the density, not this transformation. Computing $\bSigma^{-1}$ for precision
+assembly adds no further Jacobian. A covariance shared by several groups gets
+one adjustment per estimated covariance matrix, not per group. Direct conjugate
+IW Gibbs draws do not require a Metropolis adjustment.
+
+\subsection{Alternative scale and correlation coordinates}
+The following example uses different proposal coordinates and its own complete
+Jacobian. It is not an additional correction to
+\eqref{eq:iw-log-cholesky-target}.
 For the two-coefficient case, write $v_j=\sigma_j^2=e^{\xi_j}$,
 $\rho=\tanh\zeta$. The Jacobian from $(v_0,v_1,\rho)$ to the distinct covariance
 entries $(\Sigma_{00},\Sigma_{11},\Sigma_{01})$ is $\sqrt{v_0v_1}$.
@@ -555,6 +592,12 @@ checks; the fitting implementation should use factors, solves, and small-block
 operations.
 
 \begin{thebibliography}{9}
+\bibitem{Banerjee2008}
+Banerjee, S., Gelfand, A. E., Finley, A. O., and Sang, H. (2008).
+Gaussian predictive process models for large spatial data sets.
+\emph{Journal of the Royal Statistical Society: Series B}, 70, 825--848.
+\url{https://doi.org/10.1111/j.1467-9868.2008.00663.x}.
+
 \bibitem{Finley2008}
 Finley, A. O., Banerjee, S., Ek, A. R., and McRoberts, R. E. (2008).
 Bayesian multivariate process modeling for prediction of forest attributes.
