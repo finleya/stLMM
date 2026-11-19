@@ -136,12 +136,7 @@ pointwise_log_lik_from_eta <- function(object, eta, draw_index){
       ncol = n_obs
     )
   } else if(identical(family, "negative_binomial")) {
-    size <- backend$nb_size
-    if(is.null(size))
-      size <- backend$likelihood$size
-    if(is.null(size) || length(size) != 1L || is.na(size) ||
-       !is.finite(size) || size <= 0)
-      stop("error: fitted negative-binomial size is missing or invalid")
+    size <- prediction_nb_size(object, draw_index)
 
     out <- matrix(
       stats::dnbinom(as.vector(y_mat),

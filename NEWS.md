@@ -1,3 +1,26 @@
+# stLMM 0.0.6
+
+## New features
+
+- Added correlated grouped coefficients through `iid(group, ~ 1 + x)` with
+  inverse-Wishart covariance priors. The `cov_model = "independent"` form
+  shares the scalar sampler with separate IID intercept and slope terms.
+- Added parent-specific IID variances and covariance matrices through `by`,
+  and explicit new-group prediction through `allow_new_levels`.
+- Added combined fixed-plus-IID coefficient summaries and optional
+  rank-normalized R-hat, bulk ESS, and tail ESS diagnostics.
+- Added estimation of negative-binomial size with an explicit Gamma prior
+  and a scalar adaptive Metropolis update. Prediction and log likelihoods
+  use the corresponding posterior size draws. Fixed-size models remain
+  supported.
+
+## Fixes and documentation
+
+- Prediction no longer requires the response column in `newdata` and retains
+  fitted fixed-effect bases for prediction.
+- Updated manual pages, the technical document, and articles for grouped
+  effects, diagnostics, prediction, and estimated negative-binomial size.
+
 # stLMM 0.0.5
 
 ## Changes

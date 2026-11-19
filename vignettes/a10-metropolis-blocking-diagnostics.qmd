@@ -1,6 +1,6 @@
 ---
 title: "Metropolis blocking and adaptation in stLMM"
-subtitle: "How covariance and residual-variance proposals are tuned, blocked, and diagnosed"
+subtitle: "Covariance blocking, scalar size updates, and chain diagnostics"
 author: "Andrew O. Finley"
 format:
   html:
@@ -110,23 +110,25 @@ This collapsed-sampler choice is deliberate, but it has real costs. It reduces t
 
 Blocking is the choice of which Metropolis-updated parameters are proposed together. One large block can be efficient when posterior dependence is well captured by the adaptive proposal covariance, but it can struggle when different parameter groups move on different scales or have different posterior dependence patterns. Splitting parameters into smaller blocks can sometimes improve mixing because each proposal is tuned to a more focused part of the posterior. There is no free lunch: each extra Metropolis block can add another target evaluation and factorization within the same retained iteration.
 
-After collapsing the structured process terms, only a few parameter groups have Gibbs updates:
+For the Gaussian model, the coefficient and IID covariance updates use Gibbs steps:
 
 - fixed effects $\mathbf{\beta}$ are updated by Gibbs steps;
 - unstructured grouped random effects $\mathbf{\alpha}$, when included through terms such as `iid(group)`, are updated by Gibbs steps;
-- structured process effects $\mathbf{w}$ are recovered after fitting with `recover()`, not sampled during covariance-parameter updates.
+- scalar IID variances use inverse-gamma Gibbs updates, and correlated IID coefficient covariances use inverse-Wishart Gibbs updates.
+
+Gaussian structured process effects $\mathbf{w}$ are recovered after fitting with `recover()`. For augmented non-Gaussian models, process draws are refreshed within each iteration and saved by default, while covariance updates still integrate them out.
 
 The default Metropolis update is one joint block containing the covariance and residual-variance parameters that are updated by Metropolis. That's usually fastest. Splitting the parameters into several blocks can improve mixing when one large proposal is hard to tune, but it can make each iteration more expensive. Blocking is therefore a computational tradeoff, not a universally better sampler.
 
 The retained adaptive Metropolis strategy used in `stLMM` adapts ideas from unpublished adaptive Metropolis notes by Benjamin Shaby and from the broader adaptive MCMC literature [@andrieu2008tutorial].
 
-In development builds of stLMM 0.0.5 with phase timing, `fit$timing$phases[["sampling"]]` records elapsed seconds for the post-warmup MCMC loop. It includes all updates, repeated factorizations, and sample storage in that loop, while excluding preparation and calibration. Multi-chain fits provide `fit$timing$phases_by_chain` and `fit$timing$phases_total`. We use the summed sampling time as the denominator for ESS per second below; this measures sampling efficiency after calibration, not efficiency including setup and warmup. The table also reports warmup and the broader backend duration.
+`fit$timing$phases[["sampling"]]` records elapsed seconds for the post-warmup MCMC loop. It includes all updates, repeated factorizations, and sample storage in that loop, while excluding preparation and calibration. Multi-chain fits provide `fit$timing$phases_by_chain` and `fit$timing$phases_total`. We use the summed sampling time as the denominator for ESS per second below; this measures sampling efficiency after calibration, not efficiency including setup and warmup. The table also reports warmup and the broader backend duration.
 
 `fit$timing$backend` retains the CPU and elapsed times around the entire compiled call; its multi-chain counterparts are `backend_by_chain` and `backend_total`. In earlier builds these broader durations were named `sampler`, `sampler_by_chain`, and `sampler_total`. Old fits and previously rendered tables must be recomputed to obtain sampling-only durations; their values cannot be relabeled.
 
 ## What Enters the Metropolis Update
 
-The Metropolis machinery only sees covariance and residual-variance parameters that are updated during MCMC. Fixed parameters declared with `fixed(value)` are omitted from every Metropolis block. They stay at their fixed values and don't need priors.
+The covariance-blocking machinery sees the covariance and residual-variance parameters that are updated by Metropolis. Estimated negative-binomial size has a separate scalar Metropolis block, described below. Fixed parameters declared with `fixed(value)` are omitted from every Metropolis block. They stay at their fixed values and don't need priors.
 
 The sampler proposes on transformed scales. Positive parameters, such as $\tau^2$ and process variances, are updated on the log scale. Bounded covariance-function parameters are updated on a bounded-logit scale. For example, in an exponential NNGP model with residual variance, process variance, and spatial decay all updated by Metropolis, one possible transformed vector is
 
@@ -141,7 +143,7 @@ where $\phi$ is the term's decay parameter and $g(\cdot)$ maps its bounded prior
 
 Let $\mathbf{\eta}_b$ be the current transformed parameter vector for block $b$. All parameters outside block $b$ are held fixed while that block is proposed. Let $\ell(\mathbf{\eta}_b)$ denote the collapsed log posterior target under the current block values, including the collapsed likelihood, priors, and transformation Jacobians.
 
-For each retained MCMC iteration, the sampler loops over the Metropolis blocks. For each block $b$:
+For each retained MCMC iteration, the sampler loops over the covariance Metropolis blocks. For each covariance block $b$:
 
 1. Propose a random walk on the transformed scale,
 
@@ -186,6 +188,31 @@ $$
 where $m$ is the completed batch index, $a^\star$ is the target acceptance rate, and the implementation uses $c_0=1$ and $c_1=0.8$.
 
 Scalar blocking uses one-dimensional scale adaptation for $\delta_b$ and defaults to target acceptance 0.44. Multivariate blocking defaults to target acceptance 0.234. The adaptation is diminishing, so later batches make smaller changes. Diminishing adaptation is one of the standard conditions used in adaptive MCMC theory; paired with suitable control of the proposal kernels, it helps preserve ergodicity while allowing the proposal to keep learning during the run [@RobertsRosenthal2007Coupling; @Roberts01012009].
+
+## Negative-binomial size updates
+
+When `size` is omitted and `priors$size = gamma_dist(shape, rate)` is supplied,
+size uses a separate scalar adaptive Metropolis update on `log(size)`. It stays
+separate even with `metropolis$blocking = "joint"`. Its target is the ordinary
+NB likelihood conditional on the full current predictor, plus the Gamma prior
+and log-scale Jacobian. This step reuses the current predictor and does not
+factorize a covariance matrix. Pólya–Gamma variables are refreshed immediately
+afterward, before the Gaussian working-model updates.
+
+`tuning$size` sets the initial log-size proposal standard deviation, default
+0.25. The default acceptance target is 0.44 and the warmup target interval is
+`c(0.30, 0.60)`. Explicit `metropolis$target_accept` and `warmup$target` settings
+apply to size too. Calibration runs even when size is the only parameter
+updated by Metropolis, and scalar adaptation continues during retained sampling.
+Supplying `size = value` or `size = fixed(value)` fixes size; zero size tuning
+does not select fixed size.
+
+For each chain, `fit$adaptive_metropolis$size` contains size acceptance,
+proposal histories, and its own `warmup` diagnostics. In a multi-chain fit,
+inspect `fit$chains[[i]]$adaptive_metropolis$size`. These histories are separate
+from covariance-block diagnostics. The [negative-binomial article](a09-negative-binomial-counts.html#estimating-size)
+provides a runnable example. Estimating size with random effects can be weakly
+identified, so check prior sensitivity and both size and variance diagnostics.
 
 ## Warmup and Retained Adaptation
 
@@ -354,33 +381,32 @@ show_table(rbind(
 ))
 ```
 
-Next use multi-chain diagnostics. `summary()` for a multi-chain `stLMM` fit reports diagnostics computed with `coda`, and `as_mcmc()` returns a `coda::mcmc.list` if you want to work directly with the chains. The `burn` and `thin` arguments can be passed to `as_mcmc()` directly, including for recovered multi-chain objects. Here we focus on $\hat R$, effective sample size (ESS), and ESS per second for the Metropolis-updated parameters.
+Next use multi-chain diagnostics. `summary(..., diagnostic_method = "rank")` uses the optional `posterior` package to report rank-normalized split/folded R-hat, bulk ESS, and tail ESS [@Vehtari2021Rhat]. The default `diagnostic_method = "coda"` remains available, and `as_mcmc()` returns a `coda::mcmc.list` for direct work with the chains. Here we discard 500 retained iterations per chain and report bulk ESS per second for the covariance parameters. The time denominator includes the full sampling run, including those discarded iterations.
 
-```{r coda-diagnostics}
+```{r rank-diagnostics}
 #| echo: false
 covariance_parameters <- c("tau_sq", "nngp_1_sigma_sq", "nngp_1_phi")
 
-coda_diagnostics <- function(run, label){
-  chains <- as_mcmc(run)
-  chains <- chains[, covariance_parameters]
-
-  rhat <- coda::gelman.diag(chains, multivariate = FALSE)$psrf[, "Point est."]
-  ess <- coda::effectiveSize(chains)
+rank_diagnostics <- function(run, label){
+  diag <- summary(run, burn = 500, parameters = covariance_parameters,
+                  diagnostic_method = "rank")$diagnostics
+  diag <- diag[covariance_parameters, , drop = FALSE]
   elapsed <- run$timing$phases_total[["sampling"]]
 
   data.frame(
     Blocking = label,
     Parameter = covariance_parameters,
-    Rhat = round(as.numeric(rhat[covariance_parameters]), 3),
-    ESS = round(as.numeric(ess[covariance_parameters]), 1),
-    `ESS per second` = round(as.numeric(ess[covariance_parameters]) / elapsed, 1),
+    Rhat = round(diag$rhat, 3),
+    `Bulk ESS` = round(diag$ess_bulk, 1),
+    `Tail ESS` = round(diag$ess_tail, 1),
+    `Bulk ESS per second` = round(diag$ess_bulk / elapsed, 1),
     check.names = FALSE
   )
 }
 
 show_table(rbind(
-  coda_diagnostics(joint_run, "joint"),
-  coda_diagnostics(by_term_run, "by_term")
+  rank_diagnostics(joint_run, "joint"),
+  rank_diagnostics(by_term_run, "by_term")
 ))
 ```
 
@@ -389,7 +415,7 @@ It's also helpful to summarize the cost of each blocking scheme. A blocked sampl
 ```{r runtime-summary}
 #| echo: false
 runtime_summary <- function(run, label){
-  diag <- coda_diagnostics(run, label)
+  diag <- rank_diagnostics(run, label)
 
   data.frame(
     Blocking = label,
@@ -397,8 +423,9 @@ runtime_summary <- function(run, label){
     `Warmup seconds` = round(run$timing$phases_total[["warmup"]], 2),
     `Backend seconds` = round(run$timing$backend_total[["elapsed"]], 2),
     `Worst Rhat` = max(diag$Rhat, na.rm = TRUE),
-    `Minimum ESS` = min(diag$ESS, na.rm = TRUE),
-    `Minimum ESS per second` = min(diag$`ESS per second`, na.rm = TRUE),
+    `Minimum bulk ESS` = min(diag$`Bulk ESS`, na.rm = TRUE),
+    `Minimum tail ESS` = min(diag$`Tail ESS`, na.rm = TRUE),
+    `Minimum bulk ESS per second` = min(diag$`Bulk ESS per second`, na.rm = TRUE),
     check.names = FALSE
   )
 }
@@ -409,7 +436,7 @@ show_table(rbind(
 ))
 ```
 
-In this example, the default joint block is the baseline: it keeps the process variance and decay parameter in the same proposal and avoids extra target evaluations. The `"by_term"` option asks a specific question: does the residual variance need to move separately from the NNGP covariance parameters? In this run, the answer is no. The added block costs more computation and doesn't improve the chain diagnostics enough to beat the default joint update. That is the teaching point. Blocking can be useful, but it has to earn its cost in better mixing, higher ESS, or better ESS per second.
+The default joint block keeps the process variance and decay parameter in the same proposal and avoids extra target evaluations. The `"by_term"` option evaluates whether moving residual variance separately improves sampling. Compare both the parameter diagnostics and bulk ESS per second in the tables: a higher ESS per iteration can be offset by a slower iteration. Results depend on the posterior and computing environment, so a blocking choice should be based on several chains and the parameters of interest.
 
 Trace plots are still worth looking at. $\hat R$ and ESS can miss local behavior, especially in short runs.
 

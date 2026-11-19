@@ -60,7 +60,7 @@ Current formula terms include:
 
 Terms can also be multiplied by covariates using formula interactions, for example `x:nngp(...)`, `x:car(...)`, or `x:car_time(...)`, to define structured varying coefficients.
 
-The package supports Gaussian linear mixed models, binomial logistic mixed models, binary probit mixed models, and fixed-size negative-binomial count models. The logistic and negative-binomial families use Polya-Gamma augmentation; probit uses Albert-Chib latent-normal augmentation. All supported families use the same collapsed structured-process machinery.
+The package supports Gaussian linear mixed models, binomial logistic mixed models, binary probit mixed models, and negative-binomial count models with fixed or estimated size. The logistic and negative-binomial families use Polya-Gamma augmentation; probit uses Albert-Chib latent-normal augmentation. All supported families use the same collapsed structured-process machinery.
 
 For model-fit diagnostics, `log_lik()` returns observed-row pointwise log-likelihood matrices and `waic()` computes WAIC through the optional `loo` package.
 
@@ -84,7 +84,7 @@ To build and install it from a local clone with vignettes, run:
 git clone git@github.com:finleya/stLMM.git
 cd stLMM
 R CMD build .
-R CMD INSTALL stLMM_0.0.5.tar.gz
+R CMD INSTALL stLMM_0.0.6.tar.gz
 ```
 
 The vignette build requires Quarto. After installation, start with the installed package vignettes:

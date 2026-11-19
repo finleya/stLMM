@@ -177,14 +177,27 @@ prediction_trials <- function(object, newdata, n0){
   as.integer(round(trials_num))
 }
 
-prediction_nb_size <- function(object){
+prediction_nb_size <- function(object, draw_index = NULL){
+  if(!is.null(object$size_samples)){
+    size <- object$size_samples
+    if(!is.numeric(size) || !is.null(dim(size)) ||
+       length(size) != object$backend$n_samples || anyNA(size) ||
+       any(!is.finite(size)) || any(size <= 0))
+      stop("error: fitted negative-binomial size draws are missing or invalid")
+    if(is.null(draw_index)) return(size)
+    if(anyNA(draw_index) || any(draw_index < 1L | draw_index > length(size)))
+      stop("error: size draw indices do not match posterior draws")
+    return(size[draw_index])
+  }
+  if(isTRUE(object$backend$likelihood$size_estimated))
+    stop("error: fitted negative-binomial size draws are missing or invalid")
   size <- object$backend$nb_size
   if(is.null(size))
     size <- object$backend$likelihood$size
   if(is.null(size) || length(size) != 1L || is.na(size) ||
      !is.finite(size) || size <= 0)
     stop("error: fitted negative-binomial size is missing or invalid")
-  as.double(size)
+  if(is.null(draw_index)) as.double(size) else rep(as.double(size), length(draw_index))
 }
 
 finish_prediction_samples <- function(object,
@@ -263,11 +276,11 @@ finish_prediction_samples <- function(object,
       w_samples = w_samples
     )
     if(isTRUE(y_samples)){
-      size <- prediction_nb_size(object)
+      size <- prediction_nb_size(object, draw_index)
       y <- matrix(0L, nrow = n_draw, ncol = n0)
       colnames(y) <- colnames(eta)
       for(i in seq_len(n_draw))
-        y[i, ] <- stats::rnbinom(n0, size = size, mu = mean[i, ])
+        y[i, ] <- stats::rnbinom(n0, size = size[i], mu = mean[i, ])
       out$y_samples <- y
     }
     class(out) <- "stLMM_prediction"
@@ -298,7 +311,11 @@ predict.stLMM <- function(object,
                          verbose = FALSE,
                          sub_sample = list(start = 1L, thin = 1L),
                          scale = c("response", "link"),
+                         allow_new_levels = FALSE,
                          ...){
+
+  if(!is.logical(allow_new_levels) || length(allow_new_levels) != 1L || is.na(allow_new_levels))
+    stop("error: allow_new_levels must be TRUE or FALSE")
 
   if(!is.list(object) || is.null(object$backend))
     stop("error: object must be an stLMM fit")
@@ -314,6 +331,7 @@ predict.stLMM <- function(object,
         verbose = verbose,
         sub_sample = sub_sample,
         scale = scale,
+        allow_new_levels = allow_new_levels,
         ...
       ))
     stop("error: prediction with process terms requires saved or recovered latent process samples; call recover() on the fitted object first")
@@ -352,6 +370,7 @@ predict.stLMM <- function(object,
     pred_backend <- build_existing_support_prediction_backend(
       object,
       newdata,
+      allow_new_levels = allow_new_levels,
       st_scale = NULL,
       n_omp_threads = n_omp_threads,
       verbose = verbose
@@ -383,6 +402,9 @@ predict.stLMM <- function(object,
     alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
     mu <- mu + as.matrix(alpha_draws %*% Matrix::t(Z0))
   }
+  if(!is.null(newdata) && allow_new_levels)
+    mu <- add_new_iid_prediction(mu, object, newdata, draw_index)
+
 
   if(!is.null(offset0)){
     if(length(offset0) != n0)
@@ -434,6 +456,7 @@ predict.stLMM_chains <- function(object,
                                  verbose = FALSE,
                                  sub_sample = list(start = 1L, thin = 1L),
                                  scale = c("response", "link"),
+                                 allow_new_levels = FALSE,
                                  ...){
 
   scale <- match.arg(scale)
@@ -448,6 +471,7 @@ predict.stLMM_chains <- function(object,
       verbose = verbose,
       sub_sample = sub_sample,
       scale = scale,
+      allow_new_levels = allow_new_levels,
       ...
     )
   }
@@ -474,7 +498,11 @@ predict.stLMM_recovery <- function(object,
                                   verbose = FALSE,
                                   sub_sample = list(start = 1L, thin = 1L),
                                   scale = c("response", "link"),
+                                  allow_new_levels = FALSE,
                                   ...){
+
+  if(!is.logical(allow_new_levels) || length(allow_new_levels) != 1L || is.na(allow_new_levels))
+    stop("error: allow_new_levels must be TRUE or FALSE")
 
   predict_timing <- identical(Sys.getenv("STLMM_PREDICT_TIMING"), "1")
 
@@ -548,6 +576,7 @@ predict.stLMM_recovery <- function(object,
     pred_backend <- build_existing_support_prediction_backend(
       object,
       newdata,
+      allow_new_levels = allow_new_levels,
       st_scale = st_scale,
       joint_method = joint_method,
       pred_m = pred_m,
@@ -593,6 +622,9 @@ predict.stLMM_recovery <- function(object,
     if(predict_timing)
       message("predict timing: random-effect assembly = ", round(proc.time()[["elapsed"]] - t0, 3), " sec")
   }
+  if(!is.null(newdata) && allow_new_levels)
+    mu <- add_new_iid_prediction(mu, object, newdata, draw_index)
+
 
   process_names <- vapply(object$backend$process_terms, `[[`, character(1), "name")
   prediction_w_samples <- if(isTRUE(return_w_samples)) {
@@ -797,6 +829,7 @@ predict.stLMM_recovery_chains <- function(object,
                                          verbose = FALSE,
                                          sub_sample = list(start = 1L, thin = 1L),
                                          scale = c("response", "link"),
+                                         allow_new_levels = FALSE,
                                          ...){
 
   scale <- match.arg(scale)
@@ -818,6 +851,7 @@ predict.stLMM_recovery_chains <- function(object,
       verbose = verbose,
       sub_sample = sub_sample,
       scale = scale,
+      allow_new_levels = allow_new_levels,
       ...
     )
   }
@@ -839,7 +873,8 @@ build_existing_support_prediction_backend <- function(object,
                                                       pred_m = NULL,
                                                       pred_ordering = "maxmin",
                                                       n_omp_threads = NULL,
-                                                      verbose = FALSE){
+                                                      verbose = FALSE,
+                                                      allow_new_levels = FALSE){
 
   predict_timing <- identical(Sys.getenv("STLMM_PREDICT_TIMING"), "1")
   joint_method <- match.arg(joint_method)
@@ -851,9 +886,6 @@ build_existing_support_prediction_backend <- function(object,
     newdata <- as.data.frame(newdata)
 
   dat <- newdata
-  response_name <- object$backend$response_name
-  if(!is.null(response_name) && nzchar(response_name) && !response_name %in% names(dat))
-    dat[[response_name]] <- 0
 
   re_terms <- object$term_description$random_effects$terms
   if(length(re_terms)){
@@ -863,19 +895,29 @@ build_existing_support_prediction_backend <- function(object,
       if(!g %in% names(dat))
         stop("error: grouping factor ", g, " missing from newdata")
       group_values <- as.character(dat[[g]])
-      if(anyNA(group_values) || any(!group_values %in% lev))
-        stop("error: new grouping levels are not currently supported for grouping factor ", g)
-      dat[[g]] <- factor(group_values, levels = lev)
+      if(anyNA(group_values))
+        stop("error: grouping factor ", g, " in newdata contains missing values; supply explicit group labels")
+      rows <- iid_prediction_rows(term, dat)
+      new_levels <- setdiff(unique(group_values[rows]), lev)
+      if(length(new_levels) && !allow_new_levels)
+        stop("error: new grouping levels for grouping factor ", g,
+             "; set allow_new_levels = TRUE to sample their effects")
+      if(is.null(term$by)) dat[[g]] <- factor(group_values, levels = c(lev, new_levels))
     }
   }
   if(predict_timing)
     message("predict timing: backend data prep = ", round(proc.time()[["elapsed"]] - t0, 3), " sec")
 
-  fixed_formula <- object$backend$reduced_formula
+  # Fitted terms retain makepredictcall() metadata for poly(), splines, etc.
+  # Older saved fits do not contain this metadata and use their stored formula.
+  fixed_formula <- object$backend$fixed_terms
+  if(is.null(fixed_formula))
+    fixed_formula <- stats::delete.response(stats::terms(object$backend$reduced_formula))
   if(predict_timing)
     t0 <- proc.time()[["elapsed"]]
-  mf <- stats::model.frame(fixed_formula, dat, na.action = stats::na.fail)
-  X0 <- stats::model.matrix(fixed_formula, mf)
+  mf <- stats::model.frame(fixed_formula, dat, na.action = stats::na.fail,
+                          xlev = object$backend$fixed_xlevels)
+  X0 <- stats::model.matrix(fixed_formula, mf, contrasts.arg = object$backend$fixed_contrasts)
   offset0 <- stats::model.offset(mf)
   if(is.null(offset0))
     offset0 <- rep(0, nrow(X0))
@@ -887,7 +929,7 @@ build_existing_support_prediction_backend <- function(object,
 
   if(predict_timing)
     t0 <- proc.time()[["elapsed"]]
-  Z0 <- build_prediction_Z(dat, re_terms, object$backend$Z)
+  Z0 <- build_prediction_Z(dat, re_terms, object$backend$Z, allow_new_levels)
   if(predict_timing)
     message("predict timing: random-effect prediction design = ", round(proc.time()[["elapsed"]] - t0, 3), " sec")
 
@@ -1226,28 +1268,42 @@ resolve_st_scale <- function(st_scale, term_name){
   as.numeric(st_scale)
 }
 
-build_prediction_Z <- function(dat, re_terms, Z_fit){
+build_prediction_Z <- function(dat, re_terms, Z_fit, allow_new_levels = FALSE){
 
   if(!length(re_terms))
     return(Matrix::Matrix(0, nrow(dat), 0, sparse = TRUE))
 
   n <- nrow(dat)
   q <- ncol(Z_fit)
-  n_value <- sum(vapply(re_terms, function(term) n * length(term$coefficients), integer(1)))
+  slope_names <- setdiff(unique(unlist(lapply(re_terms, `[[`, "coefficients"),
+                                       use.names = FALSE)), "(Intercept)")
+  slope_values <- stats::setNames(lapply(slope_names, function(nm){
+    if(!nm %in% names(dat))
+      stop("error: iid slope covariate ", nm, " missing from newdata")
+    iid_numeric_covariate(dat[[nm]], n, paste0("iid slope covariate ", nm, " in newdata"))
+  }), slope_names)
+  active_rows <- lapply(re_terms, iid_prediction_rows, dat = dat)
+  n_value <- sum(vapply(seq_along(re_terms), function(i)
+    length(active_rows[[i]]) * length(re_terms[[i]]$coefficients), integer(1)))
   ii <- integer(n_value)
   jj <- integer(n_value)
   xx <- numeric(n_value)
   pos <- 0L
   col_offset <- 0L
 
-  for(term in re_terms){
+  for(b in seq_along(re_terms)){
+    term <- re_terms[[b]]
     group_values <- as.character(dat[[term$grouping_factor]])
     lev <- term$levels
     coef_names <- term$coefficients
     n_coef <- length(coef_names)
 
-    for(i in seq_len(n)){
+    for(i in active_rows[[b]]){
       level_index <- match(group_values[i], lev)
+      if(is.na(level_index)){
+        if(allow_new_levels) next
+        stop("error: new grouping levels require allow_new_levels = TRUE")
+      }
 
       for(j in seq_len(n_coef)){
         pos <- pos + 1L
@@ -1256,14 +1312,7 @@ build_prediction_Z <- function(dat, re_terms, Z_fit){
         if(coef_names[j] == "(Intercept)"){
           xx[pos] <- 1.0
         } else {
-          if(!coef_names[j] %in% names(dat))
-            stop("error: iid slope covariate ", coef_names[j], " missing from newdata")
-          if(!is.numeric(dat[[coef_names[j]]]))
-            stop("error: iid slope covariate ", coef_names[j], " in newdata must be numeric")
-          value <- as.numeric(dat[[coef_names[j]]][i])
-          if(anyNA(value))
-            stop("error: iid slope covariate ", coef_names[j], " in newdata contains missing values")
-          xx[pos] <- value
+          xx[pos] <- slope_values[[coef_names[j]]][i]
         }
       }
     }
@@ -1274,7 +1323,8 @@ build_prediction_Z <- function(dat, re_terms, Z_fit){
   if(col_offset != q)
     stop("error: newdata random-effect design does not match fitted model")
 
-  Matrix::sparseMatrix(i = ii, j = jj, x = xx, dims = c(n, q))
+  keep <- seq_len(pos)
+  Matrix::sparseMatrix(i = ii[keep], j = jj[keep], x = xx[keep], dims = c(n, q))
 }
 
 simulate_ar1_prediction_nodes <- function(object,
@@ -1631,6 +1681,16 @@ gp_covariance_matrix <- function(coords_a, coords_b, cov_model, sigma_sq, theta)
 }
 
 gp_correlation <- function(cov_model, theta, h, u, spatial_dim = 1L){
+  if(cov_model == "matern"){
+    x <- unname(theta["phi"]) * h
+    if(x <= 0) return(1)
+    nu <- unname(theta["nu"])
+    k <- besselK(x, nu)
+    if(!is.finite(k) || k <= 0) return(0)
+    log_cor <- nu * log(x) - (nu - 1) * log(2) - lgamma(nu) + log(k)
+    if(!is.finite(log_cor) || log_cor < -745) return(0)
+    return(exp(log_cor))
+  }
   if(cov_model == "exp")
     return(exp(-theta["phi"] * h))
   if(cov_model == "sep_exp")
@@ -1648,4 +1708,61 @@ gp_correlation <- function(cov_model, theta, h, u, spatial_dim = 1L){
                    t^(theta["beta"] * theta["gamma"])))
   }
   stop("error: unknown covariance model ", cov_model)
+}
+
+
+# Parent-specific blocks contribute only to rows belonging to that fitted parent.
+iid_prediction_rows <- function(term, dat){
+  if(is.null(term$by)) return(seq_len(nrow(dat)))
+  if(!term$by %in% names(dat))
+    stop("error: iid parent variable ", term$by, " missing from newdata")
+  parent <- dat[[term$by]]
+  if(!is.atomic(parent) || !is.null(dim(parent)) || length(parent) != nrow(dat))
+    stop("error: iid parent variable ", term$by, " in newdata must be a vector")
+  if(anyNA(parent))
+    stop("error: iid parent variable ", term$by, " in newdata contains missing values")
+  parent <- as.character(parent)
+  if(any(!parent %in% term$by_levels))
+    stop("error: new parent levels for iid by variable ", term$by,
+         " are not supported, including with allow_new_levels = TRUE")
+  which(parent == term$by_level)
+}
+
+add_new_iid_prediction <- function(mu, object, newdata, draw_index){
+  if(!is.data.frame(newdata)) newdata <- as.data.frame(newdata)
+  for(term in object$term_description$random_effects$terms){
+    group <- as.character(newdata[[term$grouping_factor]])
+    active_rows <- iid_prediction_rows(term, newdata)
+    new_levels <- setdiff(unique(group[active_rows]), term$levels)
+    if(!length(new_levels)) next
+    rows <- active_rows[group[active_rows] %in% new_levels]
+    index <- match(group[rows], new_levels)
+    k <- length(term$coefficients)
+    design <- vapply(term$coefficients, function(nm){
+      if(nm == "(Intercept)") return(rep(1, length(rows)))
+      x <- iid_numeric_covariate(newdata[[nm]], nrow(newdata),
+                                 paste0("iid slope covariate ", nm, " in newdata"))
+      x[rows]
+    }, numeric(length(rows)))
+    design <- matrix(design, nrow = length(rows), ncol = k)
+    if(!is.null(term$covariance)){
+      sample_names <- iid_covariance_sample_names(term)
+      draws <- object$iid_covariance_samples[draw_index, sample_names, drop = FALSE]
+      covariance <- matrix(0, k, k)
+      lower <- lower.tri(covariance, diag = TRUE)
+      for(s in seq_along(draw_index)){
+        covariance[lower] <- draws[s, ]
+        covariance[upper.tri(covariance)] <- t(covariance)[upper.tri(covariance)]
+        b <- matrix(stats::rnorm(length(new_levels) * k), ncol = k) %*% chol(covariance)
+        mu[s, rows] <- mu[s, rows] + rowSums(b[index, , drop = FALSE] * design)
+      }
+    } else {
+      variance <- object$iid_sigma_sq_samples[draw_index, paste0(term$name, "_sigma_sq")]
+      for(s in seq_along(draw_index)){
+        b <- stats::rnorm(length(new_levels), sd = sqrt(variance[s]))
+        mu[s, rows] <- mu[s, rows] + b[index] * design[, 1L]
+      }
+    }
+  }
+  mu
 }

@@ -12,7 +12,8 @@ stLMM(formula, data = parent.frame(), starting = list(), tuning = NULL,
 \arguments{
 \item{formula}{A model formula with fixed effects, optional \code{offset()}
 terms, optional iid grouped
-random-effect terms such as \code{iid(group)} or \code{x:iid(group)}, and
+random-effect terms such as \code{iid(group)}, \code{x:iid(group)}, or
+\code{iid(group, ~ 1 + x)} or \code{iid(plot, ~ 1 + x, by = stand)}, and
 optional structured process terms such as \code{ar1()}, \code{gp()},
 \code{nngp()}, \code{car()}, \code{dagar()}, \code{car_time()}, or
 \code{dagar_time()}.}
@@ -22,15 +23,21 @@ uses underscores. Default residual variance is supplied as
 \code{starting = list(resid = list(tau_sq = value))}. Process starts use term-specific
 blocks, for example \code{starting = list(nngp_1 = c(sigma_sq = 1, phi = 1))}.
 IID random-effect variance starts use the same term-block convention, for
-example \code{starting = list(iid_1 = list(sigma_sq = 1))}. Covariance and
+example \code{starting = list(iid_1 = list(sigma_sq = 1))}. Unstructured coefficient-formula
+iid terms use \code{starting = list(iid_1 = list(covariance = Sigma))}, with
+a symmetric positive definite matrix in coefficient order. If supplied,
+dimnames must exactly match that order; a single matrix is used for every
+chain. Omitted covariance starts use the inverse-Wishart prior mode, with
+positive diagonal congruence perturbations for multiple chains. Process covariance and
 residual variance parameters can be fixed with \code{\link{fixed}}, for
 example \code{starting = list(resid = list(tau_sq = fixed(0.5)))}.}
 \item{tuning}{Optional named list of initial Metropolis proposal scales for
-covariance and residual variance parameters. A zero tuning value fixes the
+structured-process covariance, residual variance, and estimated negative-binomial
+size parameters. IID variances and covariances use Gibbs updates. A zero Metropolis tuning value fixes the
 corresponding parameter. Parameters supplied with \code{\link{fixed}} are
 assigned zero tuning automatically.}
 \item{priors}{Named list of prior objects created with constructors such as
-\code{\link{flat}}, \code{\link{normal}}, \code{\link{ig}},
+\code{\link{flat}}, \code{\link{normal}}, \code{\link{ig}}, \code{\link{iw}},
 \code{\link{uniform}}, \code{\link{log_normal}},
 \code{\link{gamma_dist}}, \code{\link{half_normal}}, \code{\link{half_t}}, and
 \code{\link{beta_dist}}. Fixed effects use \code{priors = list(beta = flat())}
@@ -44,13 +51,23 @@ internally to the variance scale. Process terms require
 term-specific blocks, for example
 \code{priors = list(nngp_1 = list(sigma_sq = ig(shape, scale), phi = uniform(lower, upper)))}.
 IID random-effect variance priors use the same term-block convention, for
-example \code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))}. Priors
+example \code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))}.
+Unstructured coefficient-formula iid terms require
+\code{priors = list(iid_1 = list(covariance = iw(df, scale)))}. These
+covariances use Gibbs updates and accept neither tuning nor fixed matrices.
+Independent coefficient-formula terms use \code{cov_model = "independent"}
+and require \code{sigma_sq = ig(shape, scale)} or a coefficient-named list
+of IG priors under their formula term name. A shared IG specification sets
+the same prior independently on each variance. Starting variances may be a
+positive scalar or a coefficient-named numeric vector or list under
+\code{starting$iid_1$sigma_sq}. Independent variances use Gibbs updates.
+Priors
 are not required for covariance or residual variance parameters supplied with
 \code{\link{fixed}}.}
 \item{family}{Model likelihood family. Use \code{"gaussian"} for Gaussian
 linear mixed models or \code{"binomial"} for binomial logistic models using
 Polya-Gamma Gibbs updates. Use \code{"probit"} for binary probit models using
-Albert-Chib latent-normal augmentation. Use \code{"negative_binomial"} for fixed-size
+Albert-Chib latent-normal augmentation. Use \code{"negative_binomial"} for
 negative-binomial log-mean count models using Polya-Gamma Gibbs updates. The
 default is \code{"gaussian"}. For compatibility with familiar R model syntax,
 \code{gaussian()}, \code{binomial()}, \code{binomial(link = "logit")}, and
@@ -62,7 +79,10 @@ character string names a column in \code{data}; otherwise supply a positive
 integer-valued vector with length matching the model frame. The response should
 contain successes and must be between zero and \code{trials}.}
 \item{size}{Positive fixed negative-binomial size parameter for
-\code{family = "negative_binomial"}. The fitted linear predictor is
+\code{family = "negative_binomial"}; \code{fixed(value)} is also accepted.
+To estimate size, leave this argument \code{NULL} and supply
+\code{priors = list(size = gamma_dist(shape, rate))}. A fixed size and a size
+prior cannot both be supplied. The fitted linear predictor is
 \eqn{\eta_i = \log(\mu_i)}, where \eqn{\mu_i} is the mean count.}
 \item{n_samples}{Number of MCMC samples.}
 \item{n_omp_threads}{Number of OpenMP threads for supported kernels.}
@@ -87,9 +107,10 @@ Defaults are \code{enabled = TRUE}, \code{batch_length = 25},
 acceptance interval is \code{c(0.15, 0.45)} for block updates and
 \code{c(0.30, 0.60)} for scalar updates.}
 \item{metropolis}{Optional sampler-control list for Metropolis updates of
-covariance and residual variance parameters. The default
-\code{list(blocking = "joint")} keeps all active parameters in one adaptive
-covariance block. Built-in alternatives are \code{"by_term"},
+covariance, residual variance, and estimated negative-binomial size parameters.
+The default \code{list(blocking = "joint")} keeps active covariance and
+residual variance parameters in one adaptive covariance block. Estimated size
+always has its own scalar block. Built-in alternatives are \code{"by_term"},
 \code{"residual_process"}, \code{"variance_theta"},
 \code{"process_variance"}, and \code{"scalar"}. A single string such as
 \code{metropolis = "by_term"} is also accepted. A list may also contain
@@ -134,7 +155,9 @@ With \code{chains = 1}, an object of class \code{stLMM}. With
 
 For each ordinary fit, posterior samples are available both as top-level
 entries such as \code{beta_samples}, \code{tau_sq_samples},
-\code{sigma_sq_samples}, \code{theta_samples}, and \code{alpha_samples}, and
+\code{sigma_sq_samples}, \code{theta_samples}, \code{alpha_samples},
+\code{iid_sigma_sq_samples} (scalar and independent coefficient-formula iid variances), and
+\code{iid_covariance_samples} (unstructured coefficient-formula terms), and
 through the active-component list \code{samples}. Empty sample blocks for absent
 model components are \code{NULL}. Covariance Metropolis diagnostics are
 returned as \code{covariance_acceptance} and \code{adaptive_metropolis}. The
@@ -142,6 +165,24 @@ default is one global covariance block; optional blocking and scalar-update
 diagnostics are stored in \code{adaptive_metropolis$blocks}. The object also
 contains \code{term_description} and the stored \code{backend} used by recovery
 and prediction.
+For unstructured coefficient-formula iid terms, \code{iid_covariance_samples} and
+\code{samples$iid_covariance} contain the lower triangle of each covariance,
+including the diagonal, column by column, in iid term order. Columns are named
+\code{iid_1_cov[x,(Intercept)]}, for example. Coefficients in
+\code{alpha_samples} are ordered by sampler block, then group, then coefficient.
+The old scalar iid output names and ordering are preserved.
+Independent coefficient formulas expand into scalar blocks in coefficient order;
+their output names include \code{[coefficient="x"]}, for example.
+Each scalar or unstructured block with \code{by} expands by represented parent, ordered
+by the parent's factor levels (or the levels of \code{factor(parent)}).
+Within each block, child levels and coefficients retain their usual order.
+Output names identify the parent, for example
+\code{iid_1[stand="north"]_sigma_sq} or
+\code{iid_2[stand="north"]_cov[x,(Intercept)]}.
+Each block has an entry in \code{term_description$random_effects$terms},
+with \code{formula_term}, \code{by}, \code{by_level}, and \code{by_levels}
+identifying its original term and parent support. Input priors and starting
+values remain keyed by the original formula term name.
 
 \code{timing$backend} contains \code{proc.time()} CPU and elapsed wall-time
 differences around the entire compiled call. \code{timing$phases} is a named
@@ -207,7 +248,40 @@ structured probit process models, the sampler saves in-chain process draws by
 default; \code{\link{recover}} selects from those saved draws.
 
 For \code{family = "negative_binomial"}, the response must be non-negative
-integer counts and \code{size} must be supplied as a positive fixed scalar.
+integer counts. Supply a positive fixed \code{size}, or estimate one shared
+size parameter using an explicit \code{priors$size = gamma_dist(shape, rate)}.
+There is no automatic size prior. The Gamma prior is on size itself and uses
+shape and rate; truncated supports are not supported for this parameter.
+For estimated size, \code{starting$size} accepts a positive scalar or one value
+per chain. The default center is the prior mean (shape/rate), with the usual
+log-scale dispersion for omitted multi-chain starts. \code{tuning$size} is the
+positive initial log-size proposal standard deviation, default 0.25. These
+controls are rejected for fixed size; zero tuning does not select fixed size.
+
+Estimated size has its own scalar Metropolis block, regardless of covariance
+blocking. It shares the scalar adaptation implementation and the \code{warmup}
+and \code{metropolis} controls. Its default acceptance target is 0.44 and its
+default warmup target interval is \code{c(0.30, 0.60)}; explicitly supplied
+\code{metropolis$target_accept} or \code{warmup$target} overrides these defaults
+for size as well as the covariance blocks. Adaptation continues during retained
+sampling. Size-only models also run calibration warmup.
+
+Size draws are returned as \code{size_samples} and \code{samples$size};
+\code{adaptive_metropolis$size} records its acceptance, proposal histories, and
+warmup diagnostics separately from covariance-block diagnostics. Summaries and
+sample extraction include the parameter \code{size}.
+
+Size estimation is allowed with IID and structured random effects. The fit
+issues one warning because size and random-effect variances can be weakly
+identified. Check chain diagnostics and sensitivity to their priors. Within-group
+replication and dependence patterns help distinguish these sources of variation.
+For example, \code{gamma_dist(1, 0.01)} has mean 100 and a central 95 percent
+interval approximately 2.5--369; it is not a noninformative prior.
+
+Extremely small sizes can cause numerical underflow in the underlying
+Polya-Gamma generator, particularly for zero counts. The sampler stops with
+the failing shape and tilt rather than replacing the draw or bounding size.
+
 The sampler uses the log-mean parameterization \eqn{\eta_i=\log(\mu_i)} and an
 internal logit tilt \eqn{\psi_i=\eta_i-\log(\code{size})}. Conditional on the
 Polya-Gamma weights, the model again becomes a Gaussian working model with
@@ -309,9 +383,12 @@ priors = list(dagar_time_1 = list(sigma_sq = ig(shape, scale),
 \item \strong{Starting values, tuning, and fixed parameters.}
 Omitting \code{starting} uses data-based or conservative defaults. Omitting
 \code{tuning} uses default initial Metropolis proposal scales. Setting a tuning
-value to zero fixes that covariance or residual variance parameter. Parameters
+value to zero fixes that structured-process covariance or residual variance parameter. Parameters
 marked with \code{fixed()} use their supplied values and are omitted from
 Metropolis proposal blocks.
+
+IID variances and covariances use Gibbs updates; covariance and independent
+coefficient-formula terms do not accept tuning or fixed variance/covariance controls.
 
 \item \strong{Priors and parameter transforms.}
 Process terms require priors for parameters that are sampled. The Gaussian
@@ -338,6 +415,12 @@ starts. Other lengths are rejected. For process terms, chain-specific starts
 should be supplied in list blocks, for example
 \code{starting = list(nngp_1 = list(sigma_sq = c(1, 2, 3),
 phi = c(0.2, 0.4, 0.6)))}.
+
+For an independent iid coefficient formula, names under \code{sigma_sq} identify
+coefficients, not chains. A coefficient-named list may contain a scalar or a
+chain-specific vector for each coefficient. A shared scalar applies to every
+coefficient and chain. Unstructured iid terms use one starting covariance matrix
+for every chain.
 
 \item \strong{Warmup and retained-sampling adaptation.}
 By default, the Metropolis sampler runs a short discarded warmup phase that

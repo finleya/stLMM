@@ -117,7 +117,7 @@ ggplot(plot_dat, aes(x, y)) +
   labs(x = "x", y = "response")
 ```
 
-Prediction uses a `newdata` data frame with the variables needed to rebuild the fixed-effect design matrix.
+Prediction uses a `newdata` data frame with the predictor variables; it does not require a response column. Fitted factor levels and prediction-aware bases such as `poly()` and `splines::ns()` are retained when constructing the new design matrix.
 
 ```{r fixed-predict}
 new_dat <- data.frame(x = c(-0.75, 0, 0.75))
@@ -178,7 +178,7 @@ group_fit <- stLMM(
 summary(group_fit)
 ```
 
-Prediction for grouped random effects requires levels that were present during fitting; unseen grouped levels currently produce an error.
+Prediction reuses fitted draws for known groups. Unseen groups produce an error unless you explicitly set `allow_new_levels = TRUE`; this samples their effects from each posterior population distribution and includes that uncertainty in the predicted means.
 
 ```{r grouped-predict}
 group_new <- data.frame(
@@ -190,6 +190,79 @@ group_pred <- predict(group_fit, newdata = group_new)
 
 summary(group_pred)
 ```
+
+### Correlated and independent coefficients
+
+A correlated intercept and slope can be specified with a coefficient formula:
+
+```r
+correlated_fit <- stLMM(
+  y ~ x + iid(group, ~ 1 + x), data = group_dat,
+  priors = list(iid_1 = list(covariance = iw(df = 4, scale = diag(2)))),
+  n_samples = 10000, chains = 3, verbose = FALSE
+)
+```
+
+This uses a joint normal coefficient vector for each group and a conjugate inverse-Wishart covariance update. The scale matrix and degrees of freedom should reflect the units of your covariates; `stLMM` does not center or scale them. The example prior has mean `diag(2)`, since its degrees of freedom are 4 and its dimension is 2.
+
+For independent intercepts and slopes with separate variance parameters, use:
+
+```r
+independent_fit <- stLMM(
+  y ~ x + iid(group, ~ 1 + x, cov_model = "independent"), data = group_dat,
+  priors = list(iid_1 = list(sigma_sq = list(
+    "(Intercept)" = ig(3, 1), x = ig(4, 0.5)
+  ))),
+  n_samples = 10000, chains = 3
+)
+```
+
+With matching priors, this is the same model as `iid(group) + x:iid(group)` and uses the same scalar iid sampler. A single `sigma_sq = ig(3, 1)` also applies those hyperparameters independently to each variance; it does not tie the variances together. Coefficient names in a named prior list must match exactly, including case. Output names identify coefficients, such as `iid_1[coefficient="x"]_sigma_sq`; combined summaries select the formula term with `terms = "iid_1"`. Adding `by = stand` gives each stand its own intercept and slope variances with the supplied IG priors.
+
+### Prediction for new groups
+
+For prediction to a new group, provide an explicit group label and opt in:
+
+```r
+new_group <- data.frame(group = c("new", "new"), x = c(-0.5, 0.5))
+predict(correlated_fit, newdata = new_group, allow_new_levels = TRUE)
+```
+
+Both rows share the same simulated intercept and slope within each posterior draw. New-group uncertainty is present even when `y_samples = FALSE`. Put all rows that need to share a new group effect into one prediction call.
+
+### Parent-specific child effects
+
+To allow child-effect distributions to differ among parents, use `by`:
+
+```r
+stand_fit <- stLMM(
+  y ~ x + iid(stand) + iid(plot, ~ 1 + x, by = stand), data = stand_data,
+  priors = list(
+    iid_1 = list(sigma_sq = ig(2, 1)),
+    iid_2 = list(covariance = iw(4, diag(2)))
+  ),
+  n_samples = 10000, chains = 3, verbose = FALSE
+)
+```
+
+This example assumes `stand_data` contains `y`, `x`, `stand`, and `plot`. Each `(stand, plot)` pair gets its own coefficient vector, so plot labels can repeat across stands. Each stand has a separate child covariance matrix with an independent copy of the supplied IW prior. The `iid(stand)` term adds stand intercepts; it is optional. For scalar child intercepts, use `iid(plot, by = stand)` with an IG prior instead.
+
+Only parent-child pairs represented by data rows enter a `by` term, including rows with missing responses. Input priors and starting values use the original term names (`iid_1`, `iid_2`); output names identify each parent, such as `iid_2[stand="north"]_cov[x,(Intercept)]`. Prediction to a new plot within a represented stand requires `allow_new_levels = TRUE` and uses that stand's posterior covariance. Prediction to a new stand errors, including with this flag enabled.
+
+### Combined coefficient summaries
+
+To summarize fixed and iid coefficients together, select the coefficient names and iid terms explicitly:
+
+```r
+summary(stand_fit, type = "combined",
+        coefficients = c("(Intercept)", "x"),
+        terms = c("iid_1", "iid_2"), burn = 1000,
+        diagnostics = TRUE, diagnostic_method = "rank")
+```
+
+For each represented stand–plot pair, this reports the fixed intercept plus the stand and plot intercepts, and the fixed slope plus the plot slope. The slope is a coefficient of `x`, before multiplication by a covariate value. Rows identify their contributing terms and grouping levels; observations are not averaged.
+
+For a fit with multiple chains, `diagnostic_method = "rank"` uses the optional `posterior` package to report rank-normalized split/folded R-hat, bulk ESS, and tail ESS [@Vehtari2021Rhat]. A single-chain summary reports ESS but leaves R-hat undefined. Diagnostics are calculated from the combined draws within each chain. In a model that also has structured effects, explicitly selected iid summaries have the same meaning: structured coefficients are separate contributions, and `fitted()` or `predict()` assembles the full predictor.
 
 ## Classical SAE model connection
 
@@ -218,4 +291,4 @@ iterations selected by `recover()`.
 rec_mcmc <- as_mcmc(rec, include_w = TRUE)
 ```
 
-Later vignettes cover point-referenced, areal, space-time, binomial, residual variance, and sampler-diagnostic workflows.
+The [lme4 comparison](a14-lme4-validation.html) contains runnable independent and correlated coefficient examples with multi-chain diagnostics. Other articles cover point-referenced, areal, space-time, binomial, probit, [negative-binomial](a09-negative-binomial-counts.html), residual variance, and sampler-diagnostic workflows.

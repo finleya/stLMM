@@ -66,8 +66,10 @@ models, each entry is evaluated with the fitted linear predictor and the
 draw-specific residual standard deviation. For binomial models, entries are
 computed with the inverse-logit probability and fitted trial count. For
 probit models, entries are computed with the standard-normal cdf probability.
-For fixed-size negative-binomial models, entries are computed with the log-mean
-linear predictor and the fitted size parameter.
+For negative-binomial models, entries are computed with the log-mean
+linear predictor and the fitted size parameter. Estimated-size fits use the
+matching posterior size draw for each original iteration, including after
+thinning and process recovery; fixed-size fits use their supplied scalar.
 
 For models with structured process terms, \code{log_lik()} requires saved or
 recovered latent process samples so that the latent linear predictor can be

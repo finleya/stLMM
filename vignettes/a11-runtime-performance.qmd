@@ -30,10 +30,10 @@ help or hurt is very welcome.
 
 ## What Is Timed
 
-In the updated GitHub build of stLMM 0.0.5, distinguish post-warmup sampling from the complete
-fit. Check `packageDescription("stLMM")[["Config/stLMM/Timing"]]`: the value
-`"phases-v1"` identifies builds with these timers. The version number alone
-is insufficient because the update remains within 0.0.5. For one chain:
+stLMM distinguishes post-warmup sampling from the complete fit. The DESCRIPTION
+field `Config/stLMM/Timing: phases-v1` identifies builds with these timers;
+version 0.0.6 includes them. Earlier saved fits without phase timing must be
+refitted to obtain these measurements. For one chain:
 
 ```{r timing-fields, eval=FALSE}
 fit$timing$phases

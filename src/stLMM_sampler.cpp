@@ -94,6 +94,87 @@ void update_mean_without_alpha(SamplerState *s, const double *beta, double *out)
   }
 }
 
+/* Cache the small coefficient precision for repeated group blocks. */
+void refresh_iid_covariance_precision(SamplerState *s, int b)
+{
+  int k, j, info;
+  char lower;
+  double *L, *P;
+
+  k = s->reCovDim[b];
+  lower = 'L';
+  L = (double*)R_alloc(k * k, sizeof(double));
+  P = s->reCovPrecision[b];
+
+  for(j = 0; j < k * k; j++){
+    L[j] = s->reCovariance[b][j];
+    P[j] = 0.0;
+  }
+  for(j = 0; j < k; j++)
+    P[j + k * j] = 1.0;
+
+  F77_CALL(dpotrf)(&lower, &k, L, &k, &info FCONE);
+  if(info != 0)
+    Rf_error("iid covariance Cholesky failed");
+  F77_CALL(dpotrs)(&lower, &k, &k, L, &k, P, &k, &info FCONE);
+  if(info != 0)
+    Rf_error("iid covariance precision solve failed");
+}
+
+static void update_iid_covariance_gibbs(SamplerState *s, int b)
+{
+  int k, ng, j, g, col, row, info;
+  char left, lower, noTrans, trans, nonUnit;
+  double one, zero;
+  double *L, *A, *T;
+  const double *alpha;
+
+  k = s->reCovDim[b];
+  ng = s->reBlockSize[b] / k;
+  left = 'L';
+  lower = 'L';
+  noTrans = 'N';
+  trans = 'T';
+  nonUnit = 'N';
+  one = 1.0;
+  zero = 0.0;
+
+  L = (double*)R_alloc(k * k, sizeof(double));
+  A = (double*)R_alloc(k * k, sizeof(double));
+  T = (double*)R_alloc(k * k, sizeof(double));
+
+  for(j = 0; j < k * k; j++){
+    L[j] = s->reCovScale[b][j];
+    A[j] = 0.0;
+  }
+  for(g = 0; g < ng; g++){
+    alpha = s->alpha + s->reOffset[b] + g * k;
+    for(col = 0; col < k; col++)
+      for(row = col; row < k; row++)
+        L[row + k * col] += alpha[row] * alpha[col];
+  }
+  F77_CALL(dpotrf)(&lower, &k, L, &k, &info FCONE);
+  if(info != 0)
+    Rf_error("iid posterior scale Cholesky failed");
+
+  /* A A' ~ Wishart(df + ng, I); solve A T = L', then Sigma = T' T. */
+  for(col = 0; col < k; col++){
+    A[col + k * col] = std::sqrt(Rf_rchisq(s->reCovDF[b] + ng - col));
+    for(row = col + 1; row < k; row++)
+      A[row + k * col] = norm_rand();
+    for(row = 0; row < k; row++)
+      T[row + k * col] = row <= col ? L[col + k * row] : 0.0;
+  }
+  F77_CALL(dtrsm)(&left, &lower, &noTrans, &nonUnit,
+                  &k, &k, &one, A, &k, T, &k FCONE FCONE FCONE FCONE);
+  F77_CALL(dsyrk)(&lower, &trans, &k, &k,
+                  &one, T, &k, &zero, s->reCovariance[b], &k FCONE FCONE);
+  for(col = 0; col < k; col++)
+    for(row = 0; row < col; row++)
+      s->reCovariance[b][row + k * col] = s->reCovariance[b][col + k * row];
+  refresh_iid_covariance_precision(s, b);
+}
+
 void update_sigmaSqRE_gibbs(SamplerState *s)
 {
   int b, j, k, inc, mb;
@@ -105,6 +186,10 @@ void update_sigmaSqRE_gibbs(SamplerState *s)
   inc = 1;
 
   for(b = 0; b < s->nRE; b++){
+    if(s->reCovDim[b] > 0){
+      update_iid_covariance_gibbs(s, b);
+      continue;
+    }
     mb = s->reBlockSize[b];
     k = 0;
     for(j = 0; j < s->q; j++){
@@ -319,7 +404,7 @@ void update_pg_working_model(SamplerState *s,
 
     omega = pg(shape, tilt);
     if(!R_FINITE(omega) || !(omega > 0.0))
-      Rf_error("Polya-Gamma draw produced a non-positive observation precision");
+      Rf_error("Polya-Gamma draw produced a non-positive observation precision (shape=%.17g, tilt=%.17g)", shape, tilt);
 
     s->obsPrecision[i] = omega;
     s->y[i] = kappa / omega + nbOffset - obsOffset;
@@ -693,11 +778,9 @@ void unpack_cov_block_eta_to_proposal(SamplerState *s, CovProposalBlock *b, cons
   unpack_cov_eta_to_proposal(s, allEta);
 }
 
-void draw_adaptive_cov_block_proposal(SamplerState *s, CovProposalBlock *b)
+static void draw_adaptive_block_proposal(CovProposalBlock *b)
 {
   int i, j;
-
-  pack_cov_block_eta(s, b, b->eta);
 
   for(i = 0; i < b->dim; i++)
     b->z[i] = rnorm(0.0, 1.0);
@@ -707,7 +790,12 @@ void draw_adaptive_cov_block_proposal(SamplerState *s, CovProposalBlock *b)
     for(j = 0; j <= i; j++)
       b->etaProp[i] += b->proposalChol[i + b->dim * j] * b->z[j];
   }
+}
 
+void draw_adaptive_cov_block_proposal(SamplerState *s, CovProposalBlock *b)
+{
+  pack_cov_block_eta(s, b, b->eta);
+  draw_adaptive_block_proposal(b);
   unpack_cov_block_eta_to_proposal(s, b, b->etaProp);
 }
 
@@ -793,7 +881,7 @@ void update_adaptive_covariance_block_state(SamplerState *s, CovProposalBlock *b
   b->batchAccept = 0;
 }
 
-void update_adaptive_scalar_block_state(SamplerState *s, CovProposalBlock *b, int accepted)
+void update_adaptive_scalar_block_state(CovProposalBlock *b, int accepted)
 {
   int n;
   double rhat, step;
@@ -801,7 +889,6 @@ void update_adaptive_scalar_block_state(SamplerState *s, CovProposalBlock *b, in
   if(b->dim != 1)
     Rf_error("update_adaptive_scalar_block_state: scalar block has wrong dimension");
 
-  pack_cov_block_eta(s, b, b->eta);
   b->batchSamples[b->batchPos] = b->eta[0];
   b->batchAccept += accepted;
   b->batchPos++;
@@ -829,6 +916,64 @@ void update_adaptive_scalar_block_state(SamplerState *s, CovProposalBlock *b, in
   factor_adaptive_block_proposal_covariance(b);
   b->batchPos = 0;
   b->batchAccept = 0;
+}
+
+static double softplus(double x)
+{
+  return x > 0.0 ? x + std::log1p(std::exp(-x)) : std::log1p(std::exp(x));
+}
+
+static double log_nb_size_target(SamplerState *s, double logSize, const double *eta)
+{
+  int i;
+  double size, out, logMu, mu, value, shift;
+
+  size = std::exp(logSize);
+  if(!R_FINITE(size) || !(size > 0.0))
+    return R_NegInf;
+  out = log_prior_kernel_original(size, s->nbSizePrior) + logSize;
+  for(i = 0; i < s->n; i++){
+    logMu = eta[i] + (s->offset != NULL ? s->offset[i] : 0.0);
+    if(!R_FINITE(logMu))
+      return R_NegInf;
+    mu = std::exp(logMu);
+    if(R_FINITE(mu) && mu > 0.0){
+      value = Rf_dnbinom_mu(s->yObserved[i], size, mu, 1);
+    } else {
+      /* Shift a stable Rmath density at mean one when exp(logMu) is not
+         representable. This avoids differences of large log-gamma values. */
+      shift = softplus(-logSize) - softplus(logMu - logSize);
+      value = Rf_dnbinom_mu(s->yObserved[i], size, 1.0, 1) +
+        size * shift + s->yObserved[i] * (logMu + shift);
+    }
+    out += value;
+  }
+  return R_FINITE(out) ? out : R_NegInf;
+}
+
+static int update_nb_size(SamplerState *s, const double *beta,
+                          const double *alpha, const double *w)
+{
+  CovProposalBlock *b;
+  double current, proposal, logAccept;
+  int accepted;
+
+  if(!s->nbSizeEstimate)
+    return 0;
+  b = &s->nbSizeProposal;
+  update_linear_predictor(s, beta, alpha, w, s->nWork2);
+  b->eta[0] = std::log(s->nbSize);
+  draw_adaptive_block_proposal(b);
+  current = log_nb_size_target(s, b->eta[0], s->nWork2);
+  if(!R_FINITE(current))
+    Rf_error("non-finite negative-binomial size target at the current state");
+  proposal = log_nb_size_target(s, b->etaProp[0], s->nWork2);
+  logAccept = proposal - current;
+  accepted = std::log(runif(0.0, 1.0)) < logAccept;
+  if(accepted)
+    s->nbSize = std::exp(b->etaProp[0]);
+  b->eta[0] = std::log(s->nbSize);
+  return accepted;
 }
 
 int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block, const double *resid)
@@ -910,9 +1055,10 @@ int update_cov_params_mh_collapsed(SamplerState *s, const double *resid)
   totalAccepted = 0;
   for(b = 0; b < p->nBlocks; b++){
     accepted = cov_params_block_mh_collapsed_step(s, p->blocks + b, resid);
-    if(s->metropolisBlocking == 5)
-      update_adaptive_scalar_block_state(s, p->blocks + b, accepted);
-    else
+    if(s->metropolisBlocking == 5){
+      pack_cov_block_eta(s, p->blocks + b, p->blocks[b].eta);
+      update_adaptive_scalar_block_state(p->blocks + b, accepted);
+    } else
       update_adaptive_covariance_block_state(s, p->blocks + b, accepted);
     totalAccepted += accepted;
     p->totalBlockAccept += accepted;
@@ -952,6 +1098,43 @@ void update_resid_for_current_fixed_random(SamplerState *s,
     resid[i] -= s->Za[i];
 }
 
+static int adapt_warmup_block(CovProposalBlock *b, double acceptance, int batch)
+{
+  b->warmupBatchAcceptHistory[batch] = acceptance;
+  b->warmupProposalScaleHistory[batch] = b->sigmaSqM;
+  b->warmupBatches = batch + 1;
+  if(acceptance < b->warmupNearZero)
+    b->sigmaSqM *= 0.10;
+  else if(acceptance < 0.10)
+    b->sigmaSqM *= 0.25;
+  else if(acceptance < b->warmupTargetLower)
+    b->sigmaSqM *= 0.50;
+  else if(acceptance > 0.65)
+    b->sigmaSqM *= 3.00;
+  else if(acceptance > b->warmupTargetUpper)
+    b->sigmaSqM *= 1.50;
+  factor_adaptive_block_proposal_covariance(b);
+  return acceptance >= b->warmupTargetLower && acceptance <= b->warmupTargetUpper;
+}
+
+static void finish_warmup_block(CovProposalBlock *b)
+{
+  int k;
+  double ratio;
+
+  if(R_FINITE(b->sigmaSqM) && R_FINITE(b->baseSigmaSqM) && b->baseSigmaSqM > 0.0){
+    ratio = b->sigmaSqM / b->baseSigmaSqM;
+    if(b->scalarMode)
+      ratio *= ratio;
+    for(k = 0; k < b->dim * b->dim; k++)
+      b->Sigma0[k] *= ratio;
+    b->sigmaSqM = b->baseSigmaSqM;
+    factor_adaptive_block_proposal_covariance(b);
+  }
+  for(k = 0; k < b->dim * b->dim; k++)
+    b->warmupEndingProposalCov[k] = b->proposalCov[k];
+}
+
 void run_covariance_warmup(SamplerState *s,
                            double *betaCurrent,
                            double *alphaCurrent,
@@ -963,11 +1146,23 @@ void run_covariance_warmup(SamplerState *s,
 {
   CovProposalState *p;
   int b, j, k, block, accepted, batchAccepted, allBlocksInTarget, canStop, reportEveryBatches;
-  double rhat, scaleRatio;
+  double rhat;
+  int sizeAccepted;
+  CovProposalBlock *sizeBlock;
   const void *vmax_iter;
 
   p = &s->covProp;
-  if(!p->initialized || p->dim <= 0 || p->nBlocks <= 0 || !p->warmupEnabled || p->warmupMaxBatches <= 0){
+  sizeBlock = &s->nbSizeProposal;
+  if(s->nbSizeEstimate){
+    sizeBlock->warmupStartingEta[0] = std::log(s->nbSize);
+    sizeBlock->warmupStartingProposalCov[0] = sizeBlock->proposalCov[0];
+  }
+  if(!p->initialized || (p->nBlocks <= 0 && !s->nbSizeEstimate) || !p->warmupEnabled || p->warmupMaxBatches <= 0){
+    if(s->nbSizeEstimate){
+      sizeBlock->warmupStoppedReason = 3;
+      sizeBlock->warmupEndingEta[0] = std::log(s->nbSize);
+      sizeBlock->warmupEndingProposalCov[0] = sizeBlock->proposalCov[0];
+    }
     p->warmupStoppedReason = 3;
     for(block = 0; block < p->nBlocks; block++){
       CovProposalBlock *blk = p->blocks + block;
@@ -1000,6 +1195,7 @@ void run_covariance_warmup(SamplerState *s,
   for(b = 0; b < p->warmupMaxBatches; b++){
     R_CheckUserInterrupt();
     batchAccepted = 0;
+    sizeAccepted = 0;
     for(block = 0; block < p->nBlocks; block++)
       p->blocks[block].batchAccept = 0;
 
@@ -1007,6 +1203,14 @@ void run_covariance_warmup(SamplerState *s,
       R_CheckUserInterrupt();
       vmax_iter = vmaxget();
 
+      /* The size step integrates out omega; redraw omega immediately before
+         any Gaussian working-model update. */
+      if(s->nbSizeEstimate){
+        accepted = update_nb_size(s, betaCurrent, alphaCurrent, wCurrent);
+        sizeAccepted += accepted;
+        sizeBlock->warmupNAttempted++;
+        sizeBlock->warmupNAccepted += accepted;
+      }
       if(is_pg_likelihood(s))
         update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
       else if(is_probit_likelihood(s))
@@ -1043,33 +1247,19 @@ void run_covariance_warmup(SamplerState *s,
       vmaxset(vmax_iter);
     }
 
-    rhat = (double)batchAccepted / (double)(p->warmupBatchLength * p->nBlocks);
+    rhat = p->nBlocks > 0 ? (double)batchAccepted / (double)(p->warmupBatchLength * p->nBlocks) : NA_REAL;
     p->warmupBatches = b + 1;
 
     allBlocksInTarget = 1;
     for(block = 0; block < p->nBlocks; block++){
       CovProposalBlock *blk = p->blocks + block;
       double blockRhat = (double)blk->batchAccept / (double)p->warmupBatchLength;
-      blk->warmupBatchAcceptHistory[b] = blockRhat;
-      blk->warmupProposalScaleHistory[b] = blk->sigmaSqM;
-      blk->warmupBatches = b + 1;
-
-      if(blockRhat < p->warmupTargetLower || blockRhat > p->warmupTargetUpper)
+      if(!adapt_warmup_block(blk, blockRhat, b))
         allBlocksInTarget = 0;
-
-      if(blockRhat < blk->warmupNearZero)
-        blk->sigmaSqM *= 0.10;
-      else if(blockRhat < 0.10)
-        blk->sigmaSqM *= 0.25;
-      else if(blockRhat < blk->warmupTargetLower)
-        blk->sigmaSqM *= 0.50;
-      else if(blockRhat > 0.65)
-        blk->sigmaSqM *= 3.00;
-      else if(blockRhat > blk->warmupTargetUpper)
-        blk->sigmaSqM *= 1.50;
-
-      factor_adaptive_block_proposal_covariance(blk);
     }
+    if(s->nbSizeEstimate &&
+       !adapt_warmup_block(sizeBlock, (double)sizeAccepted / p->warmupBatchLength, b))
+      allBlocksInTarget = 0;
 
     canStop = allBlocksInTarget && (b + 1 >= p->warmupMinBatches);
 
@@ -1077,8 +1267,13 @@ void run_covariance_warmup(SamplerState *s,
        (((b + 1) % reportEveryBatches) == 0 ||
         canStop ||
         b == p->warmupMaxBatches - 1)){
-      Rprintf("warmup batch %d: covariance block acc=%.3f, sigma_sq_m=%.4g\n",
-              b + 1, rhat, p->sigmaSqM);
+      if(p->nBlocks > 0 || !s->nbSizeEstimate)
+        Rprintf("warmup batch %d: covariance block acc=%.3f, sigma_sq_m=%.4g\n",
+                b + 1, rhat, p->sigmaSqM);
+      else
+        Rprintf("warmup batch %d\n", b + 1);
+      if(s->nbSizeEstimate)
+        Rprintf("  size acc=%.3f\n", (double)sizeAccepted / p->warmupBatchLength);
       R_FlushConsole();
     }
 
@@ -1090,19 +1285,17 @@ void run_covariance_warmup(SamplerState *s,
 
   for(block = 0; block < p->nBlocks; block++){
     CovProposalBlock *blk = p->blocks + block;
-    if(R_FINITE(blk->sigmaSqM) && R_FINITE(blk->baseSigmaSqM) && blk->baseSigmaSqM > 0.0){
-      scaleRatio = blk->sigmaSqM / blk->baseSigmaSqM;
-      if(blk->scalarMode)
-        scaleRatio *= scaleRatio;
-      for(k = 0; k < blk->dim * blk->dim; k++)
-        blk->Sigma0[k] *= scaleRatio;
-      blk->sigmaSqM = blk->baseSigmaSqM;
-      factor_adaptive_block_proposal_covariance(blk);
-    }
-
     pack_cov_block_eta(s, blk, blk->warmupEndingEta);
-    for(k = 0; k < blk->dim * blk->dim; k++)
-      blk->warmupEndingProposalCov[k] = blk->proposalCov[k];
+    finish_warmup_block(blk);
+  }
+  if(s->nbSizeEstimate){
+    sizeBlock->warmupStoppedReason = p->warmupStoppedReason;
+    sizeBlock->warmupEndingEta[0] = std::log(s->nbSize);
+    finish_warmup_block(sizeBlock);
+    if(p->nBlocks == 0){
+      p->warmupBatches = 0;
+      p->warmupStoppedReason = 3;
+    }
   }
 }
 
@@ -1178,7 +1371,7 @@ void update_beta_draw_collapsed(SamplerState *s, const double *alpha, double *be
 
 void update_alpha_draw_collapsed(SamplerState *s, const double *beta, double *alphaDraw)
 {
-  int i, j;
+  int i, j, b, k, g, offset, col, row;
   double *ytilde, *Prec, *rhs;
 
   if(s->q <= 0)
@@ -1203,7 +1396,20 @@ void update_alpha_draw_collapsed(SamplerState *s, const double *beta, double *al
   form_ZtVinvZ_and_rhs(s, ytilde, Prec, rhs);
 
   for(j = 0; j < s->q; j++)
-    Prec[j + s->q * j] += 1.0 / s->sigmaSqRE[s->reBlockID[j]];
+    if(s->reCovDim[s->reBlockID[j]] == 0)
+      Prec[j + s->q * j] += 1.0 / s->sigmaSqRE[s->reBlockID[j]];
+  for(b = 0; b < s->nRE; b++){
+    k = s->reCovDim[b];
+    if(k == 0)
+      continue;
+    for(g = 0; g < s->reBlockSize[b] / k; g++){
+      offset = s->reOffset[b] + g * k;
+      for(col = 0; col < k; col++)
+        for(row = 0; row < k; row++)
+          Prec[offset + row + s->q * (offset + col)] +=
+            s->reCovPrecision[b][row + k * col];
+    }
+  }
 
   draw_gaussian_from_precision(Prec, rhs, s->q, alphaDraw);
 }
@@ -1541,8 +1747,77 @@ SEXP build_adaptive_metropolis_object(SamplerState *s)
 
 
 
+static SEXP build_size_metropolis_object(SamplerState *s)
+{
+  CovProposalBlock *b;
+  SEXP out, names, batch, scale, warmup, warmupNames, warmupBatch, warmupScale, target;
+  int i, nHistory;
+  const char *labels[] = {"parameter_labels", "batch_length", "batch_index", "target_accept",
+    "current_eta", "proposal_cov", "acceptance", "batch_acceptance_history",
+    "proposal_scale_history", "warmup"};
+  const char *warmupLabels[] = {"enabled", "n_batches", "n_attempted", "n_accepted",
+    "acceptance", "target", "batch_acceptance", "proposal_scale_history",
+    "starting_transformed", "ending_transformed", "starting_proposal_cov",
+    "ending_proposal_cov", "stopped_reason"};
+
+  b = &s->nbSizeProposal;
+  nHistory = b->batchIndex;
+  PROTECT(out = Rf_allocVector(VECSXP, 10));
+  PROTECT(names = Rf_allocVector(STRSXP, 10));
+  PROTECT(batch = Rf_allocVector(REALSXP, nHistory));
+  PROTECT(scale = Rf_allocVector(REALSXP, nHistory));
+  PROTECT(warmup = Rf_allocVector(VECSXP, 13));
+  PROTECT(warmupNames = Rf_allocVector(STRSXP, 13));
+  PROTECT(warmupBatch = Rf_allocVector(REALSXP, b->warmupBatches));
+  PROTECT(warmupScale = Rf_allocVector(REALSXP, b->warmupBatches));
+  PROTECT(target = Rf_allocVector(REALSXP, 2));
+  for(i = 0; i < nHistory; i++){
+    REAL(batch)[i] = b->batchAcceptHistory[i];
+    REAL(scale)[i] = b->proposalScaleHistory[i];
+  }
+  for(i = 0; i < b->warmupBatches; i++){
+    REAL(warmupBatch)[i] = b->warmupBatchAcceptHistory[i];
+    REAL(warmupScale)[i] = b->warmupProposalScaleHistory[i];
+  }
+  REAL(target)[0] = b->warmupTargetLower;
+  REAL(target)[1] = b->warmupTargetUpper;
+  SET_VECTOR_ELT(warmup, 0, Rf_ScalarLogical(b->warmupEnabled));
+  SET_VECTOR_ELT(warmup, 1, Rf_ScalarInteger(b->warmupBatches));
+  SET_VECTOR_ELT(warmup, 2, Rf_ScalarInteger(b->warmupNAttempted));
+  SET_VECTOR_ELT(warmup, 3, Rf_ScalarInteger(b->warmupNAccepted));
+  SET_VECTOR_ELT(warmup, 4, Rf_ScalarReal(b->warmupNAttempted > 0 ?
+    (double)b->warmupNAccepted / b->warmupNAttempted : NA_REAL));
+  SET_VECTOR_ELT(warmup, 5, target);
+  SET_VECTOR_ELT(warmup, 6, warmupBatch);
+  SET_VECTOR_ELT(warmup, 7, warmupScale);
+  SET_VECTOR_ELT(warmup, 8, Rf_ScalarReal(b->warmupStartingEta[0]));
+  SET_VECTOR_ELT(warmup, 9, Rf_ScalarReal(b->warmupEndingEta[0]));
+  SET_VECTOR_ELT(warmup, 10, Rf_ScalarReal(b->warmupStartingProposalCov[0]));
+  SET_VECTOR_ELT(warmup, 11, Rf_ScalarReal(b->warmupEndingProposalCov[0]));
+  SET_VECTOR_ELT(warmup, 12, Rf_mkString(b->warmupStoppedReason == 3 ? "skipped" :
+    (b->warmupStoppedReason == 2 ? "target_reached" : "max_batches")));
+  for(i = 0; i < 13; i++)
+    SET_STRING_ELT(warmupNames, i, Rf_mkChar(warmupLabels[i]));
+  Rf_namesgets(warmup, warmupNames);
+  SET_VECTOR_ELT(out, 0, Rf_mkString("log(size)"));
+  SET_VECTOR_ELT(out, 1, Rf_ScalarInteger(b->batchLength));
+  SET_VECTOR_ELT(out, 2, Rf_ScalarInteger(b->batchIndex));
+  SET_VECTOR_ELT(out, 3, Rf_ScalarReal(b->targetAccept));
+  SET_VECTOR_ELT(out, 4, Rf_ScalarReal(std::log(s->nbSize)));
+  SET_VECTOR_ELT(out, 5, Rf_ScalarReal(b->proposalCov[0]));
+  SET_VECTOR_ELT(out, 6, Rf_ScalarReal(s->nSamples > 0 ? (double)b->acceptCount / s->nSamples : NA_REAL));
+  SET_VECTOR_ELT(out, 7, batch);
+  SET_VECTOR_ELT(out, 8, scale);
+  SET_VECTOR_ELT(out, 9, warmup);
+  for(i = 0; i < 10; i++)
+    SET_STRING_ELT(names, i, Rf_mkChar(labels[i]));
+  Rf_namesgets(out, names);
+  UNPROTECT(9);
+  return out;
+}
+
 extern "C" {
-  
+
   SEXP stLMM_collapsed_sampler(SEXP backend_r)
   {
     // Read the monotonic wall clock only at phase boundaries. No timer enters
@@ -1550,15 +1825,17 @@ extern "C" {
     typedef std::chrono::steady_clock SamplerClock;
     const SamplerClock::time_point initialization_start = SamplerClock::now();
     SamplerState s;
-    SEXP out, outNames, term_description_r;
+    SEXP out, outNames, term_description_r, iid_cov_samples_r;
     SEXP phase_seconds_r, phase_names_r;
     SEXP beta_samples_r, alpha_samples_r, tau_samples_r, residual_variance_samples_r, sigma_re_samples_r, theta_samples_r, process_sigma_samples_r;
     SEXP term_labels_r, theta_accept_r, covariance_acceptance_r, w_samples_r, recover_iter_r, adaptive_metropolis_r;
+    double *iidCovSamples, *sizeSamples;
     double *betaSamples, *alphaSamples, *tauSamples, *residualVarianceSamples, *sigmaSqRESamples, *thetaSamples, *processSigmaSamples;
     double *betaCurrent, *alphaCurrent, *resid, *wSamples, *wCurrent;
     int *recoverIter;
     int i, j, iter, iter1, b, thetaOffset, describeTerms, nReport, reportLen, tauAcceptReport, doVerbose, wCurrentFresh;
-    int recoverIdx;
+    int recoverIdx, covColumn, covDim, covCol, covRow;
+    size_t z;
     const void *vmax_iter;
     BayesLogit_rpg_hybrid_t pg = BayesLogit_rpg_hybrid();
 
@@ -1604,6 +1881,8 @@ extern "C" {
     if(describeTerms)
       print_term_description(term_description_r);
     
+    sizeSamples = s.nbSizeEstimate ? (double*)R_alloc(s.nSamples, sizeof(double)) : NULL;
+    iidCovSamples = (double*)R_alloc((size_t)s.nSamples * s.nRECovElements, sizeof(double));
     betaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.p > 0 ? s.p : 1), sizeof(double));
     alphaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.q > 0 ? s.q : 1), sizeof(double));
     sigmaSqRESamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.nRE > 0 ? s.nRE : 1), sizeof(double));
@@ -1668,6 +1947,10 @@ extern "C" {
 	persistent objects allocated before the loop.
       */
       vmax_iter = vmaxget();
+      if(s.nbSizeEstimate){
+        covAccepted = update_nb_size(&s, betaCurrent, alphaCurrent, wCurrent);
+        update_adaptive_scalar_block_state(&s.nbSizeProposal, covAccepted);
+      }
       if(is_pg_likelihood(&s))
         update_pg_working_model(&s, pg, betaCurrent, alphaCurrent, wCurrent);
       else if(is_probit_likelihood(&s))
@@ -1703,7 +1986,11 @@ extern "C" {
       reportLen++;
       if(nReport > 0 && doVerbose && (reportLen >= nReport || iter == s.nSamples - 1)){
 	Rprintf("iter %d", iter + 1);
-	Rprintf(": covariance block acc=%.3f", s.covProp.nBlocks > 0 ? (double) tauAcceptReport / (double)(reportLen * s.covProp.nBlocks) : NA_REAL);
+        if(s.covProp.nBlocks > 0 || !s.nbSizeEstimate)
+          Rprintf(": covariance block acc=%.3f", s.covProp.nBlocks > 0 ? (double) tauAcceptReport / (double)(reportLen * s.covProp.nBlocks) : NA_REAL);
+        if(s.nbSizeEstimate)
+          Rprintf(": size=%.4g, size acc=%.3f", s.nbSize,
+                  (double)s.nbSizeProposal.acceptCount / (iter + 1));
 	Rprintf("\n");
 	tauAcceptReport = 0;
 	reportLen = 0;
@@ -1715,6 +2002,14 @@ extern "C" {
 	alphaSamples[iter + s.nSamples * i] = alphaCurrent[i];
       for(b = 0; b < s.nRE; b++)
 	sigmaSqRESamples[iter + s.nSamples * b] = s.sigmaSqRE[b];
+      covColumn = 0;
+      for(b = 0; b < s.nRE; b++){
+        covDim = s.reCovDim[b];
+        for(covCol = 0; covCol < covDim; covCol++)
+          for(covRow = covCol; covRow < covDim; covRow++)
+            iidCovSamples[iter + s.nSamples * covColumn++] =
+              s.reCovariance[b][covRow + covDim * covCol];
+      }
       for(i = 0; i < s.nTerms; i++)
 	processSigmaSamples[iter + s.nSamples * i] = s.terms[i].sigmaSq;
       thetaOffset = 0;
@@ -1724,6 +2019,8 @@ extern "C" {
 	thetaOffset += s.terms[i].thetaDim;
       }
       tauSamples[iter] = s.tauSq;
+      if(s.nbSizeEstimate)
+        sizeSamples[iter] = s.nbSize;
       for(i = 0; i < s.nResidualGroup; i++)
         residualVarianceSamples[iter + s.nSamples * i] = s.residualVariance[i];
 
@@ -1759,8 +2056,11 @@ extern "C" {
     UNPROTECT(1);
     PROTECT(term_description_r = build_term_description_object(&s, backend_r, s.nSamples));
     
-    PROTECT(out = Rf_allocVector(VECSXP, 15));
-    PROTECT(outNames = Rf_allocVector(STRSXP, 15));
+    PROTECT(out = Rf_allocVector(VECSXP, s.nbSizeEstimate ? 18 : 16));
+    PROTECT(outNames = Rf_allocVector(STRSXP, s.nbSizeEstimate ? 18 : 16));
+    PROTECT(iid_cov_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nRECovElements));
+    for(z = 0; z < (size_t)s.nSamples * s.nRECovElements; z++)
+      REAL(iid_cov_samples_r)[z] = iidCovSamples[z];
     PROTECT(beta_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.p > 0 ? s.p : 0));
     PROTECT(alpha_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.q > 0 ? s.q : 0));
     PROTECT(sigma_re_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nRE > 0 ? s.nRE : 0));
@@ -1812,6 +2112,7 @@ extern "C" {
     SET_VECTOR_ELT(out, 12, recover_iter_r);
     SET_VECTOR_ELT(out, 13, adaptive_metropolis_r);
     SET_VECTOR_ELT(out, 14, phase_seconds_r);
+    SET_VECTOR_ELT(out, 15, iid_cov_samples_r);
     
     SET_STRING_ELT(outNames, 0, Rf_mkChar("beta_samples"));
     SET_STRING_ELT(outNames, 1, Rf_mkChar("alpha_samples"));
@@ -1828,9 +2129,22 @@ extern "C" {
     SET_STRING_ELT(outNames, 12, Rf_mkChar("recover_iter"));
     SET_STRING_ELT(outNames, 13, Rf_mkChar("adaptive_metropolis"));
     SET_STRING_ELT(outNames, 14, Rf_mkChar("phase_seconds"));
+    SET_STRING_ELT(outNames, 15, Rf_mkChar("iid_covariance_samples"));
+    if(s.nbSizeEstimate){
+      SEXP size_samples_r, size_metropolis_r;
+      PROTECT(size_samples_r = Rf_allocVector(REALSXP, s.nSamples));
+      PROTECT(size_metropolis_r = build_size_metropolis_object(&s));
+      for(i = 0; i < s.nSamples; i++)
+        REAL(size_samples_r)[i] = sizeSamples[i];
+      SET_VECTOR_ELT(out, 16, size_samples_r);
+      SET_VECTOR_ELT(out, 17, size_metropolis_r);
+      SET_STRING_ELT(outNames, 16, Rf_mkChar("size_samples"));
+      SET_STRING_ELT(outNames, 17, Rf_mkChar("size_metropolis"));
+      UNPROTECT(2);
+    }
     Rf_namesgets(out, outNames);
-    
-    UNPROTECT(18);
+
+    UNPROTECT(19);
     free_sampler_state(&s);
     return out;
   }
@@ -2142,6 +2456,13 @@ void print_term_description(SEXP td_r)
       Rprintf("\n");
       Rprintf("    levels: %d\n", INTEGER(getListElement(re_i, "n_levels"))[0]);
       Rprintf("    q contribution: %d\n", INTEGER(getListElement(re_i, "q_contribution"))[0]);
+      if(sigma_r == R_NilValue){
+        SEXP cov = getListElement(re_i, "covariance");
+        SEXP hp = getListElement(cov, "prior_hyperparameters");
+        Rprintf("    covariance: unstructured, inverse-Wishart(df=%.6g), Gibbs\n",
+                REAL(getListElement(hp, "df"))[0]);
+        continue;
+      }
       Rprintf("    sigma^2 current: %.6g\n", REAL(getListElement(sigma_r, "current"))[0]);
       {
         SEXP hp = getListElement(sigma_r, "prior_hyperparameters");
@@ -2344,7 +2665,19 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
       SEXP re_i = VECTOR_ELT(re_terms_r, i);
       SEXP sigma_r = getListElement(re_i, "sigma_sq");
       SEXP sampler_r = getListElement(re_i, "sampler");
-      setListElementByName(sigma_r, "current", Rf_ScalarReal(s->sigmaSqRE[i]));
+      if(s->reCovDim[i] > 0){
+        int k, j;
+        SEXP value;
+
+        k = s->reCovDim[i];
+        PROTECT(value = Rf_allocMatrix(REALSXP, k, k));
+        for(j = 0; j < k * k; j++)
+          REAL(value)[j] = s->reCovariance[i][j];
+        setListElementByName(getListElement(re_i, "covariance"), "current", value);
+        UNPROTECT(1);
+      } else {
+        setListElementByName(sigma_r, "current", Rf_ScalarReal(s->sigmaSqRE[i]));
+      }
       if(nSamplesDone > 0)
         setListElementByName(sampler_r, "block_acceptance", Rf_ScalarReal(NA_REAL));
     }

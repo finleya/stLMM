@@ -21,4 +21,6 @@ The package ships with a small number of fast vignettes.
 
 The package website at <https://finleya.github.io/stLMM/> provides the broader article set. Those articles include longer model examples, likelihood extensions such as binomial, probit, and count models, diagnostics, runtime notes, applied workflows, and the modeling and software details reference that are useful for learning the package but too heavy for routine package builds.
 
+The [getting-started vignette](v01-getting-started.html#grouped-random-effects) introduces independent and correlated IID coefficients, parent-specific child effects, prediction for new groups, and combined coefficient summaries. The [lme4 comparison](a14-lme4-validation.html) gives runnable grouped-effect examples and parameter diagnostics. The [negative-binomial article](a09-negative-binomial-counts.html) covers both fixed and estimated size, and the [sampler article](a10-metropolis-blocking-diagnostics.html) explains covariance blocking and the separate size update.
+
 For real analyses, use the website articles as templates rather than as final settings. Longer chains, multiple-chain diagnostics, prior sensitivity checks, posterior predictive checks, and application-specific validation remain part of the user's analysis workflow.

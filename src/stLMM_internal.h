@@ -333,6 +333,10 @@ typedef struct {
   int likelihoodFamily;
   int *nTrial;
   double nbSize;
+  int nbSizeEstimate;
+  PriorSpec nbSizePrior;
+  double nbSizeTune, nbSizeTarget, nbSizeWarmupLower, nbSizeWarmupUpper;
+  CovProposalBlock nbSizeProposal;
   double *X;
   int betaPriorType; /* 0 = flat, 1 = independent normal */
   double *betaPriorMean;
@@ -379,6 +383,16 @@ typedef struct {
   double *residualScaledWeight;
 
   int nRE;
+  /* One entry per sampler block: zero dimension denotes a scalar IG block;
+     positive dimension denotes repeated group covariance blocks. Scalar
+     sigmaSqRE entries are placeholders for covariance blocks. */
+  int *reCovDim;
+  int *reOffset;
+  double *reCovDF;
+  double **reCovScale;
+  double **reCovariance;
+  double **reCovPrecision;
+  int nRECovElements;
   int *reBlockID;
   int *reBlockSize;
   int maxBlockSize;
@@ -505,6 +519,7 @@ void sparse_Zt_mult(SamplerState *s, const double *v, double *out);
 double sparse_Z_col_dot_dense(SamplerState *s, int col, const double *v);
 void update_mean_without_alpha(SamplerState *s, const double *beta, double *out);
 void update_sigmaSqRE_gibbs(SamplerState *s);
+void refresh_iid_covariance_precision(SamplerState *s, int b);
 double log_ig_kernel_collapsed(double x, double shape, double scale);
 double log_cov_params_target_collapsed(SamplerState *s, const double *resid);
 int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, double *out);

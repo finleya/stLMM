@@ -20,22 +20,91 @@ outside a model formula.
 }
 
 \section{IID grouped random effects}{
-\code{iid(group)} adds an iid Gaussian random intercept for the observed
-levels of \code{group}. It contributes one column per observed group level to
-the explicit random-effect design matrix \code{Z}.
+\code{iid(group)} adds an iid Gaussian random intercept for each retained
+level of \code{group}. It contributes one column per retained group level to
+the explicit random-effect design matrix \code{Z}. Without \code{by}, unused
+factor levels are retained and have coefficient draws even without data rows;
+character or numeric groups use the levels represented in the data.
 
 \code{x:iid(group)} adds an iid Gaussian group-varying slope for the numeric
-covariate \code{x}. It contributes one column per observed group level, with
+covariate \code{x}. It contributes one column per retained group level, with
 row entries scaled by \code{x}.
 
 \code{iid(group) + x:iid(group)} creates two separate scalar iid random-effect
 terms with separate variance parameters, typically named \code{iid_1} and
 \code{iid_2}. This is not a correlated intercept/slope block.
 
-IID random effects are sampled through the explicit \code{Z alpha} random-effect
-path. They do not require \code{\link{recover}}. Prediction from a fit object is
-available for existing grouping levels. New grouping levels in \code{newdata}
-currently error.
+\code{iid(group, coefficients = ~ 1 + x1 + x2, cov_model = "unstructured")}
+adds a jointly Gaussian coefficient vector per group, with a shared
+unstructured covariance matrix. The coefficient formula can be the second
+positional argument, as in \code{iid(group, ~ 1 + x)}. Use \code{~ 0 + x}
+to omit the intercept. Coefficient formulas accept additive numeric
+covariates with simple names; factor covariates, transformations, interactions,
+and nesting shorthand inside the coefficient formula are not supported.
+Covariates are used as supplied, without automatic centering or scaling.
+For every iid slope form, a covariate may be a finite numeric vector or a
+one-column numeric matrix, such as the result of \code{scale(x)}. Its values
+are used as one covariate. Multi-column matrices are not accepted, including
+during prediction.
+
+Each unstructured coefficient-formula term requires an explicit prior such as
+\code{priors = list(iid_1 = list(covariance = iw(df = 4, scale = diag(2))))}.
+Separate iid terms are independent in the prior and have separate variance or
+covariance parameters. Multiple grouping factors can be crossed. For nested
+groups, create a globally unique child identifier, for example
+\code{interaction(region, plot, drop = TRUE)}, and use separate parent and
+child iid terms. Child effects share one covariance across parents.
+
+\code{iid(group, ~ 1 + x, cov_model = "independent")} specifies independent
+intercept and slope coefficients with separate variances. With matching priors,
+it represents the same model as \code{iid(group) + x:iid(group)} and uses the
+same scalar iid sampling and prediction routines. The default for coefficient
+formulas remains \code{cov_model = "unstructured"}.
+
+For independent coefficients, supply
+\code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))} to use the same
+IG hyperparameters independently for every coefficient variance, or provide a
+named list such as
+\code{priors = list(iid_1 = list(sigma_sq = list("(Intercept)" = ig(3, 1), x = ig(4, 0.5))))}.
+Names must match all coefficient names exactly, including case; their order
+does not matter. A shared prior does not impose a shared variance. Starting
+variances under \code{starting$iid_1$sigma_sq} may be one positive number or a
+coefficient-named numeric vector or list. Variances use conjugate IG updates
+and do not accept tuning. Output names identify each coefficient, for example
+\code{iid_1[coefficient="x"]_sigma_sq}, while controls and combined-summary
+selection use the original formula term name \code{iid_1}.
+
+Use \code{iid(plot, by = stand)} for a separate child-effect variance in each
+stand, or \code{iid(plot, ~ 1 + x, by = stand)} for a separate child-coefficient
+covariance in each stand. Child labels are local to their parent: plot 1 in
+two stands identifies two different coefficient vectors. Within a stand,
+child effects are iid with zero mean and that stand's variance or covariance.
+An additional \code{iid(stand)} term supplies parent intercepts when desired.
+The scalar slope form \code{x:iid(plot, by = stand)} is also supported.
+Adding \code{cov_model = "independent"} to the coefficient-formula form gives
+a separate variance for every coefficient within every stand. The supplied
+coefficient-specific IG priors and starting values are reused across stands;
+each coefficient/stand variance has its own posterior draws. An output name
+such as \code{iid_1[coefficient="x"][stand="north"]_sigma_sq} identifies both.
+
+Controls use the original formula term name, for example
+\code{priors = list(iid_1 = list(covariance = iw(4, diag(2))))} for a single
+correlated \code{by} term. The same supplied IG or IW hyperparameters are
+applied independently to every parent block; no shared covariance
+hyperparameters are estimated. A supplied starting value or matrix is used
+for every parent. Only parent-child pairs represented by data rows enter
+these blocks, including rows with missing responses. Unused factor levels
+do not create additional parents or parent-child pairs for a \code{by} term.
+
+IID random effects are sampled through the explicit \code{Z alpha} path.
+They do not require \code{\link{recover}}. Prediction uses fitted coefficient
+draws for existing grouping levels. New levels error unless
+\code{allow_new_levels = TRUE}, which samples their coefficients from each
+posterior variance or covariance draw. Repeated rows in the same new group
+share one coefficient vector within each posterior draw.
+For \code{by} terms, this opt-in permits new children within represented
+parents and uses the corresponding parent's posterior covariance. New parent
+levels are not supported, even with \code{allow_new_levels = TRUE}.
 }
 
 \section{Structured latent process terms}{

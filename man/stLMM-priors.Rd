@@ -4,6 +4,7 @@
 \alias{flat}
 \alias{normal}
 \alias{ig}
+\alias{iw}
 \alias{uniform}
 \alias{log_normal}
 \alias{gamma_dist}
@@ -18,6 +19,8 @@ flat()
 normal(mean = 0, sd = 1)
 
 ig(shape, scale)
+
+iw(df, scale)
 
 uniform(lower, upper)
 
@@ -38,7 +41,7 @@ fixed(value)
 fixed-effect priors created by \code{normal()}. Scalars are recycled across
 fixed effects; vectors must match the number of fixed effects.}
 \item{shape, scale}{For \code{ig()}, positive inverse-gamma shape and scale
-parameters. For \code{half_normal()}, positive standard-deviation scale.}
+parameters. For \code{iw()}, a symmetric positive definite scale matrix. For \code{half_normal()}, positive standard-deviation scale.}
 \item{lower, upper}{Finite support limits for \code{uniform()}.}
 \item{meanlog, sdlog}{Mean and standard deviation on the log scale for
 \code{log_normal()}; \code{sdlog} must be positive.}
@@ -46,7 +49,9 @@ parameters. For \code{half_normal()}, positive standard-deviation scale.}
 when \code{log_normal()} or \code{gamma_dist()} is used for a covariance theta
 parameter.}
 \item{rate}{Positive gamma rate parameter.}
-\item{df}{Positive degrees of freedom for \code{half_t()}.}
+\item{df}{Positive degrees of freedom for \code{half_t()}. For \code{iw()},
+finite degrees of freedom strictly greater than \eqn{k-1}, where \eqn{k} is
+the dimension of the scale matrix.}
 \item{shape1, shape2}{Positive beta shape parameters.}
 \item{value}{Finite numeric scalar value at which a covariance or variance
 parameter should be fixed.}
@@ -55,6 +60,14 @@ parameter should be fixed.}
 Constructors for prior and fixed-parameter objects used by \code{\link{stLMM}}.
 }
 \details{
+For negative-binomial size estimation, use
+\code{priors = list(size = gamma_dist(shape, rate))} and leave \code{size = NULL}
+in \code{stLMM()}. Shape and rate must be positive and finite. The prior is
+on size, without a truncated \code{support}, and is not conjugate under the
+log-mean parameterization. An adaptive Metropolis step updates log(size).
+Supplying \code{size = value} or \code{size = fixed(value)} fixes size and
+requires no size prior; \code{starting$size} is reserved for estimation.
+
 Raw numeric vectors such as \code{c(2, 1)} are not accepted as priors. Use an
 explicit constructor so the prior family and parameter support are clear.
 
@@ -85,6 +98,38 @@ p(x \mid a, b) =
 where \code{shape = a} and \code{scale = b}. Thus the second argument to
 \code{ig()} is a scale parameter for the inverse-gamma distribution, not a rate.
 
+The inverse-Wishart constructor \code{iw(df, scale)} is used for iid
+coefficient covariance matrices with \code{cov_model = "unstructured"} through
+\code{priors = list(iid_1 = list(covariance = iw(df, scale)))}. For
+\eqn{\nu = df} and \eqn{\Psi = scale}, its density is proportional to
+\deqn{|\Sigma|^{-(\nu+k+1)/2}\exp\{-\mathrm{tr}(\Psi\Sigma^{-1})/2\}.}
+Its mean is \eqn{\Psi/(\nu-k-1)} when \eqn{\nu>k+1}. Thus \code{scale}
+is not generally the prior mean. Its mode is \eqn{\Psi/(\nu+k+1)}, used
+as the default starting covariance. In dimension one, this prior equals
+\code{ig(shape = df/2, scale = scale[1,1]/2)}. There is no default iid
+covariance prior. An inverse-Wishart prior couples the prior distributions
+of variances and correlations, so hyperparameters should be chosen with
+regard to the supplied covariate scales.
+
+For \code{iid(group, ~ 1 + x, cov_model = "independent")}, each coefficient
+variance has an independent IG prior and conjugate update. Specify
+\code{priors = list(iid_1 = list(sigma_sq = ig(3, 1)))} to reuse the same
+hyperparameters independently, or
+\code{priors = list(iid_1 = list(sigma_sq = list("(Intercept)" = ig(3, 1), x = ig(4, 0.5))))}
+for coefficient-specific hyperparameters. A named list must contain exactly
+the coefficient names, including case. These independent variances remain
+separate parameters even when their prior hyperparameters are identical.
+An explicit IG prior is required; no IW covariance is sampled for this form.
+
+For \code{iid(child, by = parent)} and
+\code{iid(child, ~ 1 + x, by = parent)}, specify the IG or IW prior under
+the original formula term name, such as \code{iid_1}. Its hyperparameters
+are reused for independent priors on every parent's variance or covariance.
+Each parent has its own posterior draw and Gibbs update. This interface
+does not estimate hyperparameters shared across the parent distributions.
+For an independent coefficient-formula term with \code{by}, each coefficient's
+IG hyperparameters are reused independently for that coefficient in every parent.
+
 Other positive variance priors use the following parameterizations. The
 \code{log_normal(meanlog, sdlog)} prior is the usual log-normal density with
 \code{meanlog} and \code{sdlog} on \eqn{\log(x)}. The
@@ -103,9 +148,10 @@ Variance parameters, including \code{tau_sq} and process \code{sigma_sq}, are
 strictly positive. Sampled residual and process variances may use
 \code{ig()}, \code{log_normal()}, \code{gamma_dist()}, \code{half_normal()}, or
 \code{half_t()}. The half-normal and half-t priors are defined on the standard
-deviation scale and transformed internally to the variance scale. IID grouped
-random-effect variances currently use conjugate Gibbs updates and must use
-\code{ig()}.
+deviation scale and transformed internally to the variance scale. Scalar IID
+grouped random-effect variances, including independent coefficient-formula
+variances, use conjugate Gibbs updates and must use \code{ig()}.
+Unstructured IID coefficient covariances use \code{iw()}.
 
 When \code{resid(model = "group", group = group)} is used, the grouped residual
 variance priors are supplied through \code{priors$resid}. A single prior can

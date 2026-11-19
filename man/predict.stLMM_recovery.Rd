@@ -7,32 +7,35 @@
 \usage{
 \method{predict}{stLMM}(object, newdata = NULL, y_samples = FALSE,
   n_omp_threads = NULL, verbose = FALSE, sub_sample = list(start = 1L,
-  thin = 1L), scale = c("response", "link"), ...)
+  thin = 1L), scale = c("response", "link"), allow_new_levels = FALSE, ...)
 
 \method{predict}{stLMM_chains}(object, newdata = NULL, y_samples = FALSE,
   n_omp_threads = NULL, verbose = FALSE, sub_sample = list(start = 1L,
-  thin = 1L), scale = c("response", "link"), ...)
+  thin = 1L), scale = c("response", "link"), allow_new_levels = FALSE, ...)
 
 \method{predict}{stLMM_recovery}(object, newdata = NULL, y_samples = FALSE,
   joint = FALSE, joint_method = c("vecchia", "full"), pred_m = NULL,
   pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
-  ...)
+  allow_new_levels = FALSE, ...)
 
 \method{predict}{stLMM_recovery_chains}(object, newdata = NULL,
   y_samples = FALSE, joint = FALSE, joint_method = c("vecchia", "full"),
   pred_m = NULL, pred_ordering = "maxmin", st_scale = NULL,
   return_w_samples = TRUE, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), scale = c("response", "link"),
-  ...)
+  allow_new_levels = FALSE, ...)
 }
 \arguments{
 \item{object}{An \code{stLMM} fit without structured process terms, an
 augmented non-Gaussian process fit with saved in-chain process draws, a recovered object
 returned by \code{recover()}, or the corresponding multi-chain object.}
-\item{newdata}{Optional data frame. Grouped random-effect levels must already
-exist in the fitted model support. For recovered process models, process
+\item{newdata}{Optional data frame. Variables used only in the response expression
+are not required and are ignored if supplied, including missing response values.
+Variables also used as prediction inputs, such as predictors or offsets, must
+still be supplied with valid values. Grouped random-effect levels must already
+exist in the fitted model support unless \code{allow_new_levels = TRUE}. For recovered process models, process
 coordinates may be existing support locations or new AR1, GP, or NNGP nodes.
 CAR and CAR-time prediction rows must use existing graph areas; CAR-time rows
 must also use fitted time values.}
@@ -40,6 +43,17 @@ must also use fitted time values.}
 posterior predictive samples. Gaussian fits use the fitted residual variance.
 Binomial fits draw counts from the fitted probabilities and prediction trial
 counts. Probit fits draw binary responses from the fitted probabilities.}
+\item{allow_new_levels}{Logical, default \code{FALSE}. Unseen iid grouping
+levels cause an error unless explicitly set to \code{TRUE}. When enabled,
+new group coefficients are sampled jointly from the zero-mean normal
+population distribution using each retained posterior variance or covariance
+draw. One vector is sampled per distinct new group per draw and reused across
+its rows; known groups keep their fitted draws. This uncertainty is included
+in \code{mu_samples}, even when \code{y_samples = FALSE}. Missing group
+labels still error. For iid terms with \code{by}, only new children within
+represented parents are supported; a new parent level errors even with this
+option enabled. The option does not permit new fixed-effect factor levels,
+new residual-variance groups, or unsupported structured process locations.}
 \item{joint}{Logical; for new GP or NNGP nodes, whether to draw unique new
 nodes with cross-location dependence. The default \code{FALSE} simulates
 unique new nodes independently conditional on the fitted support or
@@ -126,11 +140,31 @@ reports progress at the R phase level rather than printing from worker threads.
 With \code{newdata = NULL}, prediction returns fitted-row posterior mean
 samples for the original data rows. With \code{newdata}, fixed-effect and iid
 random-effect design matrices are rebuilt from the fitted formula metadata.
+Fixed-effect prediction retains fitted factor levels, contrasts, and the basis
+information supplied by prediction-aware functions such as \code{poly()} and
+\code{splines::ns()}. These bases are not refitted to the prediction rows.
+For other data-dependent transformations, compute the transformed covariates
+explicitly and apply the same transformation to fitting and prediction data.
 If the fitted formula contains \code{offset()}, the same offset expression is
 evaluated in \code{newdata} and added to the prediction linear predictor.
 New AR1, GP, and NNGP process nodes are supported. Repeated prediction rows
 sharing a new process node reuse the same simulated latent draw within a
 posterior sample.
+
+For new iid groups, sampling is performed on the linear predictor scale
+before any inverse-link transformation. This is posterior prediction for new
+groups, rather than setting their effects to zero. New groups are independent
+conditional on each posterior covariance draw. Calls made separately simulate
+new effects independently; put all rows requiring shared new-group effects
+in the same prediction call.
+
+For \code{iid(child, by = parent)} and coefficient-formula variants,
+\code{newdata} must contain both grouping variables. Children are matched
+by their parent-child pair. Repeated rows for a new pair share one draw;
+the same child label in different parents receives separate draws using
+each parent's posterior variance or covariance. A child observed in one
+parent may still be new in another. Parent levels must have been represented
+by rows in the fitting data, even when \code{allow_new_levels = TRUE}.
 
 When \code{return_w_samples = TRUE}, recovered-process prediction objects also
 contain \code{w_samples}, a named list with one matrix per process term. Each
@@ -155,7 +189,10 @@ binary responses with those fitted probabilities.
 For \code{family = "negative_binomial"}, prediction first constructs posterior
 samples of the log mean and then exponentiates them when
 \code{scale = "response"}. If \code{y_samples = TRUE}, prediction simulates
-negative-binomial counts using the fitted fixed \code{size}.
+negative-binomial counts using the fitted size. For estimated size, each
+response draw uses the corresponding posterior \code{size_samples} value,
+aligned by original iteration after thinning and process recovery. Fixed-size
+fits use their supplied scalar. Mean counts remain \eqn{\exp(\eta)}.
 
 For dense \code{gp()} terms, \code{joint = FALSE} draws each unique new node
 from its marginal conditional distribution given the fitted support. With

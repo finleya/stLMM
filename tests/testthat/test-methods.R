@@ -64,7 +64,7 @@ test_that("print summary and plot methods work for recovered objects", {
   set.seed(3002)
   dat <- data.frame(y = rnorm(6), time = rep(1:3, each = 2))
 
-  fit <- stLMM(
+  expect_warning(fit <- stLMM(
     y ~ 0 + ar1(time),
     data = dat,
     starting = list(tau_sq = 1, ar1_1 = c(sigma_sq = 1, phi = 0.4)),
@@ -75,7 +75,8 @@ test_that("print summary and plot methods work for recovered objects", {
     ),
     n_samples = 8,
     verbose = FALSE
-  )
+  ), "duplicated time values detected in ar1(time); fitting latent process on 3 unique time points (from 6 observations)",
+  fixed = TRUE)
   rec <- recover(fit, sub_sample = list(start = 2, thin = 2))
 
   expect_output(print(rec), "stLMM recovery")

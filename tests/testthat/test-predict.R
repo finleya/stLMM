@@ -91,7 +91,7 @@ test_that("predict.stLMM_recovery with newdata NULL matches fitted samples", {
     time = rep(seq_len(3), each = 2)
   )
 
-  fit <- stLMM(
+  expect_warning(fit <- stLMM(
     y ~ 0 + ar1(time),
     data = dat,
     starting = list(tau_sq = 1, ar1_1 = c(sigma_sq = 1, phi = 0.4)),
@@ -102,7 +102,8 @@ test_that("predict.stLMM_recovery with newdata NULL matches fitted samples", {
     ),
     n_samples = 10,
     verbose = FALSE
-  )
+  ), "duplicated time values detected in ar1(time); fitting latent process on 3 unique time points (from 6 observations)",
+  fixed = TRUE)
   rec <- recover(fit, sub_sample = list(start = 2, thin = 2))
 
   pred <- predict(rec)

@@ -1,7 +1,7 @@
 Package: stLMM
 Type: Package
 Title: Bayesian Spatial and Space-Time Linear Mixed Models
-Version: 0.0.5
+Version: 0.0.6
 Config/stLMM/Timing: phases-v1
 Authors@R: c(
     person("Andrew O.", "Finley", role = c("aut", "cre"),
@@ -37,6 +37,7 @@ Suggests:
     ggplot2,
     knitr,
     loo,
+    posterior,
     quarto,
     sf,
     testthat (>= 3.0.0)

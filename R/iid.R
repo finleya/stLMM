@@ -16,6 +16,28 @@ validate_iid_variable_name <- function(x, where){
   x
 }
 
+# A one-column matrix (for example, scale(x)) represents one numeric covariate.
+# Normalize its storage without changing the supplied values.
+iid_numeric_covariate <- function(x, n, where){
+  if(!is.numeric(x) || length(x) != n ||
+     (!is.null(dim(x)) && (!is.matrix(x) || ncol(x) != 1L || nrow(x) != n)))
+    stop("error: ", where, " must be a finite numeric vector or one-column matrix with ", n, " rows")
+  if(anyNA(x))
+    stop("error: ", where, " contains missing values")
+  if(any(!is.finite(x)))
+    stop("error: ", where, " must be finite numeric values")
+  as.numeric(x)
+}
+
+# Covariance draws store the lower triangle by column, including the diagonal.
+# Both output labeling and prediction use this order.
+iid_covariance_sample_names <- function(term){
+  coefficients <- term$coefficients
+  k <- length(coefficients)
+  ij <- which(lower.tri(matrix(0, k, k), diag = TRUE), arr.ind = TRUE)
+  paste0(term$name, "_cov[", coefficients[ij[, 1]], ",", coefficients[ij[, 2]], "]")
+}
+
 parse_iid_call <- function(lbl){
 
   colon_parts <- split_top_level_colon(lbl)
@@ -47,8 +69,16 @@ parse_iid_call <- function(lbl){
   inside <- trimws(hit[2])
   pieces <- split_top_level(inside, split = ",")
 
-  if(length(pieces) != 1L)
-    stop("error: iid() currently accepts exactly one grouping variable")
+  if(length(pieces) != 1L){
+    spec <- parse_iid_coefficients(iid_part, lbl)
+    if(!is.null(coef_name)){
+      if(!is.null(spec$cov_model))
+        stop("error: an iid coefficient formula cannot be combined with an external slope")
+      spec$coef_name <- validate_iid_variable_name(coef_name, "iid slope covariate")
+      spec$coefficient <- spec$coef_name
+    }
+    return(spec)
+  }
 
   group_name <- validate_iid_variable_name(trimws(pieces[1]), "iid() grouping variable")
 
@@ -61,6 +91,60 @@ parse_iid_call <- function(lbl){
     coef_name = coef_name,
     coefficient = if(is.null(coef_name)) "(Intercept)" else coef_name
   )
+}
+
+parse_iid_coefficients <- function(iid_part, lbl){
+  args <- as.list(str2lang(iid_part))[-1L]
+  nms <- names(args)
+  if(is.null(nms)) nms <- rep("", length(args))
+  allowed <- c("group", "coefficients", "cov_model", "by")
+  if(length(args) > length(allowed))
+    stop("error: iid() accepts group, coefficients, cov_model, and by")
+  named <- nms[nzchar(nms)]
+  if(anyDuplicated(named) || any(!named %in% allowed))
+    stop("error: iid() accepts group, coefficients, cov_model, and by without duplicate arguments")
+  positional <- which(!nzchar(nms))
+  nms[positional] <- setdiff(allowed, named)[seq_along(positional)]
+  names(args) <- nms
+  if(!is.symbol(args$group))
+    stop("error: iid() grouping variable must be a simple variable name")
+  group <- validate_iid_variable_name(as.character(args$group), "iid() grouping variable")
+  by_name <- NULL
+  if("by" %in% names(args)){
+    if(!is.symbol(args$by))
+      stop("error: iid() by must be a simple variable name")
+    by_name <- validate_iid_variable_name(as.character(args$by), "iid() by variable")
+  }
+  f <- args$coefficients
+  if(is.null(f) && !is.null(by_name)){
+    if(!is.null(args$cov_model))
+      stop("error: iid() cov_model requires a coefficient formula")
+    return(list(label = lbl, group_name = group, coef_name = NULL,
+                coefficient = "(Intercept)", by_name = by_name))
+  }
+  if(!is.call(f) || !identical(f[[1L]], as.name("~")) || length(f) != 2L)
+    stop("error: iid() coefficients must be a one-sided formula, e.g. ~ 1 + x")
+  additive <- function(x){
+    if(is.symbol(x)) return(as.character(x) != ".")
+    if(is.numeric(x)) return(length(x) == 1L && x %in% c(0, 1))
+    is.call(x) && as.character(x[[1L]]) %in% c("+", "-") &&
+      all(vapply(as.list(x)[-1L], additive, logical(1)))
+  }
+  if(!additive(f[[2L]]))
+    stop("error: iid() coefficients currently supports additive numeric variable names and an optional intercept")
+  tt <- stats::terms(stats::as.formula(f))
+  vars <- attr(tt, "term.labels")
+  for(v in vars) validate_iid_variable_name(v, "iid slope covariate")
+  coefficients <- c(if(attr(tt, "intercept") == 1L) "(Intercept)", vars)
+  if(!length(coefficients))
+    stop("error: iid() coefficient formula must include at least one coefficient")
+  cov_model <- args$cov_model %||% "unstructured"
+  if(!identical(cov_model, "unstructured") && !identical(cov_model, "independent"))
+    stop('error: iid() cov_model must be "unstructured" or "independent"')
+  out <- list(label = lbl, group_name = group, coef_name = vars,
+              coefficient = coefficients, cov_model = cov_model)
+  if(!is.null(by_name)) out$by_name <- by_name
+  out
 }
 
 default_iid_names <- function(specs){
@@ -122,7 +206,7 @@ build_iid_design <- function(iid_info, data, n_obs){
   }
 
   iid_vars <- unique(unlist(lapply(terms, function(term){
-    c(term$group_name, term$coef_name)
+    c(term$group_name, term$coef_name, term$by_name)
   }), use.names = FALSE))
   iid_vars <- iid_vars[nzchar(iid_vars)]
 
@@ -133,12 +217,72 @@ build_iid_design <- function(iid_info, data, n_obs){
   if(nrow(iid_mf) != n_obs)
     stop("error: iid random-effect data rows do not match fixed-effect model rows")
 
+  slope_names <- unique(unlist(lapply(terms, `[[`, "coef_name"), use.names = FALSE))
+  slope_values <- stats::setNames(lapply(slope_names, function(nm)
+    iid_numeric_covariate(iid_mf[[nm]], n_obs, paste0("iid slope covariate ", nm))), slope_names)
+
+  # Block contract: name identifies a sampler block; formula_name, when present,
+  # identifies its original control-list term. coefficient lists the block's
+  # coefficients, while formula_coefficients retains an independent formula's
+  # full coefficient list for control validation. rows/group_index/levels map
+  # observations to contiguous group-major columns. Public term descriptions
+  # expose formula_name as formula_term and coefficient as coefficients.
+  # Independent coefficient formulas use the same scalar blocks as separate
+  # iid intercept/slope terms, in coefficient order before parent expansion.
+  scalar_terms <- list()
+  for(term in terms){
+    if(!identical(term$cov_model, "independent")){
+      scalar_terms[[length(scalar_terms) + 1L]] <- term
+      next
+    }
+    for(coef in term$coefficient){
+      block <- term
+      block$formula_name <- term$name
+      block$formula_coefficients <- term$coefficient
+      block$coefficient <- coef
+      block$coef_name <- if(coef == "(Intercept)") NULL else coef
+      block$name <- paste0(term$name, "[coefficient=", encodeString(coef, quote = '"'), "]")
+      scalar_terms[[length(scalar_terms) + 1L]] <- block
+    }
+  }
+  terms <- scalar_terms
+
+  # Each observed parent is an existing sampler block. Its children occupy
+  # contiguous columns; inactive observations never enter that block's Z.
+  # Keeping parent and child labels separate avoids ambiguous pasted keys.
+  blocks <- list()
+  for(term in terms){
+    if(is.null(term$by_name)){
+      blocks[[length(blocks) + 1L]] <- term
+      next
+    }
+    parent <- iid_mf[[term$by_name]]
+    if(!is.atomic(parent) || !is.null(dim(parent)) || length(parent) != n_obs || anyNA(parent))
+      stop("error: iid() by variable must be a nonmissing vector")
+    parent <- droplevels(factor(parent))
+    parent_levels <- levels(parent)
+    if(!length(parent_levels)) stop("error: iid() by variable has no observed levels")
+    for(level in parent_levels){
+      block <- term
+      block$formula_name <- term$formula_name %||% term$name
+      block$by_level <- level
+      block$by_levels <- parent_levels
+      block$rows <- which(parent == level)
+      block$name <- paste0(term$name, "[", term$by_name, "=", encodeString(level, quote = '"'), "]")
+      blocks[[length(blocks) + 1L]] <- block
+    }
+  }
+  terms <- blocks
+
   for(i in seq_along(terms)){
     g <- terms[[i]]$group_name
     if(!g %in% names(iid_mf))
       stop("error: grouping factor ", g, " not found for ", terms[[i]]$label)
 
-    group <- iid_mf[[g]]
+    rows <- terms[[i]]$rows
+    if(is.null(rows)) rows <- seq_len(n_obs)
+    group <- iid_mf[[g]][rows]
+    if(!is.null(terms[[i]]$by_name) && is.factor(group)) group <- droplevels(group)
     if(is.factor(group)){
       levels_i <- levels(group)
       group <- factor(group, levels = levels_i)
@@ -155,24 +299,27 @@ build_iid_design <- function(iid_info, data, n_obs){
     terms[[i]]$levels <- levels_i
     terms[[i]]$n_levels <- length(levels_i)
 
-    if(!is.null(terms[[i]]$coef_name)){
-      x <- iid_mf[[terms[[i]]$coef_name]]
-      if(!is.numeric(x))
-        stop("error: iid slope covariate ", terms[[i]]$coef_name, " must be numeric")
-      x <- as.numeric(x)
-      if(length(x) != n_obs || anyNA(x))
-        stop("error: iid slope covariate ", terms[[i]]$coef_name, " contains missing values")
-      terms[[i]]$scale <- x
+    if(identical(terms[[i]]$cov_model, "unstructured")){
+      values <- lapply(terms[[i]]$coefficient, function(nm){
+        if(nm == "(Intercept)") return(rep(1, length(rows)))
+        slope_values[[nm]][rows]
+      })
+      terms[[i]]$scale <- do.call(cbind, values)
+    } else if(!is.null(terms[[i]]$coef_name)){
+      terms[[i]]$scale <- slope_values[[terms[[i]]$coef_name]][rows]
     } else {
-      terms[[i]]$scale <- rep(1.0, n_obs)
+      terms[[i]]$scale <- rep(1.0, length(rows))
     }
 
     terms[[i]]$group_index <- as.integer(group)
   }
 
-  re.q <- vapply(terms, `[[`, integer(1), "n_levels")
+  re_nlevels <- vapply(terms, `[[`, integer(1), "n_levels")
+  re_ncoef <- vapply(terms, function(term) length(term$coefficient), integer(1))
+  re.q <- re_nlevels * re_ncoef
   q <- sum(re.q)
-  n_value <- n_obs * length(terms)
+  n_value <- sum(vapply(terms, function(term)
+    length(term$group_index) * length(term$coefficient), integer(1)))
   ii <- integer(n_value)
   jj <- integer(n_value)
   xx <- numeric(n_value)
@@ -182,16 +329,20 @@ build_iid_design <- function(iid_info, data, n_obs){
   for(i in seq_along(terms)){
     term <- terms[[i]]
     idx <- term$group_index
-    scale <- term$scale
+    rows <- term$rows
+    if(is.null(rows)) rows <- seq_len(n_obs)
+    scale <- matrix(term$scale, nrow = length(rows), ncol = re_ncoef[i])
 
-    for(row in seq_len(n_obs)){
-      pos <- pos + 1L
-      ii[pos] <- row
-      jj[pos] <- col_offset + idx[row]
-      xx[pos] <- scale[row]
+    for(row in seq_along(rows)){
+      for(j in seq_len(re_ncoef[i])){
+        pos <- pos + 1L
+        ii[pos] <- rows[row]
+        jj[pos] <- col_offset + (idx[row] - 1L) * re_ncoef[i] + j
+        xx[pos] <- scale[row, j]
+      }
     }
 
-    col_offset <- col_offset + term$n_levels
+    col_offset <- col_offset + re.q[i]
   }
 
   Z <- Matrix::sparseMatrix(i = ii, j = jj, x = xx, dims = c(n_obs, q))
@@ -199,17 +350,21 @@ build_iid_design <- function(iid_info, data, n_obs){
   z_names <- character(q)
   col_offset <- 0L
   for(i in seq_along(terms)){
-    idx <- col_offset + seq_len(terms[[i]]$n_levels)
-    z_names[idx] <- paste0(terms[[i]]$name, "_", make.names(terms[[i]]$levels, unique = TRUE))
-    col_offset <- col_offset + terms[[i]]$n_levels
+    idx <- col_offset + seq_len(re.q[i])
+    level_names <- paste0(terms[[i]]$name, "_", make.names(terms[[i]]$levels, unique = TRUE))
+    z_names[idx] <- if(identical(terms[[i]]$cov_model, "unstructured"))
+      paste0(rep(level_names, each = re_ncoef[i]), "_",
+             rep(make.names(terms[[i]]$coefficient, unique = TRUE), times = re_nlevels[i])) else level_names
+    z_names[idx] <- make.unique(z_names[idx])
+    col_offset <- col_offset + re.q[i]
   }
   colnames(Z) <- z_names
 
   list(
     Z = Z,
     re_names = vapply(terms, `[[`, character(1), "name"),
-    re_nlevels = as.integer(re.q),
-    re_ncoef = rep.int(1L, length(terms)),
+    re_nlevels = as.integer(re_nlevels),
+    re_ncoef = re_ncoef,
     re.q = as.integer(re.q),
     re_block_id = rep.int(seq_along(terms), re.q),
     terms = terms

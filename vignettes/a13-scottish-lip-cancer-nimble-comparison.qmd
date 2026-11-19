@@ -509,7 +509,7 @@ The intercepts are broadly comparable because they are global log-risk terms. Th
 
 The table below describes the computational scale of this example; the timing scopes differ across implementations. NIMBLE's elapsed time surrounds the high-level `nimbleMCMC()` call, including model compilation and all chains. For stLMM, backend time sums the compiled calls across chains, including initialization, calibration warmup, and result assembly but excluding R-side setup. A separate stLMM column reports only the post-warmup sampling loops, including iterations later discarded as burn-in. No sampling-only NIMBLE timer is collected here, so that entry is left missing. These columns do not establish a cross-package sampling-speed ranking.
 
-The phase timings require the updated GitHub build of stLMM 0.0.5, identified by `Config/stLMM/Timing: phases-v1` in DESCRIPTION. Earlier tables used compiled-call durations under the name `sampler_total`; obtaining the sampling column requires fresh fits.
+The phase timings are available in stLMM 0.0.6 and are identified by `Config/stLMM/Timing: phases-v1` in DESCRIPTION. Earlier tables used compiled-call durations under the name `sampler_total`; fits without phase timing must be refitted to obtain the sampling column.
 ```{r runtime-summary}
 elapsed_seconds <- function(x) {
   if (is.null(x) || !"elapsed" %in% names(x))

@@ -1,6 +1,6 @@
 ---
 title: "Negative-binomial count models with stLMM"
-subtitle: "Fixed-size NB-PG likelihoods with areal CAR effects"
+subtitle: "Fixed and estimated size with areal CAR effects"
 author: "Andrew O. Finley"
 format:
   html:
@@ -36,9 +36,9 @@ trace_parameters <- c("(Intercept)", "x", "car_1_sigma_sq", "car_1_rho")
 
 ## Overview
 
-This vignette introduces count models in `stLMM` using `family = "negative_binomial"`. The example uses the bundled `stunitco` county polygon layer, extracts Washington counties, builds a county adjacency graph, simulates areal counts with a CAR latent effect and a known exposure offset, and fits fixed-size negative-binomial models using Pólya-Gamma updates. The fits use three chains so the trace plots can be inspected directly.
+This vignette introduces count models in `stLMM` using `family = "negative_binomial"`. The examples use the bundled `stunitco` county polygon layer, extract Washington counties, build a county adjacency graph, and simulate areal counts with a CAR latent effect and a known exposure offset. We fit negative-binomial models with fixed or estimated size using Pólya-Gamma updates. The fits use three chains so the trace plots can be inspected directly.
 
-There are two simulation sections. The first generates counts from a negative-binomial model with known size and fits the same likelihood. The second generates Poisson counts and fits a large-size negative-binomial model to show how the fixed-size NB likelihood can approximate a Poisson log-mean model. The examples avoid extremely sparse counts, because very sparse count data provide little information about a latent areal surface.
+The first example generates counts from a negative-binomial model with known size and fits the same likelihood. The second generates Poisson counts and fits a large-size negative-binomial model to approximate a Poisson log-mean model. The final example uses repeated counts within counties to estimate size jointly with the CAR effect. The examples avoid extremely sparse counts, because very sparse count data provide little information about a latent areal surface.
 
 ## Count model
 
@@ -52,7 +52,7 @@ E(y_i) = \mu_i,
 \operatorname{var}(y_i) = \mu_i + \frac{\mu_i^2}{r},
 $$
 
-where $r$ is the fixed `size` argument. The log mean is modeled as
+where $r>0$ is the size parameter. Supply `size` to fix it, or omit `size` and supply `priors$size` to estimate it. The log mean is modeled as
 
 $$
 \eta_i = \log(\mu_i) = o_i + \beta_0 + x_i\beta_1 + w_i.
@@ -80,7 +80,7 @@ $$
 
 This is the same Pólya-Gamma identity used for binomial logistic regression, applied to the negative-binomial logit-probability representation [@PolsonScottWindle2013; @WindleCarvalhoScottSun2013]. The package uses this conditionally Gaussian form to reuse the sparse collapsed sampler used by the Gaussian and binomial models.
 
-The `size` parameter is fixed in this implementation. A larger `size` reduces overdispersion and moves the negative-binomial distribution toward a Poisson distribution. Extremely large `size` values are not always better computationally because the Pólya-Gamma shape is $y_i + r$.
+The first two examples fix `size`; the final example estimates a shared size under an explicit Gamma prior, as described in [Estimating size](#estimating-size). A larger `size` reduces overdispersion and moves the negative-binomial distribution toward a Poisson distribution. Extremely large `size` values are not always better computationally because the Pólya-Gamma shape is $y_i + r$.
 
 ## County graph
 
@@ -230,9 +230,9 @@ plot(
 
 ## Recover areal effects
 
-As with Gaussian CAR models, the structured CAR effect is integrated out during parameter updates. For Pólya-Gamma process models, `stLMM()` saves the in-chain process draws by default as `save_process = list(start = 1, thin = 1)` because those draws are already needed to refresh the augmentation variables. Calling `recover()` selects the retained county-effect draws requested by `sub_sample`; it does not run a separate post-fit Pólya-Gamma reconstruction. Use `save_process = list(start = ..., thin = ...)` to reduce memory use for larger process supports.
+As with Gaussian CAR models, the structured CAR effect is integrated out during the Gaussian coefficient and covariance updates. For Pólya-Gamma process models, `stLMM()` saves the in-chain process draws by default as `save_process = list(start = 1, thin = 1)` because those draws are already needed to refresh the augmentation variables. Calling `recover()` selects the retained county-effect draws requested by `sub_sample`; it does not run a separate post-fit Pólya-Gamma reconstruction. Use `save_process = list(start = ..., thin = ...)` to reduce memory use for larger process supports.
 
-The intercept and the average level of a realized spatial effect can trade off, so the diagnostic below compares the areal intercept $\beta_0 + w_i$ rather than $w_i$ alone. The full log mean $\eta_i = \beta_0 + x_i\beta_1 + w_i$ is often the more stable prediction-scale diagnostic, but $\beta_0 + w_i$ is useful for seeing whether the structured surface is being recovered.
+The intercept and the average level of a realized spatial effect can trade off, so the diagnostic below compares the areal intercept $\beta_0 + w_i$ rather than $w_i$ alone. The full log mean $\eta_i = o_i + \beta_0 + x_i\beta_1 + w_i$ is often the more stable prediction-scale diagnostic, but $\beta_0 + w_i$ is useful for seeing whether the structured surface is being recovered. `summary(type = "combined")` combines fixed and IID coefficients; the structured sum here is constructed explicitly from aligned draws.
 
 ```{r recover-nb}
 rec_nb <- recover(fit_nb, sub_sample = list(start = 501, thin = 5))
@@ -435,14 +435,97 @@ ggplot(pois_recovery, aes(truth, estimate)) +
   )
 ```
 
-The large-size fit uses the same package machinery as the negative-binomial example. In this small simulation it should recover the log mean surface reasonably well, but the approximation is still an NB model. In applications where a Poisson likelihood is the scientific target, a native Poisson implementation would be the cleaner model.
+The large-size fit uses the same package machinery as the negative-binomial example. It approximates the Poisson log mean surface while retaining the NB variance $\mu_i + \mu_i^2/r$. Check whether the extra variance term is small on the mean-count scale relevant to the application.
+
+## Estimating size
+
+To estimate one shared negative-binomial size, omit `size` and supply an explicit Gamma prior using `priors = list(size = gamma_dist(shape, rate))`. Optional `starting$size` and `tuning$size` control the starting value and initial log-size proposal standard deviation. Size has a separate scalar adaptive Metropolis block that uses the package's existing warmup and adaptation controls. Its draws are included in summaries and sample extraction; acceptance and warmup histories are in `fit$adaptive_metropolis$size` for each chain.
+
+There is no automatic size prior. For example, `gamma_dist(1, 0.01)` has mean 100 and a central 95% interval of about 2.5–369, so it is not a noninformative choice. Estimation with IID or structured terms issues a warning because size and random-effect variances can trade off. Examine diagnostics and prior sensitivity, particularly with little replication. Extremely small sizes can also underflow in the underlying Pólya–Gamma generator; the sampler stops with the failing shape and tilt.
+
+### Replicated counts within counties
+
+We simulate six conditionally independent counts per county using the same county means and CAR realization as above. The repeated counts help separate observation-level dispersion from persistent county variation. Counts for the four holdout counties remain missing. The size prior below has shape 2, rate 0.2, and mean 10; it is an illustrative proper prior that should be reconsidered for another application.
+
+```{r simulate-estimated-size}
+set.seed(114)
+dat_size <- dat_nb[rep(seq_len(nrow(dat_nb)), each = 6),
+                   c("area", "x", "log_exposure", "mu_true")]
+rownames(dat_size) <- NULL
+dat_size$y <- rnbinom(nrow(dat_size), size = size_nb, mu = dat_size$mu_true)
+dat_size$y[dat_size$area %in% dat_nb$area[holdout_nb]] <- NA
+```
+
+```{r fit-estimated-size}
+#| warning: true
+fit_size <- stLMM(
+  y ~ x + offset(log_exposure) + car(area, graph = g),
+  data = dat_size,
+  family = "negative_binomial",
+  priors = list(
+    beta = normal(mean = 0, sd = 3),
+    size = gamma_dist(shape = 2, rate = 0.2),
+    car_1 = list(sigma_sq = half_t(df = 3, scale = 1),
+                 rho = uniform(0.05, 0.95))
+  ),
+  starting = list(size = c(3, 12, 30),
+                  car_1 = list(sigma_sq = 1, rho = 0.8)),
+  tuning = list(size = 0.25, car_1 = list(sigma_sq = 0.08, rho = 0.06)),
+  n_samples = 2500, chains = 3,
+  chain_control = list(seed = 114), verbose = FALSE
+)
+```
+
+The rank diagnostics require the optional `posterior` package and report rank-normalized split/folded R-hat, bulk ESS, and tail ESS [@Vehtari2021Rhat]. Check size and the spatial covariance parameters together; a well-mixed size chain does not establish convergence of every component.
+
+```{r estimated-size-summary}
+summary(fit_size, burn = 500,
+        parameters = c("size", "car_1_sigma_sq", "car_1_rho"),
+        diagnostic_method = "rank")
+
+size_draws <- as_samples(fit_size, burn = 500)$size
+knitr::kable(data.frame(
+  truth = size_nb, mean = mean(size_draws),
+  lower = unname(quantile(size_draws, 0.025)),
+  upper = unname(quantile(size_draws, 0.975))
+), digits = 3, caption = "Size posterior mean and central 95% credible interval")
+```
+
+```{r estimated-size-traces, fig.width=8, fig.height=5}
+#| code-fold: true
+#| code-summary: "Show size and covariance traces"
+plot(fit_size, parameters = c("size", "car_1_sigma_sq", "car_1_rho"),
+     burnin = 500, n_col = 2, chain_colors = chain_colors)
+```
+
+Each chain stores size acceptance and warmup diagnostics in `adaptive_metropolis$size`. The following reports retained acceptance separately for each chain.
+
+```{r estimated-size-acceptance}
+knitr::kable(data.frame(
+  chain = seq_along(fit_size$chains),
+  acceptance = vapply(fit_size$chains, function(chain)
+    chain$adaptive_metropolis$size$acceptance, numeric(1))
+), digits = 3)
+```
+
+### Prediction with estimated size
+
+Prediction data require predictors and group labels, without a response column. Mean counts remain $\exp(\eta_i)$. With `y_samples = TRUE`, each predictive count uses the size draw from the same original iteration as its regression and process draws. The same alignment is used by `log_lik()`, including after thinning or `recover()`.
+
+```{r predict-estimated-size}
+pred_size <- predict(
+  fit_size, newdata = holdout_nb_new, y_samples = TRUE,
+  sub_sample = list(start = 501, thin = 5)
+)
+summary(pred_size)
+```
 
 ## Practical guidance
 
-The fixed-size negative-binomial family is useful when counts are overdispersed relative to Poisson and a fixed size is scientifically defensible or can be sensitivity-tested. A simple workflow is to fit a small grid of plausible sizes and compare fixed effects, fitted means, spatial variance, and recovered areal intercepts.
+Fix size when it is scientifically justified or when comparing a grid of plausible values. Estimate it under an explicit Gamma prior when dispersion is part of the inference. Compare fixed effects, fitted means, spatial variance, and recovered areal intercepts across reasonable prior or fixed-size choices.
 
 The `size` parameter also interacts with random and structured effects. Smaller `size` gives extra observation-level overdispersion, while spatial random effects explain persistent area-level variation. Because these components can trade off, report sensitivity to `size` when the data do not strongly determine the distinction.
 
 Very large `size` values approximate Poisson counts, but they are not automatically better. The Pólya-Gamma draw has shape $y_i + r$, so large `size` can increase computational cost or change sampler behavior. Use a large-size NB fit as an approximation check, not as a blanket recommendation.
 
-For negative-binomial models, `fitted()` and `predict()` return mean counts on the response scale by default. Use `scale = "link"` for the log mean. If `y_samples = TRUE`, prediction simulates negative-binomial count outcomes using the fixed `size`.
+For negative-binomial models, `fitted()` and `predict()` return mean counts on the response scale by default. Use `scale = "link"` for the log mean. If `y_samples = TRUE`, prediction simulates negative-binomial count outcomes using the fixed `size` or the matching posterior size draw when estimated.

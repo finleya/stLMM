@@ -44,3 +44,7 @@ dev/modeling_and_software_details/stLMM.pdf
 .DS_Store
 __MACOSX/
 cache/
+
+# Local development notes, validation scripts/results, and experiments.
+# Existing tracked technical-reference sources remain versioned.
+/dev/

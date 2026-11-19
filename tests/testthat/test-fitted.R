@@ -54,7 +54,7 @@ test_that("fitted.stLMM includes recovered process effects with draw alignment",
     time = rep(seq_len(3), each = 2)
   )
 
-  fit <- stLMM(
+  expect_warning(fit <- stLMM(
     y ~ 0 + ar1(time),
     data = dat,
     starting = list(tau_sq = 1, ar1_1 = c(sigma_sq = 1, phi = 0.4)),
@@ -65,7 +65,8 @@ test_that("fitted.stLMM includes recovered process effects with draw alignment",
     ),
     n_samples = 8,
     verbose = FALSE
-  )
+  ), "duplicated time values detected in ar1(time); fitting latent process on 3 unique time points (from 6 observations)",
+  fixed = TRUE)
 
   rec <- recover(fit, sub_sample = list(start = 2, thin = 2))
   mu <- fitted(rec, summary = FALSE)
@@ -214,7 +215,7 @@ test_that("recovered AR1 effects and fitted values track simulated process data"
   y <- w_true[time] + rnorm(length(time), sd = sqrt(tau_sq))
   dat <- data.frame(y = y, time = time)
 
-  fit <- stLMM(
+  expect_warning(fit <- stLMM(
     y ~ 0 + ar1(time),
     data = dat,
     starting = list(tau_sq = tau_sq, ar1_1 = c(sigma_sq = sigma_sq, phi = phi)),
@@ -225,7 +226,8 @@ test_that("recovered AR1 effects and fitted values track simulated process data"
     ),
     n_samples = 1500,
     verbose = FALSE
-  )
+  ), "duplicated time values detected in ar1(time); fitting latent process on 8 unique time points (from 40 observations)",
+  fixed = TRUE)
 
   rec <- recover(fit, sub_sample = list(start = 501, thin = 2))
   w_hat <- colMeans(rec$w_samples$ar1_1)
@@ -253,7 +255,7 @@ test_that("fitted.stLMM applies SVC scaling and recovers simulated SVC process v
   y <- beta_true + x * w_true[time] + rnorm(length(time), sd = sqrt(tau_sq))
   dat <- data.frame(y = y, x = x, time = time)
 
-  fit <- stLMM(
+  expect_warning(fit <- stLMM(
     y ~ 1 + x:ar1(time),
     data = dat,
     starting = list(tau_sq = tau_sq, ar1_1 = c(sigma_sq = sigma_sq, phi = phi)),
@@ -264,7 +266,8 @@ test_that("fitted.stLMM applies SVC scaling and recovers simulated SVC process v
     ),
     n_samples = 1800,
     verbose = FALSE
-  )
+  ), "duplicated time values detected in ar1(time); fitting latent process on 7 unique time points (from 42 observations)",
+  fixed = TRUE)
 
   rec <- recover(fit, sub_sample = list(start = 601, thin = 2))
   mu <- fitted(rec, summary = FALSE)

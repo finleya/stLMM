@@ -41,6 +41,29 @@ ig <- function(shape, scale){
   )
 }
 
+validate_iid_covariance_matrix <- function(x, k, where, coefficients = NULL){
+  if(!is.matrix(x) || !is.numeric(x) || !identical(dim(x), c(k, k)) ||
+     any(!is.finite(x)) || !isSymmetric(unname(x), tol = 1e-12))
+    stop("error: ", where, " must be a finite symmetric ", k, " by ", k, " matrix")
+  if(!is.null(coefficients) && !is.null(dimnames(x)) &&
+     (!identical(rownames(x), coefficients) || !identical(colnames(x), coefficients)))
+    stop("error: ", where, " dimnames must match the iid coefficient order")
+  if(inherits(try(chol(x), silent = TRUE), "try-error"))
+    stop("error: ", where, " must be positive definite")
+  storage.mode(x) <- "double"
+  x
+}
+
+iw <- function(df, scale){
+  k <- nrow(scale)
+  if(is.null(k) || k < 1L)
+    stop("error: iw() scale must be a nonempty symmetric positive definite matrix")
+  scale <- validate_iid_covariance_matrix(scale, k, "iw() scale")
+  if(!is.numeric(df) || length(df) != 1L || !is.finite(df) || df <= k - 1)
+    stop("error: iw() df must be finite and greater than the matrix dimension minus one")
+  make_stLMM_prior("iw", list(df = as.double(df), scale = scale))
+}
+
 uniform <- function(lower, upper){
   make_stLMM_prior(
     "uniform",

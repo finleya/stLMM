@@ -233,10 +233,21 @@ summary.stLMM <- function(object,
                          probs = c(0.025, 0.5, 0.975),
                          burn = 0L,
                          parameters = NULL,
+                         type = c("parameters", "combined"),
+                         coefficients = NULL,
+                         terms = NULL,
+                         diagnostics = FALSE,
+                         diagnostic_method = c("coda", "rank"),
                          ...){
 
   if(!is.numeric(probs) || anyNA(probs) || any(probs <= 0 | probs >= 1))
     stop("error: probs must contain values in (0,1)")
+  type <- match.arg(type)
+  diagnostic_method <- match.arg(diagnostic_method)
+  if(type == "combined")
+    return(summary_iid_combined(object, probs, burn, coefficients, terms,
+                                diagnostics, diagnostic_method, parameters))
+  validate_combined_only_args(coefficients, terms)
   burn <- validate_burn(burn, object$backend$n_samples)
   samples <- drop_burn_samples(object$samples, burn = burn)
   samples <- filter_sample_blocks(samples, parameters = parameters)
@@ -258,6 +269,11 @@ summary.stLMM <- function(object,
     term_description = object$term_description
   )
 
+  if(isTRUE(diagnostics)){
+    out$diagnostics <- summary_matrix_diagnostics(
+      as_mcmc(object, burn = burn), diagnostic_method, parameters)
+    out$diagnostic_method <- diagnostic_method
+  }
   class(out) <- "summary_stLMM"
   out
 }
@@ -298,6 +314,14 @@ print.summary_stLMM <- function(x, digits = max(3L, getOption("digits") - 3L), .
     print(round(x$parameters[[nm]], digits))
   }
 
+  if(!is.null(x$diagnostics)){
+    cat("\nChain diagnostics (", x$diagnostic_method, "):\n", sep = "")
+    diag <- x$diagnostics
+    num_cols <- vapply(diag, is.numeric, logical(1))
+    diag[num_cols] <- lapply(diag[num_cols], round, digits = digits)
+    print(diag)
+  }
+
   invisible(x)
 }
 
@@ -307,10 +331,20 @@ summary.stLMM_chains <- function(object,
                                  include_w = FALSE,
                                  burn = 0L,
                                  parameters = NULL,
+                                 type = c("parameters", "combined"),
+                                 coefficients = NULL,
+                                 terms = NULL,
+                                 diagnostic_method = c("coda", "rank"),
                                  ...){
 
   if(!is.numeric(probs) || anyNA(probs) || any(probs <= 0 | probs >= 1))
     stop("error: probs must contain values in (0,1)")
+  type <- match.arg(type)
+  diagnostic_method <- match.arg(diagnostic_method)
+  if(type == "combined")
+    return(summary_iid_combined(object, probs, burn, coefficients, terms,
+                                diagnostics, diagnostic_method, parameters, include_w))
+  validate_combined_only_args(coefficients, terms)
   burn <- validate_burn(burn, object$chains[[1L]]$backend$n_samples)
 
   chains <- as_mcmc(object, include_w = include_w, burn = burn)
@@ -321,7 +355,9 @@ summary.stLMM_chains <- function(object,
   }
 
   diagnostics_out <- if(isTRUE(diagnostics)){
-    d <- chain_diagnostics(object, include_w = include_w, burn = burn)
+    d <- if(diagnostic_method == "rank")
+      summary_matrix_diagnostics(chains, diagnostic_method, parameters) else
+      chain_diagnostics(object, include_w = include_w, burn = burn)
     if(!is.null(parameters))
       d <- d[parameters, , drop = FALSE]
     d
@@ -348,6 +384,8 @@ summary.stLMM_chains <- function(object,
     term_description = object$term_description
   )
 
+  if(isTRUE(diagnostics) && diagnostic_method == "rank")
+    out$diagnostic_method <- diagnostic_method
   class(out) <- "summary_stLMM_chains"
   out
 }
@@ -375,7 +413,9 @@ print.summary_stLMM_chains <- function(x, digits = max(3L, getOption("digits") -
   print(round(x$parameters, digits))
 
   if(!is.null(x$diagnostics)){
-    cat("\nChain diagnostics:\n")
+    if(identical(x$diagnostic_method, "rank"))
+      cat("\nChain diagnostics (rank-normalized split/folded R-hat, bulk/tail ESS):\n") else
+      cat("\nChain diagnostics:\n")
     diag <- x$diagnostics
     num_cols <- vapply(diag, is.numeric, logical(1))
     diag[num_cols] <- lapply(diag[num_cols], round, digits = digits)
@@ -597,11 +637,26 @@ summary.stLMM_recovery <- function(object,
                                   parameters = NULL,
                                   include_w = FALSE,
                                   max_w = 20L,
+                                  type = c("parameters", "combined"),
+                                  coefficients = NULL,
+                                  terms = NULL,
+                                  diagnostics = FALSE,
+                                  diagnostic_method = c("coda", "rank"),
                                   ...){
 
+  type <- match.arg(type)
+  diagnostic_method <- match.arg(diagnostic_method)
+  if(type == "combined"){
+    if(isTRUE(include_w))
+      stop('error: include_w does not select contributions to combined coefficients; use terms')
+    return(summary.stLMM(object, probs = probs, burn = burn, parameters = parameters,
+                        type = type, coefficients = coefficients, terms = terms,
+                        diagnostics = diagnostics, diagnostic_method = diagnostic_method))
+  }
   burn <- validate_burn(burn, object$backend$n_samples)
   out <- summary.stLMM(object, probs = probs, burn = burn,
-                       parameters = parameters)
+                       parameters = parameters, coefficients = coefficients, terms = terms,
+                       diagnostics = diagnostics, diagnostic_method = diagnostic_method)
   out$recover_iter <- object$recover_iter
   out$recovered_terms <- names(object$w_samples)
   out$w_node_order <- vapply(object$w_samples, function(z) attr(z, "node_order") %||% NA_character_, character(1))
@@ -617,6 +672,12 @@ summary.stLMM_recovery <- function(object,
       if(ncol(w_i) > max_w)
         w_i <- w_i[, seq_len(max_w), drop = FALSE]
       out$w[[nm]] <- posterior_summary_table(w_i, probs = probs)
+      if(isTRUE(diagnostics)){
+        d <- summary_matrix_diagnostics(coda::mcmc(w_i), diagnostic_method)
+        d$parameter <- paste0(nm, ":", d$parameter)
+        rownames(d) <- d$parameter
+        out$diagnostics <- rbind(out$diagnostics, d)
+      }
     }
   }
 
@@ -634,7 +695,7 @@ print.summary_stLMM_recovery <- function(x, digits = max(3L, getOption("digits")
   if(length(x$w_node_order))
     cat("  w_samples order: ", paste(names(x$w_node_order), x$w_node_order, sep = "=", collapse = ", "), "\n", sep = "")
 
-  if(!is.null(x$w)){
+  if(!is.null(x[["w"]])){
     for(nm in names(x$w)){
       cat("\nw:", nm, "\n")
       print(round(x$w[[nm]], digits))
@@ -650,6 +711,10 @@ summary.stLMM_recovery_chains <- function(object,
                                          include_w = FALSE,
                                          burn = 0L,
                                          parameters = NULL,
+                                         type = c("parameters", "combined"),
+                                         coefficients = NULL,
+                                         terms = NULL,
+                                         diagnostic_method = c("coda", "rank"),
                                          ...){
 
   out <- summary.stLMM_chains(
@@ -659,8 +724,13 @@ summary.stLMM_recovery_chains <- function(object,
     include_w = include_w,
     burn = burn,
     parameters = parameters,
+    type = match.arg(type),
+    coefficients = coefficients,
+    terms = terms,
+    diagnostic_method = match.arg(diagnostic_method),
     ...
   )
+  if(inherits(out, "summary_stLMM_combined")) return(out)
   out$recover_iter <- lapply(object$chains, `[[`, "recover_iter")
   out$recovered_terms <- if(length(object$chains)) names(object$chains[[1L]]$w_samples) else character(0)
   class(out) <- "summary_stLMM_recovery_chains"

@@ -663,6 +663,7 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   s->hasOffset = 0;
   s->nTrial = NULL;
   s->nbSize = 0.0;
+  s->nbSizeEstimate = 0;
 
   family_r = getListElement(backend_r, "family");
   if(family_r != R_NilValue){
@@ -851,6 +852,35 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
     s->nbSize = as_real_scalar_strict(size_r, "backend$nb_size");
     if(!(s->nbSize > 0.0))
       Rf_error("negative-binomial size must be positive");
+
+    {
+      SEXP control, prior, target;
+      control = getListElement(backend_r, "nb_size_control");
+      if(control != R_NilValue){
+        if(TYPEOF(control) != VECSXP)
+          Rf_error("backend$nb_size_control must be a list");
+        prior = getListElement(control, "prior");
+        target = getListElement(control, "warmup_target");
+        if(TYPEOF(prior) != REALSXP || LENGTH(prior) != 2 ||
+           !R_FINITE(REAL(prior)[0]) || !R_FINITE(REAL(prior)[1]) ||
+           REAL(prior)[0] <= 0.0 || REAL(prior)[1] <= 0.0)
+          Rf_error("backend size prior must contain positive finite Gamma shape and rate");
+        if(TYPEOF(target) != REALSXP || LENGTH(target) != 2 ||
+           !(0.0 < REAL(target)[0] && REAL(target)[0] < REAL(target)[1] && REAL(target)[1] < 1.0))
+          Rf_error("backend size warmup target must satisfy 0 < lower < upper < 1");
+        s->nbSizePrior.family = PRIOR_GAMMA;
+        s->nbSizePrior.p1 = REAL(prior)[0];
+        s->nbSizePrior.p2 = REAL(prior)[1];
+        s->nbSizeTune = as_real_scalar_strict(getListElement(control, "tuning"), "size tuning");
+        s->nbSizeTarget = as_real_scalar_strict(getListElement(control, "target_accept"), "size target_accept");
+        s->nbSizeWarmupLower = REAL(target)[0];
+        s->nbSizeWarmupUpper = REAL(target)[1];
+        if(!(s->nbSizeTune > 0.0 && s->nbSizeTarget > 0.0 && s->nbSizeTarget < 1.0) ||
+           s->warmupNearZero >= s->nbSizeWarmupLower)
+          Rf_error("invalid size tuning or adaptation target");
+        s->nbSizeEstimate = 1;
+      }
+    }
 
     s->yObserved = REAL(y_r);
     s->y = (double*)R_alloc(s->n > 0 ? s->n : 1, sizeof(double));
@@ -1186,7 +1216,9 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   /*
     Random-effects block metadata, starting variances, and IG priors for alpha.
     Each alpha column j belongs to block reBlockID[j], and the prior
-    precision contribution is 1 / sigmaSqRE[reBlockID[j]].
+    scalar prior precision contribution is 1 / sigmaSqRE[reBlockID[j]].
+    Optional iid_covariance metadata below overrides this for vector terms;
+    their scalar entries are unused placeholders for the legacy backend layout.
   */
   s->nRE = 0;
   s->maxBlockSize = 0;
@@ -1280,6 +1312,83 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
       }
 
       s->alphaBlockBuf = (double*)R_alloc(s->maxBlockSize > 0 ? s->maxBlockSize : 1, sizeof(double));
+    }
+  }
+
+  /* Optional coefficient covariance blocks; dimension zero selects scalar IG updates. */
+  s->reCovDim = (int*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(int));
+  s->reOffset = (int*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(int));
+  s->reCovDF = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
+  s->reCovScale = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->reCovariance = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->reCovPrecision = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->nRECovElements = 0;
+  {
+    SEXP blocks, block, dim, df, scale, start, matrices[2], d;
+    int offset, b, k, j, m, col, row, info;
+    char lower;
+    double v, *check;
+
+    blocks = getListElement(backend_r, "iid_covariance");
+    if(blocks != R_NilValue && (TYPEOF(blocks) != VECSXP || LENGTH(blocks) != s->nRE))
+      Rf_error("backend$iid_covariance must have one entry per iid term");
+
+    offset = 0;
+    lower = 'L';
+    for(b = 0; b < s->nRE; b++){
+      s->reCovDim[b] = 0;
+      s->reOffset[b] = offset;
+      block = blocks == R_NilValue ? R_NilValue : VECTOR_ELT(blocks, b);
+      if(block != R_NilValue){
+        dim = getListElement(block, "dim");
+        if(TYPEOF(dim) != INTSXP || LENGTH(dim) != 1 || INTEGER(dim)[0] < 1)
+          Rf_error("backend iid covariance dimension malformed");
+        k = INTEGER(dim)[0];
+        if(s->reBlockSize[b] % k != 0)
+          Rf_error("backend iid covariance dimension does not divide coefficient count");
+        for(j = 0; j < s->reBlockSize[b]; j++)
+          if(s->reBlockID[offset + j] != b)
+            Rf_error("backend covariance coefficients must be contiguous within terms");
+        s->reCovDim[b] = k;
+
+        df = getListElement(block, "df");
+        if(TYPEOF(df) != REALSXP || LENGTH(df) != 1 ||
+           !R_FINITE(REAL(df)[0]) || REAL(df)[0] <= k - 1)
+          Rf_error("backend iid covariance df malformed");
+        s->reCovDF[b] = REAL(df)[0];
+
+        scale = getListElement(block, "scale");
+        start = getListElement(block, "starting");
+        matrices[0] = scale;
+        matrices[1] = start;
+        for(m = 0; m < 2; m++){
+          d = Rf_getAttrib(matrices[m], R_DimSymbol);
+          if(TYPEOF(matrices[m]) != REALSXP || TYPEOF(d) != INTSXP || LENGTH(d) != 2 ||
+             INTEGER(d)[0] != k || INTEGER(d)[1] != k)
+            Rf_error("backend iid covariance scale/starting matrix malformed");
+          for(col = 0; col < k; col++)
+            for(row = 0; row < k; row++){
+              v = REAL(matrices[m])[row + k * col];
+              if(!R_FINITE(v) || std::fabs(v - REAL(matrices[m])[col + k * row]) >
+                 1e-12 * (1 + std::fabs(v)))
+                Rf_error("backend iid covariance matrix must be finite and symmetric");
+            }
+          check = (double*)R_alloc(k * k, sizeof(double));
+          for(j = 0; j < k * k; j++)
+            check[j] = REAL(matrices[m])[j];
+          F77_CALL(dpotrf)(&lower, &k, check, &k, &info FCONE);
+          if(info != 0)
+            Rf_error("backend iid covariance matrix must be positive definite");
+        }
+        s->reCovScale[b] = REAL(scale);
+        s->reCovariance[b] = (double*)R_alloc(k * k, sizeof(double));
+        s->reCovPrecision[b] = (double*)R_alloc(k * k, sizeof(double));
+        for(j = 0; j < k * k; j++)
+          s->reCovariance[b][j] = REAL(start)[j];
+        refresh_iid_covariance_precision(s, b);
+        s->nRECovElements += k * (k + 1) / 2;
+      }
+      offset += s->reBlockSize[b];
     }
   }
 
@@ -1846,5 +1955,18 @@ void init_cov_proposal_state(SamplerState *s)
         p->proposalChol[j + p->dim * k] = 0.0;
   }
 
+  if(s->nbSizeEstimate){
+    CovProposalBlock *b;
+    b = &s->nbSizeProposal;
+    init_cov_proposal_block(p, b, 1, s->metropolisBatchLength, p->maxBatchHistory,
+                            s->nbSizeTarget, 1, s->warmupEnabled,
+                            s->warmupBatchLength, s->warmupMinBatches,
+                            s->warmupMaxBatches, s->nbSizeWarmupLower,
+                            s->nbSizeWarmupUpper, s->warmupNearZero);
+    b->eta[0] = std::log(s->nbSize);
+    b->Sigma0[0] = s->nbSizeTune * s->nbSizeTune;
+    b->proposalCov[0] = b->Sigma0[0];
+    b->proposalChol[0] = s->nbSizeTune;
+  }
   p->initialized = 1;
 }

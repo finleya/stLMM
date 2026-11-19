@@ -216,14 +216,14 @@ stLMM(formula, data = parent.frame(), starting = list(), tuning = NULL,
      n_samples, n_omp_threads = 1,
      nngp_search = c("fast", "brute"),
      verbose = TRUE, n_report = 100, warmup = TRUE,
-     metropolis = list(), cholmod_control = list(), chains = 1L,
-     save_process = NULL, chain_control = list(),
+     metropolis = list(), cholmod_control = list(), save_process = NULL,
+     chains = 1L, chain_control = list(),
      describe_terms = FALSE, ...)
 \end{verbatim}
 
 To simplify model specification, not all prior distributions need to be specified by the user. Reasonable defaults are used for some low-level quantities, such as the fixed-effect prior and default starts. Other priors, especially structured-process covariance priors, require explicit user consideration and are therefore required.
 
-The \texttt{family} argument currently supports \texttt{"gaussian"}, \texttt{"binomial"}, \texttt{"probit"}, and \texttt{"negative\_binomial"}. For \texttt{family = "binomial"}, the response is the number of successes and \texttt{trials} supplies the number of trials. If \texttt{trials} is omitted, each row is treated as one Bernoulli trial. Binomial models use a logit link, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "probit"}, the response is binary 0/1 and the link is the standard-normal cdf. Probit models use Albert-Chib latent-normal augmentation, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "negative\_binomial"}, the response is a nonnegative integer count and \texttt{size} supplies a fixed positive negative-binomial size parameter. Negative-binomial models use a log-mean link and also omit Gaussian residual variance terms.
+The \texttt{family} argument currently supports \texttt{"gaussian"}, \texttt{"binomial"}, \texttt{"probit"}, and \texttt{"negative\_binomial"}. For \texttt{family = "binomial"}, the response is the number of successes and \texttt{trials} supplies the number of trials. If \texttt{trials} is omitted, each row is treated as one Bernoulli trial. Binomial models use a logit link, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "probit"}, the response is binary 0/1 and the link is the standard-normal cdf. Probit models use Albert-Chib latent-normal augmentation, do not use \texttt{resid()} residual variance terms, and do not have a \texttt{tau\_sq} parameter. For \texttt{family = "negative\_binomial"}, the response is a nonnegative integer count and \texttt{size} supplies a fixed positive negative-binomial size parameter. Alternatively, omitting \texttt{size} and supplying \texttt{priors\$size = gamma\_dist(shape, rate)} estimates one shared size. Negative-binomial models use a log-mean link and also omit Gaussian residual variance terms.
 
 Standard R formula offsets are supported through \texttt{offset()}. The offset is a known additive component of the linear predictor. For count models with an exposure or expected-count scaling $E_i$, users can write \texttt{offset(log(E))}. Section~\ref{sec:negative-binomial} gives the negative-binomial model and computational rationale.
 
@@ -233,13 +233,13 @@ Standard R formula offsets are supported through \texttt{offset()}. The offset i
 
 Priors are supplied through explicit prior constructors. Fixed effects may use \texttt{flat()} or \texttt{normal(mean, sd)}. The Gaussian likelihood defaults to \texttt{flat()} for $\bbeta$, while augmented non-Gaussian likelihoods default to \texttt{normal(mean = 0, sd = 10)}. The \texttt{normal()} constructor defines independent normal priors and allows scalar or coefficient-specific mean and standard-deviation vectors. The \texttt{flat()} and \texttt{normal()} constructors are accepted only for \texttt{priors\$beta}.
 
-The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, except iid grouped random-effect variances, which are currently Gibbs-updated and therefore use \texttt{ig()}. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
+The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, except scalar iid grouped random-effect variances, which are currently Gibbs-updated and therefore use \texttt{ig()}. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
 
 Parameter names are local to the model term. This follows the software API and keeps user-supplied \texttt{starting}, \texttt{tuning}, and \texttt{priors} lists readable, but it means the same symbol can have different meanings in different terms. For example, \texttt{phi} is a spatial decay parameter in an exponential GP or NNGP term, but it is an ordered-support one-step correlation in an \texttt{ar1()} term.
 
 Process and sampled residual variance parameters are fixed via \texttt{fixed(value)} in the starting list. For example, \texttt{starting = list(nngp\_1 = list(phi = fixed(6)))} fixes the \texttt{phi} parameter in the first NNGP term. Fixed parameters are skipped in the Metropolis update so they do not add computing overhead, but they still contribute to the likelihood.
 
-\subsection{Multiple chains and coda diagnostics}
+\subsection{Multiple chains and posterior diagnostics}
 \index{chains}
 \index{coda@\texttt{coda}}
 
@@ -247,9 +247,37 @@ The \texttt{chains} argument runs multiple MCMC chains sequentially from the sam
 
 If the user omits starting values, multi-chain fitting uses the same default centers as single-chain fitting but disperses positive variance starts on the log scale and bounded covariance starts within their prior bounds. The \texttt{chain\_control} list supports \texttt{seed}, which sets the R random seed before chain starts are generated, and \texttt{dispersion}, which controls log-scale jitter for omitted positive starts.
 
-If the user supplies a starting value, that value is treated as authoritative. Scalar starts are recycled to every chain. Vectors with length \texttt{chains} define chain-specific starts.
+If the user supplies a starting value, that value is treated as authoritative. Scalar parameter starts are recycled to every chain. Vectors with length \texttt{chains} in scalar parameter entries define chain-specific starts. For independent iid coefficient formulas, names under \texttt{sigma\_sq} identify coefficients; a coefficient-named list can supply a scalar or chain-specific vector for each coefficient. Unstructured iid terms use one supplied starting covariance matrix for every chain.
 
 The package provides \texttt{as\_mcmc()} as a bridge to \texttt{coda}. Single-chain objects convert to \texttt{coda::mcmc}; multi-chain objects convert to \texttt{coda::mcmc.list}. The \texttt{summary()} method for multi-chain fits reports pooled posterior summaries and coda-style chain diagnostics including point-estimate $\hat R$ and effective sample size where available.
+
+Setting \texttt{diagnostic\_method = "rank"} in an ordinary or combined summary selects the \texttt{posterior} package implementation \citep{posteriorPackage} of the diagnostics developed by \citet{Vehtari2021Rhat}. The reported \texttt{rhat} is the maximum of rank-normalized split and folded-split $\hat R$; folding helps detect differences in scale between chains. The \texttt{ess\_bulk} column measures efficiency for rank-normalized values using split chains. The \texttt{ess\_tail} column is the minimum of the effective sample sizes for the 5th and 95th percentiles. It is not an ESS specifically for the quantile probabilities supplied to \texttt{summary()}. These diagnostics apply to Gibbs and Metropolis samples as well as to derived scalar quantities. The optional dependency is required only when the rank method is requested. The default diagnostic method is \texttt{"coda"}.
+
+Diagnostics retain chain identity. The rank method returns unavailable values for nonfinite draws, a constant chain, or fewer than four retained draws per chain. The summary reports $\hat R$ as unavailable for a single chain, while ESS can still be requested with \texttt{diagnostics = TRUE}. The output identifies the diagnostic method. An ESS is an estimate of sampling efficiency, and neither a favorable ESS nor $\hat R$ proves convergence to the full posterior.
+
+\subsubsection{Combined iid coefficient summaries}
+\index{combined coefficients}
+The opt-in \texttt{type = "combined"} summary constructs a coefficient for a represented group combination before computing posterior summaries and diagnostics. For coefficient $k$, selected iid formula terms $\mathcal T$, retained iteration $m$, and chain $c$, the quantity is
+\[
+\widetilde\beta^{(m,c)}_{k,g}
+ = \beta^{(m,c)}_k + \sum_{t\in\mathcal T_k}
+       \alpha^{(m,c)}_{t,g_t,k},
+\]
+where $\mathcal T_k$ contains selected terms with coefficient $k$, $g_t$ identifies the corresponding group (including its parent for a \texttt{by} term), and the fixed contribution is zero when no matching fixed coefficient exists. The result is on the linear-predictor coefficient scale. A slope coefficient is not multiplied by observed covariate values; offsets and other coefficients are excluded. For example, a stand--plot intercept is $\beta_0+u_{stand}+v_{stand,plot}$, while a stand-only intercept is $\beta_0+u_{stand}$.
+
+If the same covariate also has a structured coefficient process $w_k(s)$, the iid sum excludes $w_k(s)$. Its intervals and diagnostics describe the selected sum rather than the full local coefficient $\widetilde\beta_{k,g}+w_k(s)$. The likelihood can identify the total contribution more strongly than its separate iid and structured parts. The \texttt{fitted()} and \texttt{predict()} methods assemble the complete linear predictor and apply the requested response transformation.
+
+\begin{verbatim}
+summary(fit, type = "combined", coefficients = "(Intercept)",
+        terms = c("iid_1", "iid_2"), burn = 1000,
+        diagnostic_method = "rank")
+\end{verbatim}
+
+The \texttt{terms} argument is required. Formula identifiers such as \texttt{iid\_2} select all parent blocks of a \texttt{by} term. The explicit convenience \texttt{terms = "all"} is supported for iid-only models. Combined summaries support scalar, correlated, crossed, and parent-specific iid contributions. In a model that also contains structured effects, select the iid terms explicitly. After recovery, ordinary parameter summaries with \texttt{include\_w = TRUE} report structured process coefficients separately. Without \texttt{coefficients}, all coefficient names appearing in the selected iid terms are summarized. Each output row records its actual contributing terms and whether a fixed coefficient was included.
+
+Rows correspond to represented group combinations in order of first appearance in the fitted design. There is no averaging over observations, no Cartesian expansion of unrepresented combinations, and no summary for unused levels without fitted rows. Group and parent labels remain separate. The returned \texttt{quantities} table supplies these labels, an exact coefficient-draw expression, and a representative fitted-data row. The \texttt{iteration}, \texttt{chain\_ids}, and count fields describe the retained draws. Iid combinations on recovery objects use all original fixed and iid draws after \texttt{burn}, irrespective of any thinner structured recovery subset.
+
+The computation uses the sparse design's stored group membership, including explicit zero entries for zero-valued slope covariates. It neither divides by covariates nor constructs a dense observation-by-coefficient matrix. Only one scalar quantity's iteration-by-chain draw matrix is materialized at a time; no fitting, latent recovery, or new random-number generation occurs. Diagnostics are computed on each combined draw matrix, never by combining component diagnostics. Consequently, good mixing for $\beta_0+u_g$ does not imply good mixing for $\beta_0$ and $u_g$ separately.
 
 \subsection{Formula model terms}
 
@@ -295,9 +323,55 @@ Fixed effects use ordinary R formula syntax and enter the model through $\bX\bbe
 \index{iid@\texttt{iid()}}
 \index{alpha@$\alpha$}
 
-\texttt{iid(group)} adds an iid Gaussian random intercept over observed group levels. \texttt{x:iid(group)} adds an iid Gaussian random slope for numeric covariate \texttt{x}. These terms use the explicit $\bZ\balpha$ rather than the collapsed structured-process.
+\texttt{iid(group)} adds an iid Gaussian random intercept over retained group levels. Without \texttt{by}, unused factor levels are retained; character or numeric groups use the levels represented in the data. \texttt{x:iid(group)} adds an iid Gaussian random slope for numeric covariate \texttt{x}. These terms use the explicit $\bZ\balpha$ rather than the collapsed structured-process.
 
-Each iid term receives its own variance parameter. For example, \texttt{iid(group) + x:iid(group)} produces two iid random-effect variance controls, typically named \texttt{iid\_1} and \texttt{iid\_2}. The iid random effects are sampled directly during fitting and are returned in \texttt{alpha\_samples}; no \texttt{recover()} call is needed for these coefficients.
+Each scalar iid term receives its own variance parameter. For example, \texttt{iid(group) + x:iid(group)} produces two iid random-effect variance controls, typically named \texttt{iid\_1} and \texttt{iid\_2}. The iid random effects are sampled directly during fitting and are returned in \texttt{alpha\_samples}; no \texttt{recover()} call is needed for these coefficients.
+
+Correlated coefficient vectors are specified with
+\begin{verbatim}
+iid(group, coefficients = ~ 1 + x1 + x2, cov_model = "unstructured")
+priors = list(iid_1 = list(covariance = iw(df = nu, scale = Psi)))
+\end{verbatim}
+The second argument may be positional. Coefficient formulas accept additive numeric variable names and optional intercepts; \texttt{\textasciitilde{} 0 + x} removes the intercept. Data are used as supplied: centering and scaling are the user's responsibility. All iid slope forms accept finite numeric vectors or one-column numeric matrices, treating the matrix values as one covariate. Multi-column matrices are rejected during fitting and prediction. Construct any transformed or interaction covariates as numeric columns in the input data before naming them in a coefficient formula.
+
+For term $b$ with $m_b$ groups and $k_b$ coefficients per group,
+\begin{equation}
+ \balpha_{bg}\mid\Sigma_b \stackrel{\mathrm{iid}}{\sim} N_{k_b}(0,\Sigma_b),
+ \qquad g=1,\ldots,m_b.
+\end{equation}
+Different terms have independent priors and separate covariance parameters. Multiple terms may be crossed or nested. Standard nesting uses globally unique child identifiers, for example \texttt{interaction(region, plot, drop = TRUE)}, with separate parent and child terms; the child covariance is shared across parents.
+
+\paragraph{Independent coefficient vectors.}
+The specification
+\begin{verbatim}
+iid(group, ~ 1 + x, cov_model = "independent")
+priors = list(iid_1 = list(sigma_sq = list(
+  "(Intercept)" = ig(3, 1), x = ig(4, 0.5)
+)))
+\end{verbatim}
+sets $\Sigma_b=\operatorname{diag}(\sigma^2_{b1},\ldots,\sigma^2_{bk_b})$, with an independent inverse-gamma prior for each variance. With matching priors it is the same model as separate scalar terms such as \texttt{iid(group) + x:iid(group)}. The coefficient-formula default remains \texttt{cov\_model = "unstructured"}.
+
+A single \texttt{sigma\_sq = ig(a, b)} applies the same hyperparameters independently to every coefficient variance; it does not constrain those variances to equality. A coefficient-named list specifies different priors, with names matched exactly and independently of their order. Starting values under \texttt{starting\$iid\_1\$sigma\_sq} may be a positive scalar or a coefficient-named numeric vector or list. Each variance uses the scalar inverse-gamma Gibbs update described below. Coefficients can be dependent in the posterior through the likelihood even though their population covariance is diagonal.
+
+Independent formulas expand into scalar blocks in coefficient order. Those blocks use the same sparse design construction, coefficient draws, variance updates, and prediction routines as separate scalar iid terms. Parameter names identify the originating formula term and coefficient, for example \texttt{iid\_1[coefficient="x"]\_sigma\_sq}. Combined summaries select the original formula identifier \texttt{iid\_1} and then the requested coefficient names.
+
+\paragraph{Parent-specific iid distributions.}
+The term \texttt{iid(plot, by = stand)} assigns a separate scalar child-effect variance to each stand. Its coefficient-formula counterpart, \texttt{iid(plot, \textasciitilde{} 1 + x, by = stand)}, specifies
+\begin{equation}
+ \balpha_{bhg}\mid\Sigma_{bh}\stackrel{\mathrm{iid}}{\sim}
+ N_{k_b}(0,\Sigma_{bh}),\qquad g=1,\ldots,m_{bh},
+\end{equation}
+within parent $h$, with independent priors on the parent covariance matrices. The same supplied inverse-Wishart hyperparameters are applied independently to every parent; no shared covariance hyperparameters are estimated. Scalar terms analogously use independent copies of the supplied inverse-gamma prior. An additional \texttt{iid(stand)} term supplies a parent intercept if desired. The \texttt{by} term itself has zero-mean child coefficients within every parent.
+
+With \texttt{cov\_model = "independent"}, $\Sigma_{bh}$ is diagonal and each coefficient has a separate variance within each parent. Its supplied IG hyperparameters are reused independently across parents. Expansion is by coefficient first, then parent, matching the scalar-term order. Names identify both, for example \texttt{iid\_1[coefficient="x"][stand="north"]\_sigma\_sq}.
+
+Parent and child labels are stored separately: identical plot labels in two stands identify distinct coefficient vectors. Only parent-child pairs represented in the supplied data enter these blocks, including rows whose responses are missing. Unused factor levels do not introduce extra parents or pairs for a \texttt{by} term. Parent order follows factor levels after unused parents are removed; child order follows the corresponding levels within each parent. Terms without \texttt{by} retain unused grouping-factor levels.
+
+At construction, \texttt{build\_iid\_design()} expands a scalar or unstructured term into one sampler block per parent, with contiguous child-coefficient columns. Independent coefficient formulas first expand into scalar terms as described above. The sparse design contains entries only for observations belonging to the corresponding parent, so a formula term contributes at most $n k_b$ stored entries across all its blocks. The C++ variance and covariance samplers update these blocks independently conditional on their coefficient draws. Controls are keyed by the formula term name; sample columns and term-description entries include parent labels, for example \texttt{iid\_2[stand="north"]\_cov[x,(Intercept)]}. A supplied starting value or covariance is reused for each parent; default multi-chain starts are perturbed independently for each block.
+
+The sparse CSC design $\bZ$ is stacked by sampler block, then group, then coefficient within a block. Each observation contributes its coefficient covariates only to its group's columns. No large Kronecker matrix is constructed. The prior precision for an unstructured coefficient block consists of repeated $\Sigma_b^{-1}$ blocks. Independent coefficient formulas and separate scalar terms use diagonal prior precision with one variance per scalar block.
+
+\texttt{alpha\_samples} holds coefficient draws. Scalar variances, including independent coefficient-formula variances, are stored in \texttt{iid\_sigma\_sq\_samples}. Unstructured covariances are in \texttt{iid\_covariance\_samples}, storing each lower triangle column by column (including diagonals), in term order. Column labels identify the term and both coefficients. The active sample list exposes the same block as \texttt{samples\$iid\_covariance}, so sample extraction and summaries include it.
 
 As with $\bbeta$, the choice not to fold $\balpha$ into $\bw$ is deliberate. Gibbs updates for these terms are inexpensive relative to the downside of adding more nonzero elements to the collapsed precision matrix and additional parameters to the Metropolis update. It is also useful to have $\balpha$ immediately available after fitting.
 
@@ -948,9 +1022,9 @@ The latent-normal variables are refreshed at the start of each MCMC iteration. F
 \index{P{\'o}lya-Gamma}
 \index{count data}
 
-The fixed-size negative-binomial family is intended for count responses while preserving the current collapsed Gaussian computational structure. It is not a direct implementation of the classical Poisson log-link model. An exact Poisson log-link likelihood does not have the same P{\'o}lya-Gamma quadratic augmentation used by the binomial logit likelihood. A negative-binomial model with a logit probability parameterization does have this form \citep{Polson2013,WindleDynamic2013,Zhou2012}.
+The negative-binomial family is intended for count responses while preserving the current collapsed Gaussian computational structure. It is not a direct implementation of the classical Poisson log-link model. An exact Poisson log-link likelihood does not have the same P{\'o}lya-Gamma quadratic augmentation used by the binomial logit likelihood. A negative-binomial model with a logit probability parameterization does have this form \citep{Polson2013,WindleDynamic2013,Zhou2012}.
 
-The current implementation uses a fixed size parameter $r>0$. With mean $\mu_i$,
+The implementation supports a fixed or estimated shared size parameter $r>0$. With mean $\mu_i$,
 \begin{equation}
   y_i \mid \mu_i,r \sim \mathrm{NegBin}(r,\mu_i),
   \qquad
@@ -967,7 +1041,7 @@ where $o_i$ is an optional offset. For count models with known exposure or expec
 \begin{equation}
   \psi_i = \eta_i - \log(r).
 \end{equation}
-Under this parameterization, $\mu_i=r\exp(\psi_i)$ and the likelihood kernel is
+Under this parameterization, $\mu_i=r\exp(\psi_i)$. Conditional on $r$, the likelihood kernel in $\psi_i$ is
 \begin{equation}
   p(y_i\mid \psi_i,r)
     \propto
@@ -992,21 +1066,31 @@ The only differences from the binomial working model are the P{\'o}lya-Gamma sha
 
 This $\log(r)$ adjustment is the main implementation trap when adapting the binomial P{\'o}lya-Gamma update: draw the P{\'o}lya-Gamma variate using the tilt $\psi_i=\eta_i-\log(r)$, not $\eta_i$, and then add $\log(r)$ back in the working response $z_i^\ast$. When a formula offset is present, subtract $o_i$ from $z_i^\ast$ before passing the working response to the collapsed Gaussian machinery.
 
-The initial fixed-$r$ design is deliberate. In spatial and space-time count models, a free negative-binomial dispersion parameter can compete with structured effects and unstructured grouped random effects: extra-Poisson variation can be explained by smaller $r$, by larger process variance, by iid random-effect variance, or by some combination of these. Fixing $r$ avoids adding another weakly identified variance-like component while the count likelihood, fitted values, prediction, and recovery behavior are validated. A large fixed $r$ also provides a Poisson-like model because $\mu_i^2/r$ becomes small and the negative-binomial distribution approaches the Poisson distribution as $r\rightarrow\infty$.
+Size controls conditional observation-level variation. IID and structured random effects can also explain extra-Poisson variation, so joint estimation may be weakly identified, especially with little within-group replication or weak dependence. The package allows joint estimation and issues one warning when random effects are present. Users should examine mixing and prior sensitivity. A large fixed $r$ provides a Poisson-like model because $\mu_i^2/r$ becomes small as $r\rightarrow\infty$.
 
 There is a computational tradeoff. The P{\'o}lya-Gamma draw has shape $y_i+r$. Windle et al. discuss that P{\'o}lya-Gamma methods for negative-binomial count models work especially well for small or moderate counts, while large count sizes can make augmentation slower \citep{WindleDynamic2013}. Windle, Polson, and Scott also study sampling methods for $\mathrm{PG}(b,z)$ when $b$ is not one, which is the relevant case here \citep{WindleSampling2014}. Consequently, choosing an extremely large $r$ only to mimic a Poisson likelihood can be computationally unattractive. In practice, fixed-$r$ sensitivity checks should use values large enough that $\mu_i^2/r$ is small on the relevant mean scale, but not so large that P{\'o}lya-Gamma refreshes dominate runtime without changing inference.
 
-Future versions could allow $r$ to be estimated as a likelihood parameter, not as a covariance or residual variance parameter. One possible route is the Chinese-restaurant-table augmentation used in negative-binomial process and mixed negative-binomial regression work \citep{ZhouCarin2012,Zhou2012}. With a gamma prior $r\sim\mathrm{Gamma}(a_0,b_0)$, using the shape--rate convention, the usual logit-probability parameterization introduces
-\begin{equation}
-  L_i \mid y_i,r \sim \mathrm{CRT}(y_i,r)
-\end{equation}
-and gives the Gamma full conditional
-\begin{equation}
-  r\mid\cdot \sim
-  \mathrm{Gamma}\left(a_0+\sum_i L_i,\;
-    b_0+\sum_i \log\{1+\exp(\psi_i)\}\right),
-\end{equation}
-equivalently with rate $b_0-\sum_i\log(1-p_i)$. This is a Gibbs update rather than a Metropolis update under that parameterization. That extension should have its own likelihood-control grammar, for example a \texttt{starting\$likelihood} and \texttt{priors\$likelihood} block, rather than placing $r$ inside process covariance controls. It would also require careful documentation of parameterization: in the log-mean form above, changing $r$ changes $\psi_i=\eta_i-\log(r)$, so the full conditional structure differs from a model that puts the linear predictor directly on $\psi_i=\mathrm{logit}(p_i)$. Sampling $r$ should therefore be treated as a later overdispersed negative-binomial mode, not as the default spatial count model.
+\paragraph{Estimated size.}
+Leave \texttt{size = NULL} and supply
+\begin{verbatim}
+priors = list(size = gamma_dist(shape = a, rate = b))
+\end{verbatim}
+to estimate one shared size. A positive numeric \texttt{size}, or \texttt{size = fixed(value)}, fixes it; supplying both a fixed size and a size prior is an error. The Gamma prior is proper, uses shape and rate, and has no automatic default or truncated support. Optional \texttt{starting\$size} gives a scalar or chain-specific positive starting values; the automatic center is $a/b$, with log-scale dispersion for omitted multi-chain starts. \texttt{tuning\$size} specifies a positive initial proposal standard deviation on log(size), default 0.25.
+
+Let $\ell=\log(r)$ and hold the full current predictor $\eta_i$, including offsets and latent effects, fixed. The log target on this transformed scale is
+\begin{align}
+ \log\pi(\ell\mid\cdot) ={}& \sum_{i\in\mathcal O}\left[
+  \log\Gamma(y_i+r)-\log\Gamma(r)-\log\Gamma(y_i+1)
+  +r\log\frac{r}{r+\mu_i}+y_i\log\frac{\mu_i}{r+\mu_i}\right] \notag\\
+ &+(a-1)\log r-br+\ell+C,\qquad r=e^\ell,\quad\mu_i=e^{\eta_i}.
+\end{align}
+Here $\mathcal O$ contains observed response rows, and the final $\ell$ is the transformation Jacobian. A symmetric Gaussian random walk on $\ell$ uses this target for the Metropolis acceptance ratio. The Gamma prior is not conjugate in this log-mean model: $\psi_i=\eta_i-\log(r)$ changes with size.
+
+The size update integrates out the P{\'o}lya-Gamma variables. Each iteration therefore updates size first, immediately redraws all P{\'o}lya-Gamma variables using that size and the current full predictor, and then performs the existing collapsed coefficient and covariance updates. Structured process draws are refreshed at the end of the iteration. This order is also used during warmup. Size likelihood evaluations reuse the current predictor and require no matrix factorization; the existing working-model refresh handles the updated observation precision.
+
+Size uses a separate one-dimensional block sharing the scalar proposal and batch-adaptation routines with covariance updates. Its default acceptance target is 0.44, with warmup target interval $[0.30,0.60]$. Explicit \texttt{metropolis\$target\_accept} and \texttt{warmup\$target} settings apply to size too. Calibration runs even when size is the only Metropolis-updated parameter, and scalar adaptation continues during retained sampling. Covariance blocking does not combine size with covariance parameters. \texttt{adaptive\_metropolis\$size} contains its separate acceptance and warmup histories; \texttt{size\_samples} contains the retained draws.
+
+Size and all other samples are aligned by original iteration. Posterior predictive counts and pointwise log likelihoods use the corresponding size draw, including after thinning and structured-process recovery. Summaries and sample extraction include size. Extremely small size can cause underflow in the underlying P{\'o}lya-Gamma generator for zero counts; the sampler reports the failing shape and tilt and stops without replacing the draw or truncating size.
 
 \section{Gaussian Gibbs updates}
 
@@ -1082,21 +1166,21 @@ sampled diagonal residual precision models, and P{\'o}lya-Gamma working
 precisions because all of those cases enter through the sparse $\bZ$ and
 diagonal $\bW$.
 
-The prior precision for the explicit iid random effects is then added to the diagonal:
+The prior precision for the explicit iid random effects is then added to the diagonal for scalar terms, or to the corresponding group blocks for unstructured coefficient-formula terms:
 \begin{equation}
   \bQ_\alpha = \bQ_{\alpha,0} + \bD_\alpha^{-1}.
 \end{equation}
 These are the usual grouped-random-effect full-conditional quantities, but
 they are computed from weighted sparse design products and factor-based solves
 with $\bM$, rather than from a formed observed covariance or precision matrix.
-The final draw uses \texttt{draw\_gaussian\_from\_precision()} with the small
+The final draw uses \texttt{draw\_gaussian\_from\_precision()} with the
 dense precision $\bQ_\alpha$ and right-hand side $\bb_\alpha$. This step is
 implemented in \texttt{update\_alpha\_draw\_collapsed()}, with
 \texttt{form\_ZtVinvZ\_and\_rhs()} assembling the two crossproducts above.
 
 \subsection{Update of explicit random-effect variances}
 
-For iid random-effect block $b$, $\sigma^2_{\alpha,b}$ is the variance used in the corresponding diagonal block of $\bD_\alpha$. The inverse-gamma prior parameters $a_b$ and $b_b$ are supplied through \texttt{priors}. Given the current random effects in block $b$, the block variance update is Gibbs with an inverse-gamma full conditional. For block size $m_b$ and
+For scalar iid random-effect block $b$, $\sigma^2_{\alpha,b}$ is the variance used in the corresponding diagonal block of $\bD_\alpha$. The inverse-gamma prior parameters $a_b$ and $b_b$ are supplied through \texttt{priors}. Given the current random effects in block $b$, the block variance update is Gibbs with an inverse-gamma full conditional. For block size $m_b$ and
 \begin{equation}
   s_b = \balpha_b\trans \balpha_b,
 \end{equation}
@@ -1110,6 +1194,42 @@ the update is
 \end{aligned}
 \end{equation}
 This is implemented by \texttt{update\_sigmaSqRE\_gibbs()}.
+
+\paragraph{Correlated iid covariance Gibbs update.}
+For unstructured coefficient-formula terms, the explicit prior is
+\begin{equation}
+ \Sigma_b\sim\mathrm{IW}_{k_b}(\nu_b,\Psi_b),\qquad
+ p(\Sigma_b)\propto |\Sigma_b|^{-(\nu_b+k_b+1)/2}
+ \exp\{-\tfrac12\mathrm{tr}(\Psi_b\Sigma_b^{-1})\}.
+\end{equation}
+The scale must be symmetric positive definite and $\nu_b>k_b-1$. The prior mean is $\Psi_b/(\nu_b-k_b-1)$ when it exists; the default starting covariance is the mode $\Psi_b/(\nu_b+k_b+1)$. No prior or automatic scaling is supplied for these covariance matrices. The inverse-Wishart couples variance and correlation priors; this should inform the choice of hyperparameters. A supplied starting matrix is used by all chains; default multi-chain starts apply positive diagonal congruence perturbations to preserve positive definiteness.
+
+Conditional on the explicit coefficients,
+\begin{equation}
+ \Sigma_b\mid\balpha_b\sim\mathrm{IW}_{k_b}\left(
+ \nu_b+m_b,\;\Psi_b+\sum_{g=1}^{m_b}\balpha_{bg}\balpha_{bg}\trans\right).
+\end{equation}
+Here $m_b$ counts group vectors, not scalar coefficients. Retained unused factor levels are also latent group vectors and enter this conditional. In dimension one, the prior is $\mathrm{IG}(\nu_b/2,\Psi_b/2)$. Collapsing the structured process does not disturb this conditional because $\Sigma_b$ enters the model through the explicit coefficient prior. The same update applies with the supported augmented likelihoods.
+
+For a \texttt{by} term, apply the same update separately to each represented parent:
+\begin{equation}
+ \Sigma_{bh}\mid\balpha_{bh}\sim\mathrm{IW}_{k_b}\left(
+ \nu_b+m_{bh},\;\Psi_b+\sum_{g=1}^{m_{bh}}\balpha_{bhg}\balpha_{bhg}\trans\right).
+\end{equation}
+Here $m_{bh}$ counts the child vectors represented within parent $h$, not all child labels appearing elsewhere in the data. For scalar child effects,
+\begin{equation}
+ \sigma^2_{bh}\mid\balpha_{bh}\sim\mathrm{IG}\left(
+ a_b+\frac{m_{bh}}{2},\;b_b+\frac12\sum_{g=1}^{m_{bh}}\alpha_{bhg}^{2}\right).
+\end{equation}
+Each parent covariance precision is cached once per update and reused for its child blocks. The total explicit coefficient dimension is $q=\sum_b\sum_h m_{bh}k_b$ for parent-specific terms. These updates retain the existing joint coefficient solve; posterior dependence between parents through fixed effects or structured processes is still handled by that solve.
+
+The generator uses a triangular-solve formulation of the standard Bartlett-based approach to inverse-Wishart generation discussed by \citet{Jones1985} and reviewed in \citet[Section~3.1]{Axen2023}. The implementation factors the posterior scale $\Psi_b^*=LL\trans$, draws a lower-triangular Bartlett factor $A$ with diagonal squares $A_{jj}^2\sim\chi^2_{\nu_b+m_b-j+1}$ and independent standard-normal entries below the diagonal, solves $AT=L\trans$, and sets $\Sigma_b=T\trans T$. The identity
+\begin{equation}
+ \Sigma_b=T\trans T=L(AA\trans)^{-1}L\trans
+\end{equation}
+connects the triangular solve to the inverse-Wishart construction. The implementation evaluates this expression using a triangular solve and a symmetric crossproduct. A small Cholesky solve against the identity caches $\Sigma_b^{-1}$ once per covariance update; that precision is added directly to each group block in the existing coefficient precision. No large covariance inverse or new factorization of the structured precision $\bM$ is required. There is no Metropolis step for iid covariances.
+
+The existing full conditional coefficient precision and its Cholesky factor are still dense $q\times q$. Sparse $\bZ$ does not imply a sparse collapsed conditional precision when a structured process is present. The implementation uses this dense coefficient solve for scalar, independent, and unstructured iid terms.
 
 \section{Adaptive covariance Metropolis blocks}
 
@@ -1205,7 +1325,7 @@ The main routine is \texttt{stLMM\_collapsed\_sampler()}. After initialization, 
 \item If the likelihood is P{\'o}lya-Gamma, refresh the augmentation variables, working response, observed-row precision $\bW$, collapsed matrix $\bM$, and CHOLMOD factor using \texttt{update\_pg\_working\_model()}.
 \item Sample $\bbeta$ from its Gaussian full conditional using $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$ and $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bZ\balpha)$.
 \item Sample $\balpha$ from its Gaussian full conditional using $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bZ)$ and $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\by-\bX\bbeta)$.
-\item Sample explicit iid random-effect variances with \texttt{update\_sigmaSqRE\_gibbs()}.
+\item Sample explicit iid random-effect variances or covariances with \texttt{update\_sigmaSqRE\_gibbs()}.
 \item Form the running residual $\br=\by-\bX\bbeta-\bZ\balpha$ for the covariance-parameter update.
 \item For each adaptive Metropolis block, propose covariance or sampled residual variance parameters, assemble and factor the candidate $\bM$, evaluate Equation~\eqref{eq:collapsed-mh-target}, and accept or reject the proposal.
 \item If the likelihood is P{\'o}lya-Gamma and structured process terms are present, refresh $\br$ and draw the current latent process from its conditional distribution. This draw is always made to seed the next P{\'o}lya-Gamma refresh; it is stored only on the \texttt{save\_process} grid.
@@ -1213,7 +1333,7 @@ The main routine is \texttt{stLMM\_collapsed\_sampler()}. After initialization, 
 \end{minipage}
 \end{center}
 
-Step 1 is skipped for Gaussian likelihoods. Under P{\'o}lya-Gamma likelihoods, currently \texttt{family = "binomial"} and \texttt{family = "negative\_binomial"} with fixed size, the iteration begins by refreshing the P{\'o}lya-Gamma variables using the current warm-running latent process draw in the full linear predictor. After the augmentation is refreshed, the sampler uses the same collapsed coefficient and covariance update machinery with $\bW=\mathrm{diag}(\omega_i)$. Under \texttt{family = "probit"}, Step 1 refreshes Albert-Chib latent normal variables and uses the same collapsed machinery with $\bW=\bI$. At the end of the iteration, for structured augmented non-Gaussian process models, the sampler draws a fresh conditional $\bw$ using the current factorized $\bM$ and carries it forward to the next augmentation refresh. These internal process draws are retained by default for augmented non-Gaussian process models, avoiding a separate post-fit augmented/process reconstruction chain.
+Step 1 is skipped for Gaussian likelihoods. Under P{\'o}lya-Gamma likelihoods, currently \texttt{family = "binomial"} and \texttt{family = "negative\_binomial"}, the iteration first updates size when estimated and then refreshes the P{\'o}lya-Gamma variables using the current warm-running latent process draw in the full linear predictor. After the augmentation is refreshed, the sampler uses the same collapsed coefficient and covariance update machinery with $\bW=\mathrm{diag}(\omega_i)$. Under \texttt{family = "probit"}, Step 1 refreshes Albert-Chib latent normal variables and uses the same collapsed machinery with $\bW=\bI$. At the end of the iteration, for structured augmented non-Gaussian process models, the sampler draws a fresh conditional $\bw$ using the current factorized $\bM$ and carries it forward to the next augmentation refresh. These internal process draws are retained by default for augmented non-Gaussian process models, avoiding a separate post-fit augmented/process reconstruction chain.
 
 \section{Latent process recovery and fitted values}
 
@@ -1278,19 +1398,23 @@ With missing responses, fitted values are full-row quantities. Observed rows rep
 
 Prediction is a post-fit layer. It reuses the fitted backend, posterior samples, and recovered latent process draws rather than adding prediction to the MCMC sampler.
 
+Fixed-effect prediction uses stored fitted terms, factor levels, and contrasts. Prediction-aware basis functions such as \texttt{poly()} and \texttt{splines::ns()} retain their fitted basis information when constructing the design for new rows. For other data-dependent transformations, users should construct numeric columns explicitly and apply the same transformation to fitting and prediction data. Variables used only in the response expression are not evaluated during prediction; variables also used as predictors or offsets remain required inputs.
+
 The current prediction API is:
 \begin{verbatim}
 predict.stLMM(object, newdata = NULL, y_samples = FALSE,
+             n_omp_threads = NULL, verbose = FALSE,
              sub_sample = list(start = 1L, thin = 1L),
-             scale = c("response", "link"), ...)
+             scale = c("response", "link"), allow_new_levels = FALSE, ...)
 
 predict.stLMM_recovery(object, newdata = NULL, y_samples = FALSE,
                       joint = FALSE,
-                      joint_method = c("full", "vecchia"),
+                      joint_method = c("vecchia", "full"),
                       pred_m = NULL, pred_ordering = "maxmin",
-                      st_scale = 1, return_w_samples = TRUE,
+                      st_scale = NULL, return_w_samples = TRUE,
+                      n_omp_threads = NULL, verbose = FALSE,
                       sub_sample = list(start = 1L, thin = 1L),
-                      scale = c("response", "link"), ...)
+                      scale = c("response", "link"), allow_new_levels = FALSE, ...)
 \end{verbatim}
 
 The currently implemented behavior is:
@@ -1303,7 +1427,16 @@ The currently implemented behavior is:
 \item \texttt{y\_samples} is returned only when \texttt{y\_samples = TRUE};
 \item \texttt{w\_samples} is returned only by recovered-process prediction when \texttt{return\_w\_samples = TRUE}.
 \end{itemize}
-\texttt{joint}, \texttt{joint\_method}, \texttt{pred\_m}, \texttt{pred\_ordering}, and \texttt{st\_scale} are arguments to \texttt{predict.stLMM\_recovery()} only, because new process-node prediction requires saved or recovered latent process draws. Formula offsets are evaluated in \texttt{newdata} when present and are included in both link-scale and response-scale predictions. For binomial fits, \texttt{scale = "response"} returns probabilities for fitted means, while \texttt{scale = "link"} returns the linear predictor. Posterior predictive \texttt{y\_samples} are binomial draws using fitted or prediction trial counts. For probit fits, \texttt{scale = "response"} returns $\Phi(\eta_i)$ and posterior predictive \texttt{y\_samples} are Bernoulli draws with those probabilities. For the fixed-size negative-binomial family, \texttt{scale = "response"} returns $\exp(\eta_i)$ and posterior predictive \texttt{y\_samples} are negative-binomial draws using the fixed fitted size.
+\texttt{joint}, \texttt{joint\_method}, \texttt{pred\_m}, \texttt{pred\_ordering}, and \texttt{st\_scale} are arguments to \texttt{predict.stLMM\_recovery()} only, because new process-node prediction requires saved or recovered latent process draws. Formula offsets are evaluated in \texttt{newdata} when present and are included in both link-scale and response-scale predictions. For binomial fits, \texttt{scale = "response"} returns probabilities for fitted means, while \texttt{scale = "link"} returns the linear predictor. Posterior predictive \texttt{y\_samples} are binomial draws using fitted or prediction trial counts. For probit fits, \texttt{scale = "response"} returns $\Phi(\eta_i)$ and posterior predictive \texttt{y\_samples} are Bernoulli draws with those probabilities. For the negative-binomial family, \texttt{scale = "response"} returns $\exp(\eta_i)$ and posterior predictive \texttt{y\_samples} are negative-binomial draws using the matching posterior size draw when size is estimated, or the fixed fitted size otherwise.
+
+\paragraph{New iid grouping levels.}
+The default \texttt{allow\_new\_levels = FALSE} errors on unseen iid labels. Explicit opt-in with \texttt{TRUE} draws
+\begin{equation}
+ \balpha_{b,g_{\mathrm{new}}}^{(s)}\sim N_{k_b}(0,\Sigma_b^{(s)})
+\end{equation}
+for each distinct new group and retained posterior draw. Scalar terms use their variance draws. One vector is reused across all rows bearing the same new label; different new groups are independent conditional on the posterior covariance draw. Each covariance Cholesky factor is reused across all new groups in that draw. Known groups retain their fitted draws. The new contribution is added before the inverse link, and its uncertainty remains in \texttt{mu\_samples} even when \texttt{y\_samples = FALSE}. Separate prediction calls simulate independent new effects, so rows that must share a new effect belong in one call. Missing labels still error. This argument does not permit new fixed-effect factor levels, residual-variance groups, or unsupported structured locations.
+
+For \texttt{by} terms, matching uses both parent and child labels. With \texttt{allow\_new\_levels = TRUE}, a new child in a represented parent $h$ receives a draw from $N(0,\Sigma_{bh}^{(s)})$ (or its scalar variance analogue). Repeated rows of the same new pair share that draw; identical new child labels in different parents receive separate draws from their respective parent distributions. A parent not represented by fitting-data rows errors even with this flag enabled. Prior-predictive covariance draws for new parents are outside the current prediction interface.
 
 For process terms, prediction rows are shared but process supports are term-specific. The prediction backend maps each prediction row separately for each fitted process term, preserving that term's graph, coordinate order, support, ordering, and SVC covariate scale. This is essential for models such as
 \begin{verbatim}
@@ -1360,7 +1493,7 @@ If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
   y_i^{(b)} \sim \mathrm{Bernoulli}(\pi_i^{(b)}).
 \end{equation}
 
-For the fixed-size negative-binomial family, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
+For the negative-binomial family, $\mu_i^{(b)}$ denotes the linear predictor when \texttt{scale = "link"}. On the response scale,
 \begin{equation}
   \lambda_i^{(b)} = \exp(\mu_i^{(b)}).
 \end{equation}
@@ -1368,7 +1501,7 @@ If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
 \begin{equation}
   y_i^{(b)} \sim \mathrm{NegBin}(r,\lambda_i^{(b)}),
 \end{equation}
-where $r$ is the fixed fitted size parameter and the second argument is the mean.
+where $r$ is replaced by its corresponding posterior draw when estimated, and the second argument is the mean.
 
 For models without structured process terms, \texttt{predict.stLMM()} uses the posterior samples stored in the fit object. It rebuilds $\bX_0$ and $\bZ_0$ for \texttt{newdata} and returns
 \begin{equation}

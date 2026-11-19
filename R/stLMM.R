@@ -365,7 +365,7 @@ stLMM <- function(formula, data = parent.frame(),
             stop("error: size must be supplied for family = \"negative_binomial\"")
         if(is_fixed_parameter(x))
             x <- fixed_parameter_value(x, "size", "size")
-        val <- x[1]
+        val <- x
         if(!is.numeric(val) || length(val) != 1L || is.na(val) ||
            !is.finite(val) || val <= 0)
             stop("error: size must be a finite positive scalar for family = \"negative_binomial\"")
@@ -410,6 +410,22 @@ stLMM <- function(formula, data = parent.frame(),
         if(length(extra))
             stop("error: unknown parameter(s) ", paste(extra, collapse = ", "), " in ", where)
         block$sigma_sq
+    }
+
+    resolve_iid_scalar_control <- function(x, term, where){
+        if(is.null(x) || !identical(term$cov_model, "independent"))
+            return(x)
+        value <- normalize_iid_sigma_block(x, where)
+        if(inherits(value, "stLMM_prior") ||
+           (is.numeric(value) && length(value) == 1L && is.null(names(value))))
+            return(list(sigma_sq = value))
+        nms <- names(value)
+        if((!is.list(value) && !is.numeric(value)) || is.null(nms) ||
+           anyNA(nms) || any(!nzchar(nms)) || anyDuplicated(nms) ||
+           !setequal(nms, term$formula_coefficients))
+            stop("error: ", where, "$sigma_sq must be shared or have exactly the coefficient names: ",
+                 paste(term$formula_coefficients, collapse = ", "))
+        list(sigma_sq = value[[term$coefficient]])
     }
 
     collect_re_pairs <- function(x_list, re_names, where){
@@ -1134,7 +1150,7 @@ stLMM <- function(formula, data = parent.frame(),
         stop("error: at least one observed response is required")
 
     trials_vec <- if(is_binomial) normalize_trials(trials, data, n_full) else NULL
-    nb_size <- if(is_negbin) normalize_nb_size(size) else NULL
+    nb_size <- if(is_negbin && !is.null(size)) normalize_nb_size(size) else NULL
     if(!is_binomial && !is.null(trials))
         stop("error: trials is used only with family = \"binomial\"")
     if(!is_negbin && !is.null(size))
@@ -1172,6 +1188,36 @@ stLMM <- function(formula, data = parent.frame(),
     starting <- normalize_named_list(starting, "starting")
     tuning   <- normalize_named_list(tuning,   "tuning")
     priors   <- normalize_named_list(priors,   "priors")
+
+    estimate_size <- is_negbin && !is.null(priors$size)
+    nb_size_prior <- NULL
+    if(!is_negbin && any(vapply(list(priors$size, starting$size, tuning$size),
+                                function(x) !is.null(x), logical(1))))
+        stop('error: size controls are used only with family = "negative_binomial"')
+    if(estimate_size){
+        if(!is.null(size))
+            stop("error: supply either a fixed size or priors$size for estimation, not both")
+        pr <- require_prior_object(priors$size, "priors$size")
+        validate_prior_hyperparameters(pr, "priors$size")
+        if(!identical(pr$family, "gamma_dist") || !is.null(pr$support) ||
+           !identical(pr$scale, "value"))
+            stop("error: priors$size must use gamma_dist(shape, rate) without support")
+        nb_size_prior <- as.double(pr$parameters)
+        start_size <- starting$size %||% (nb_size_prior[1] / nb_size_prior[2])
+        if(!is.numeric(start_size) || !length(start_size) %in% c(1L, chains) ||
+           anyNA(start_size) || any(!is.finite(start_size)) || any(start_size <= 0))
+            stop("error: starting$size must be positive finite numeric values of length 1 or chains")
+        nb_size <- as.double(start_size[1])
+        size_tuning <- tuning$size %||% 0.25
+        if(!is.numeric(size_tuning) || length(size_tuning) != 1L ||
+           is.na(size_tuning) || !is.finite(size_tuning) || size_tuning <= 0)
+            stop("error: tuning$size must be a finite positive scalar; use size to fix it")
+    } else if(is_negbin){
+        if(is.null(nb_size))
+            stop("error: size must be supplied, or use priors$size = gamma_dist(shape, rate) to estimate it")
+        if(!is.null(starting$size) || !is.null(tuning$size))
+            stop("error: starting$size and tuning$size require priors$size; use size for a fixed value")
+    }
 
     residual_model <- list(type = "global_tau", label = "tau_sq")
     if(is_augmented_likelihood && !is.null(residual))
@@ -1255,6 +1301,8 @@ stLMM <- function(formula, data = parent.frame(),
     ####################################################
     
     re_names   <- iid_design$re_names
+    re_control_names <- vapply(iid_design$terms, function(term)
+        if(is.null(term$formula_name)) term$name else term$formula_name, character(1))
     re_nlevels <- iid_design$re_nlevels
     re_ncoef   <- iid_design$re_ncoef
     re.q       <- iid_design$re.q
@@ -1271,6 +1319,8 @@ stLMM <- function(formula, data = parent.frame(),
     
     graphs <- proc_info$graphs
     terms  <- proc_info$process_terms
+    if(estimate_size && (n_re > 0L || length(terms) > 0L))
+        warning("Estimating negative-binomial size with random effects: size and random-effect variances may be weakly identified. Check mixing and sensitivity to their priors.", call. = FALSE)
 
     if(length(terms)){
         type_counter <- integer(0)
@@ -1381,43 +1431,92 @@ stLMM <- function(formula, data = parent.frame(),
         encode_prior(ig(2, 1))
     }
 
-    if(n_re){
+    iid_is_covariance <- vapply(iid_design$terms, function(term)
+        identical(term$cov_model, "unstructured"), logical(1))
+    scalar_re_names <- re_names[!iid_is_covariance]
+    scalar_control_names <- re_control_names[!iid_is_covariance]
+    scalar_terms <- iid_design$terms[!iid_is_covariance]
+    iid_covariance <- stats::setNames(vector("list", n_re), re_names)
+    for(term in scalar_terms){
+        if(identical(term$cov_model, "independent") && !is.null(tuning[[term$formula_name]]))
+            stop("error: ", term$formula_name, " variances use Gibbs sampling and do not accept tuning")
+    }
+    if(length(scalar_re_names)){
         if("sigma_sq_re" %in% names(starting))
             stop("error: starting$sigma_sq_re is no longer supported; use starting = list(iid_1 = list(sigma_sq = value))")
         if("sigma_sq_re" %in% names(priors))
             stop("error: priors$sigma_sq_re is no longer supported; use priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))")
 
-        sigma_sq_re_start_list <- stats::setNames(lapply(re_names, function(nm) starting[[nm]]), re_names)
+        sigma_sq_re_start_list <- stats::setNames(lapply(seq_along(scalar_control_names), function(i){
+            nm <- scalar_control_names[i]
+            resolve_iid_scalar_control(starting[[nm]], scalar_terms[[i]], paste0("starting$", nm))
+        }), scalar_re_names)
         start_where_re <- "starting"
 
-        missing_re_start <- re_names[vapply(sigma_sq_re_start_list[re_names], is.null, logical(1))]
+        missing_re_start <- scalar_re_names[vapply(sigma_sq_re_start_list[scalar_re_names], is.null, logical(1))]
         if(length(missing_re_start)){
             for(nm in missing_re_start)
                 sigma_sq_re_start_list[[nm]] <- list(sigma_sq = 1)
         }
 
-        sigma_sq_re_starting <- collect_re_scalars(sigma_sq_re_start_list, re_names, start_where_re)
+        sigma_sq_re_starting <- collect_re_scalars(sigma_sq_re_start_list, scalar_re_names, start_where_re)
 
-        sigma_sq_re_prior_list <- stats::setNames(vector("list", n_re), re_names)
-        for(i in seq_along(re_names))
-            sigma_sq_re_prior_list[[re_names[i]]] <- priors[[re_names[i]]]
+        sigma_sq_re_prior_list <- stats::setNames(vector("list", length(scalar_re_names)), scalar_re_names)
+        for(i in seq_along(scalar_re_names)){
+            nm <- scalar_control_names[i]
+            sigma_sq_re_prior_list[[scalar_re_names[i]]] <- resolve_iid_scalar_control(
+                priors[[nm]], scalar_terms[[i]], paste0("priors$", nm))
+        }
         prior_where_re <- "priors"
 
-        missing_re_prior <- re_names[vapply(sigma_sq_re_prior_list[re_names], is.null, logical(1))]
+        missing_re_prior <- scalar_re_names[vapply(sigma_sq_re_prior_list[scalar_re_names], is.null, logical(1))]
         if(length(missing_re_prior))
             stop("error: missing prior(s) for grouped random-effect variance ",
                  paste(missing_re_prior, collapse = ", "), " in ", prior_where_re)
 
         sigma_sq_re_IG <- collect_re_pairs(
             sigma_sq_re_prior_list,
-            re_names,
+            scalar_re_names,
             prior_where_re
         )
     } else {
         sigma_sq_re_starting <- numeric(0)
         sigma_sq_re_IG <- matrix(0, 0, 2)
     }
-    
+
+    if(any(iid_is_covariance)){
+        scalar_start <- sigma_sq_re_starting
+        scalar_ig <- sigma_sq_re_IG
+        sigma_sq_re_starting <- rep(1, n_re)
+        sigma_sq_re_IG <- matrix(1, n_re, 2L)
+        sigma_sq_re_starting[!iid_is_covariance] <- scalar_start
+        sigma_sq_re_IG[!iid_is_covariance, ] <- scalar_ig
+        for(i in which(iid_is_covariance)){
+            nm <- re_control_names[i]
+            k <- re_ncoef[i]
+            coef_names <- iid_design$terms[[i]]$coefficient
+            block <- normalize_param_block(priors[[nm]], paste0("priors$", nm))
+            if(is.null(block) || !identical(names(block), "covariance") ||
+               !inherits(block$covariance, "stLMM_prior") || block$covariance$family != "iw")
+                stop("error: priors$", nm, " must contain covariance = iw(df, scale)")
+            pr <- block$covariance$parameters
+            pr <- iw(pr$df, validate_iid_covariance_matrix(pr$scale, k,
+                paste0("priors$", nm, "$covariance scale"), coef_names))$parameters
+            start <- pr$scale / (pr$df + k + 1)
+            if(!is.null(starting[[nm]])){
+                sb <- normalize_param_block(starting[[nm]], paste0("starting$", nm))
+                if(!identical(names(sb), "covariance"))
+                    stop("error: starting$", nm, " must contain covariance")
+                start <- validate_iid_covariance_matrix(sb$covariance, k,
+                    paste0("starting$", nm, "$covariance"), coef_names)
+            }
+            if(!is.null(tuning[[nm]]))
+                stop("error: ", nm, " covariance uses Gibbs sampling and does not accept tuning")
+            iid_covariance[[i]] <- list(dim = as.integer(k), df = pr$df,
+                                        scale = pr$scale, starting = start)
+        }
+    }
+
     ## assign graph indices and term-level parameter metadata
     graph_names <- names(graphs)
     
@@ -1532,6 +1631,23 @@ stLMM <- function(formula, data = parent.frame(),
                     status = "gibbs"
                 )
             )
+            if(!is.null(iid_term$formula_name))
+                re_term_description[[i]]$formula_term <- iid_term$formula_name
+            if(identical(iid_term$cov_model, "independent"))
+                re_term_description[[i]]$cov_model <- "independent"
+            if(!is.null(iid_term$by_name)){
+                re_term_description[[i]]$by <- iid_term$by_name
+                re_term_description[[i]]$by_level <- iid_term$by_level
+                re_term_description[[i]]$by_levels <- iid_term$by_levels
+            }
+            if(iid_is_covariance[i]){
+                re_term_description[[i]]$sigma_sq <- NULL
+                re_term_description[[i]]$cov_model <- "unstructured"
+                re_term_description[[i]]$covariance <- list(
+                    current = iid_covariance[[i]]$starting,
+                    prior_family = "inverse-Wishart",
+                    prior_hyperparameters = iid_covariance[[i]][c("df", "scale")])
+            }
         }
         names(re_term_description) <- re_names
     }
@@ -1659,6 +1775,8 @@ stLMM <- function(formula, data = parent.frame(),
     status_message("Preparing sampler backend.")
 
     n_report <- normalize_n_report(n_report)
+    size_target <- if(is.list(metropolis)) metropolis$target_accept else NULL
+    size_warmup_target <- if(is.list(warmup)) warmup$target else NULL
     metropolis <- normalize_metropolis(metropolis)
     warmup <- normalize_warmup(warmup, metropolis)
     save_process_control <- normalize_save_process(
@@ -1719,6 +1837,9 @@ stLMM <- function(formula, data = parent.frame(),
         save_process = save_process_control,
         formula = formula,
         reduced_formula = work_formula,
+        fixed_terms = stats::delete.response(stats::terms(mf)),
+        fixed_xlevels = stats::.getXlevels(stats::terms(mf), mf),
+        fixed_contrasts = attr(X, "contrasts"),
         response_name = all.vars(formula)[1],
         trials = if(is_binomial) as.integer(trials_vec) else NULL,
         trials_obs = if(is_binomial) as.integer(trials_vec[observed_index]) else NULL,
@@ -1747,6 +1868,7 @@ stLMM <- function(formula, data = parent.frame(),
         ## random effects
         sigma_sq_re_starting = as.double(sigma_sq_re_starting),
         sigma_sq_re_IG = sigma_sq_re_IG,
+        iid_covariance = iid_covariance,
         re = list(
             q = as.integer(re.q),
             block_id = as.integer(re_block_id)
@@ -1797,6 +1919,13 @@ stLMM <- function(formula, data = parent.frame(),
         
     )
     
+    if(estimate_size){
+        backend$nb_size_control <- list(
+            prior = nb_size_prior, tuning = as.double(size_tuning),
+            target_accept = as.double(size_target %||% 0.44),
+            warmup_target = as.double(size_warmup_target %||% c(0.30, 0.60)))
+        backend$likelihood$size_estimated <- TRUE
+    }
     class(backend) <- "stLMM_backend"
 
     process_names <- vapply(backend$process_terms, `[[`, character(1), "name")
@@ -1836,6 +1965,12 @@ stLMM <- function(formula, data = parent.frame(),
 
     build_chain_backend <- function(chain){
         b <- backend
+        if(estimate_size){
+            b$nb_size <- if(!is.null(starting$size))
+                chain_value(starting$size, chain, chains, "size", positive = TRUE) else
+                log_jitter(nb_size, chain_control$dispersion)
+            b$likelihood$size <- b$nb_size
+        }
         if(!(fixed_residual_variance || sampled_residual_variance)){
             if(!is.null(tau_sq_start_control))
                 b$tau_sq_starting <- chain_value(tau_sq_start_control, chain, chains, "tau_sq", positive = TRUE)
@@ -1845,9 +1980,20 @@ stLMM <- function(formula, data = parent.frame(),
 
         if(n_re){
             for(i in seq_along(re_names)){
+                if(iid_is_covariance[i]){
+                    if(chains > 1L && is.null(starting[[re_control_names[i]]])){
+                        # Congruence by a positive diagonal matrix preserves SPD.
+                        d <- exp(stats::rnorm(re_ncoef[i], 0, chain_control$dispersion / 2))
+                        b$iid_covariance[[i]]$starting <- iid_covariance[[i]]$starting * outer(d, d)
+                    }
+                    next
+                }
                 start_entry <- NULL
-                if(re_names[i] %in% names(starting))
-                    start_entry <- normalize_iid_sigma_block(starting[[re_names[i]]], paste0("starting$", re_names[i]))
+                if(re_control_names[i] %in% names(starting)){
+                    where <- paste0("starting$", re_control_names[i])
+                    control <- resolve_iid_scalar_control(starting[[re_control_names[i]]], iid_design$terms[[i]], where)
+                    start_entry <- normalize_iid_sigma_block(control, where)
+                }
                 if(!is.null(start_entry))
                     b$sigma_sq_re_starting[i] <- chain_value(start_entry, chain, chains, re_names[i], positive = TRUE)
                 else if(chains > 1L)
@@ -1939,7 +2085,12 @@ stLMM <- function(formula, data = parent.frame(),
 
         if(!is.null(out$sigma_sq_re_samples) && is.matrix(out$sigma_sq_re_samples) && ncol(out$sigma_sq_re_samples) > 0L)
             colnames(out$sigma_sq_re_samples) <- paste0(re_names, "_sigma_sq")
-        out$iid_sigma_sq_samples <- out$sigma_sq_re_samples
+        out$iid_sigma_sq_samples <- out$sigma_sq_re_samples[, !iid_is_covariance, drop = FALSE]
+        if(any(iid_is_covariance)){
+            cov_names <- unlist(lapply(re_term_description[iid_is_covariance],
+                                      iid_covariance_sample_names), use.names = FALSE)
+            colnames(out$iid_covariance_samples) <- cov_names
+        } else out$iid_covariance_samples <- NULL
 
         if(!is.null(out$sigma_sq_samples) && is.matrix(out$sigma_sq_samples) && ncol(out$sigma_sq_samples) > 0L)
             colnames(out$sigma_sq_samples) <- paste0(process_names_i, "_sigma_sq")
@@ -1979,6 +2130,15 @@ stLMM <- function(formula, data = parent.frame(),
             sigma_sq = if(is.matrix(out$sigma_sq_samples) && ncol(out$sigma_sq_samples) > 0L) out$sigma_sq_samples else NULL,
             theta = if(is.matrix(out$theta_samples) && ncol(out$theta_samples) > 0L) out$theta_samples else NULL
         )
+
+        if(estimate_size){
+            out$samples$size <- matrix(out$size_samples, ncol = 1L,
+                                       dimnames = list(NULL, "size"))
+            out$adaptive_metropolis$size <- out$size_metropolis
+            out$size_metropolis <- NULL
+        }
+        if(any(iid_is_covariance))
+            out$samples$iid_covariance <- out$iid_covariance_samples
 
         out$sigma_sq_re_samples <- NULL
 
