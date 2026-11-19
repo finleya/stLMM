@@ -1,0 +1,228 @@
+Collapsed IID development plan -- draft for discussion
+2026-11-19
+=====================================================
+
+Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
+Branch: collapsed-iid, created from this baseline for staged development.
+Current stage: 1 -- interface and mathematical design review. Implementation
+has not started. Discuss and agree on one implementation increment at a time.
+
+This plan is explicitly shared on the branch so work can continue from another
+checkout. It is the exception to keeping internal development material local;
+other working notes, conversations, validation artifacts, and roadmaps remain
+excluded. After each agreed stage, update its status and record the relevant
+commit and validation results here.
+
+Scope and decisions
+-------------------
+Add an optional sampler that integrates IID coefficients together with structured
+effects for the relevant coefficient and covariance updates. Keep the existing
+separate-IID sampler available. Preserve formula syntax, supplied data scales,
+group membership rules, and explicit new-level prediction controls.
+
+The agreed intended automatic rule is:
+  IID effects and no structured latent terms: collapse IID effects.
+  IID effects plus structured latent terms: keep IID effects separate.
+  No IID effects: use the existing applicable sampler.
+An explicit setting can select either IID strategy in either model class.
+Grouped Gaussian residual variances are not structured latent process terms for
+this decision. Crossing and nesting of IID groups do not change the rule.
+
+Proposed control: collapse_iid = NULL, TRUE, or FALSE.
+NULL applies the automatic rule; TRUE requests joint collapsing; FALSE selects
+the separate-IID path. Resolve this once during R-side setup and record both the
+requested and resolved setting in the fit. Do not silently change modes because
+of a prior choice or a runtime performance heuristic. Settle behavior of an
+explicit TRUE when there are no IID terms during interface review.
+
+This changes the default MCMC path for existing IID-only calls. Their model and
+prior stay the same, but seeded draws will change. collapse_iid=FALSE must retain
+the legacy sampling path and, for existing priors, its seeded draws/RNG behavior.
+Default mixed IID-plus-structured models should retain that legacy behavior too.
+The new automatic default should be enabled only when the intended supported
+model combinations have passed validation.
+
+Broader priors should be independent of the collapsing choice. The proposed
+separate path retains conjugate IG/IW updates for those priors and uses a
+conditional Metropolis target for nonconjugate priors. The collapsed path uses
+the marginal target for its IID covariance parameters, including IG/IW priors.
+Acceptance of nonconjugate updates for the collapsed path is already settled.
+
+Keep the main routines small
+---------------------------
+The C++ entry point should orchestrate state initialization, warmup, iterations,
+output storage, timing, and cleanup. It should select one of two readable
+iteration helpers:
+
+  if (s.collapseIid)
+    update_collapsed_iid_iteration(...);
+  else
+    update_separate_iid_iteration(...);
+
+These are two explicit update schedules sharing numerical helpers, not two copies
+of the complete sampler. Keep the ordering visible so the partially collapsed
+and augmented-likelihood algorithms can be reviewed mathematically.
+
+Reuse the existing procedural C++ style: structs, ordinary functions, R-managed
+storage, BLAS/LAPACK, and CHOLMOD. A new class hierarchy or a collection of sampler
+drivers for every combination of family, grouping, and prior is unnecessary.
+
+Responsibilities:
+  R/stLMM.R: orchestrate fitting; resolve controls and report the selected mode.
+  R/iid.R and prior helpers: normalize grouped terms and supported prior blocks.
+  stLMM_state.cpp: allocate state, build parameter metadata, and assign proposals.
+  stLMM_precision.cpp: assemble/factor/apply the applicable latent system.
+  stLMM_sampler.cpp: two update schedules and shared Metropolis operations.
+  Focused IID helpers, possibly stLMM_iid.cpp: covariance transforms, prior
+    densities, conditional covariance targets, and small block operations.
+  Existing recovery/output helpers: return familiar coefficient names and draws.
+
+Avoid a broad source reorganization. Extract only what the extension needs, then
+prove that the separate path remains unchanged before adding the new algorithm.
+Warmup and retained sampling must call the same strategy-specific update logic;
+there should not be independent copies that can drift apart.
+
+Numerical representation to review
+----------------------------------
+For an initial centered representation, stack v=(alpha,w), set H=[Z,A], and use
+  Q = blockdiag(D_alpha^{-1}, Q_w),
+  M = Q + H' W H.
+The blocks of M are
+  [ D_alpha^{-1}+Z'WZ     Z'WA       ]
+  [ A'WZ                  Q_w+A'WA   ].
+
+Recommend this as the first implementation because it extends existing design
+and precision machinery directly. Correlated IID blocks do not require changing
+the observation weights. Keep the responsibilities of observation mappings and
+prior blocks distinct so later parameter-dependent loadings can be supported.
+Whether to move IID scales/correlations into A is an explicit design decision;
+there is no need to move all current structured variances at the same time.
+
+Required operations: apply H/H', add H'WH, assemble prior blocks, evaluate prior
+log determinants, factor M, apply marginal precision, and recover coefficients.
+Use sparse index caches and fixed symbolic patterns where valid. Repeated small
+IID covariance factors can be reused across their groups. No large covariance
+inverse or n-by-n observation covariance should be formed by the fitting code.
+Dense versions are restricted to small independent validation problems.
+
+Shared group nodes may connect many structured nodes and create Cholesky fill.
+IID-only crossed terms can also create fill; one grouping factor with disjoint
+groups has a much simpler pattern. The existing separate method also has a dense
+IID conditional system, so neither method is guaranteed faster for every design.
+Measure nnz(M), nnz(Cholesky factor), memory, factorization/solve time, and effective
+samples per second. Include conditional recovery costs in the comparison.
+
+Joint collapsing does not imply storing every structured effect at every Gaussian
+iteration. Preserve the alpha samples expected by the existing API and decide
+how to generate them efficiently. A joint conditional draw may be used internally
+without retaining all of w; benchmark that cost rather than assuming it is free.
+Non-Gaussian augmentation requires a current compatible latent realization.
+
+Prior and parameterization proposal
+-----------------------------------
+Scalar and independent coefficient variances: use the existing ig(),
+log_normal(), gamma_dist(), half_normal(), and half_t() conventions. The half
+priors remain priors on standard deviations even when the parameter is named
+sigma_sq. Retain named coefficient lists and the existing by-parent reuse of
+prior hyperparameters. Require explicit priors; do not introduce hidden scaling.
+
+Correlated coefficients: retain covariance=iw(...) and add a mutually exclusive
+separation specification Sigma=D R D, where D contains marginal standard
+deviations and R is a correlation matrix. Candidate interface:
+  priors=list(iid_1=list(
+    sigma_sq=list("(Intercept)"=half_t(3,1), x=half_t(3,0.5)),
+    correlation=lkj(shape=2)))
+This is proposed syntax, not an implemented function or a default prior choice.
+
+Use valid unconstrained covariance coordinates, such as log scales and transformed
+partial correlations defining a Cholesky factor. Independent unconstrained
+pairwise correlations are not sufficient for dimension greater than two.
+Derive the complete Jacobian for the chosen coordinates and prior measure.
+An IW density on Sigma and separate densities on variances/R require different
+change-of-variable accounting. Check the scalar reduction and two-dimensional
+case analytically before the general case. No automatic covariance jitter should
+silently change the posterior target.
+
+LKJ is a candidate correlation prior, with density proportional to
+det(R)^(shape-1). A flat density on correlation matrices at shape=1 is not a flat
+density on transformed Cholesky coordinates. Primary references:
+  Lewandowski, Kurowicka, and Joe (2009), Journal of Multivariate Analysis 100,
+  1989-2001: https://www.sciencedirect.com/science/article/pii/S0047259X09000876
+  https://mc-stan.org/docs/functions-reference/correlation_matrix_distributions.html
+
+Reuse adaptive proposal machinery and the existing metropolis control object.
+Before coding, specify how joint, by_term, residual_process, variance_theta,
+process_variance, and scalar blocking treat IID scales and correlations, including
+separate parent covariance matrices. Large by-parent collections must not acquire
+an undocumented blocking rule. Test both joint and small-block proposals.
+
+Staged implementation and review
+--------------------------------
+1. Agree on the interface, latent representation, prior specification, parameter
+   transforms, blocking meanings, and exact Gaussian/augmented update schedules.
+   The branch currently contains this plan only. Use small commits and review
+   the result of each implementation stage before proceeding to the next.
+
+2. Extract the necessary iteration orchestration/helpers with no algorithm change.
+   Verify seeded legacy samples and RNG state, existing public output, and all
+   package tests. Keep unrelated numerical-core cleanup out of this stage.
+
+3. Implement the joint Gaussian latent calculations using known covariance
+   parameters in small reference problems. Cover IID-only and IID-plus-structured
+   models, independent and correlated coefficients, crossing, nesting, by parents,
+   unused levels, missing responses, and zero/collinear design columns. Compare
+   log determinants, marginal quadratic forms, and conditional recovery moments
+   against independently constructed dense formulas. Test rejected proposals and
+   cache restoration explicitly.
+
+4. Add covariance sampling and broader priors in reviewable increments: scalar
+   variances first, then correlated blocks and by-parent matrices. Share prior
+   and transform calculations between separate and collapsed paths, while keeping
+   their conditional and marginal targets distinct. Compare against quadrature
+   where small and against the existing sampler under identical IG/IW priors.
+
+5. Integrate binomial, probit, and negative-binomial models, including estimated
+   size. Derive the order before coding: in a fully IID-collapsed augmented path,
+   update NB size using the current full predictor when applicable, refresh
+   augmentation, perform marginal coefficient/covariance updates, then recover a
+   compatible latent realization for the next iteration. Check initialization,
+   warmup, multiple chains, and saved-draw alignment as part of the same design.
+
+6. Validate prediction, recovery, log_lik, fitted values, combined summaries,
+   modern diagnostics, and new-level behavior for both modes. Use synthetic
+   recovery studies, comparisons under matched priors, prior-sensitivity cases,
+   and lme4 as an external estimation comparison. Compare combined coefficients
+   and predictors as well as marginal fixed and random effects.
+
+7. Benchmark representative group structures and structured graphs, including a
+   few hundred groups and groups spanning distant spatial nodes. Enable the
+   automatic default only after these tests and compatibility checks pass.
+   Update manuals and the technical document with implemented behavior at each
+   completed stage; update teaching articles after the interface stabilizes.
+   Public commits contain package code, tests, documentation, and this explicitly
+   shared plan. Other internal plans, working notes, exploratory scripts, reports,
+   conversations, and generated fits remain local.
+
+Longer-term design requirements
+-------------------------------
+The common algebra should allow observation mappings and prior precision blocks
+to vary independently. An observation may select or combine multiple latent
+coefficients. Do not require all responses to share observation locations,
+covariates, or a complete response vector at every location.
+
+Structured processes nested within parent groups remain the next substantive
+modeling extension after the IID work. They can use independent prior blocks for
+each parent, with shared versus parent-specific process parameters specified
+separately. Multivariate LMC and conditional multivariate CAR/DAGAR can follow.
+
+For multivariate misalignment, observed (response, location) pairs map to latent
+supports through selection/loading operators. Missing outcomes do not require
+dummy observed responses. Missing predictors require separate treatment. Keep
+latent process cross-covariance distinct from correlated measurement errors;
+independent response-specific errors preserve diagonal observation precision,
+whereas full residual correlation needs additional block-precision machinery.
+
+Future covariance loadings, cross-response prior blocks, and response metadata
+should fit these responsibilities. Do not implement multivariate likelihoods,
+residual covariance, spatially varying loadings, or structured nesting as part of
+the first collapsed-IID branch merely to anticipate those future capabilities.
