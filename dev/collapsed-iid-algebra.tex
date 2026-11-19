@@ -1,0 +1,494 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,bm,enumitem}
+\usepackage[nopatch=footnote]{microtype}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\setlist{nosep,leftmargin=2em}
+\newcommand{\by}{\bm{y}}
+\newcommand{\bx}{\bm{x}}
+\newcommand{\bo}{\bm{o}}
+\newcommand{\bw}{\bm{w}}
+\newcommand{\bu}{\bm{u}}
+\newcommand{\bv}{\bm{v}}
+\newcommand{\br}{\bm{r}}
+\newcommand{\bb}{\bm{b}}
+\newcommand{\bz}{\bm{z}}
+\newcommand{\balpha}{\bm{\alpha}}
+\newcommand{\bbeta}{\bm{\beta}}
+\newcommand{\btheta}{\bm{\theta}}
+\newcommand{\bxi}{\bm{\xi}}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bA}{\bm{A}}
+\newcommand{\bB}{\bm{B}}
+\newcommand{\bC}{\bm{C}}
+\newcommand{\bD}{\bm{D}}
+\newcommand{\bH}{\bm{H}}
+\newcommand{\bI}{\bm{I}}
+\newcommand{\bK}{\bm{K}}
+\newcommand{\bL}{\bm{L}}
+\newcommand{\bM}{\bm{M}}
+\newcommand{\bP}{\bm{P}}
+\newcommand{\bQ}{\bm{Q}}
+\newcommand{\bR}{\bm{R}}
+\newcommand{\bS}{\bm{S}}
+\newcommand{\bT}{\bm{T}}
+\newcommand{\bV}{\bm{V}}
+\newcommand{\bW}{\bm{W}}
+\newcommand{\bX}{\bm{X}}
+\newcommand{\bZ}{\bm{Z}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\bLambda}{\bm{\Lambda}}
+\newcommand{\bzero}{\bm{0}}
+\newcommand{\trans}{^{\mathsf T}}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\blockdiag}{blockdiag}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\tr}{tr}
+\title{\texttt{stLMM}: Algebra for IID and Structured Random Effects}
+\author{}
+\date{Development specification --- \today}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+This note develops a common Gaussian latent-variable formulation for grouped
+IID coefficients and structured effects. It distinguishes fixed observation
+designs from parameter-dependent loadings, derives separate and jointly collapsed
+calculations, and states the requirements for likelihood augmentation,
+multivariate processes, and spatial misalignment. The jointly IID-collapsed
+sampler is a proposed extension to the version 0.0.6 baseline. The equations do
+not imply that every model construction discussed here is already implemented.
+\end{abstract}
+\tableofcontents
+
+\section{Observation model and notation}
+For the $n$ observed responses, consider
+\begin{equation}\label{eq:observation}
+ \by = \bo + \bX\bbeta + \bZ\balpha + \bA\bw + \bm{\epsilon},
+ \qquad \bm{\epsilon}\sim N_n(\bzero,\bR).
+\end{equation}
+Here $\bo$ is a known offset, $\bX$ is the fixed-effect design, $\bZ$ maps grouped
+coefficients to observations, and $\bA$ maps structured latent coefficients to
+observations. Use $\bH$ for the \emph{combined} observation mapping so that the
+existing meaning of $\bA$ is preserved. The more general specification is
+\begin{equation}\label{eq:general}
+ \by\mid\bbeta,\bv,\btheta \sim
+ N_n\{\bo+\bX\bbeta+\bH(\btheta)\bv,\bR(\btheta)\},
+ \qquad
+ \bv\mid\btheta\sim N_q\{\bzero,\bQ(\btheta)^{-1}\}.
+\end{equation}
+The parameter vector $\btheta$ includes covariance parameters and, where present,
+unknown loadings. Both $\bH$ and $\bQ$ may depend on these parameters. Conditional
+on their current values, their entries are numerical quantities for the Gaussian
+calculations. Symbols without their arguments below retain this dependence.
+
+The derivations assume proper positive-definite $\bQ$ and $\bR$ and set
+$\bW=\bR^{-1}$. The present observation models use diagonal $\bW$; the identities
+also hold for positive-definite block observation precision. Intrinsic or otherwise
+singular priors need a constrained formulation and are not covered by ordinary
+determinants in this note. Missing responses contribute no observation-likelihood
+row; the latent support may still contain their locations or group levels.
+
+For independent IID and structured prior blocks, the centered specification is
+\begin{equation}\label{eq:stack}
+ \bv=\begin{pmatrix}\balpha\\\bw\end{pmatrix},\qquad
+ \bH=[\bZ\ \bA],\qquad
+ \bQ=\blockdiag(\bD_\alpha^{-1},\bQ_w).
+\end{equation}
+The block-diagonal prior expresses independence between these components given
+parameters. Their posterior distributions generally are dependent.
+
+\section{Correlated IID coefficients with a fixed design}
+For a grouped term with $G$ groups and $k$ coefficients per group, write
+\begin{equation}\label{eq:iid}
+ \balpha_g\mid\bSigma\stackrel{\mathrm{iid}}{\sim}N_k(\bzero,\bSigma),
+ \qquad \bD_\alpha=\bI_G\otimes\bSigma.
+\end{equation}
+The IID designation applies to the coefficient \emph{vectors} across groups.
+Entries within each vector may be correlated. For independent terms, concatenate
+their designs and use independent prior blocks. For parent-specific covariance
+matrices, replace each term block by $\blockdiag_h(\bI_{G_h}\otimes\bSigma_h)$.
+These covariance specifications are distinct from whether the group memberships
+are crossed or nested.
+
+For a correlated intercept and slope,
+\begin{equation}\label{eq:two-coefficients}
+ \balpha_g=\begin{pmatrix}\alpha_{0g}\\\alpha_{1g}\end{pmatrix},\qquad
+ \bSigma=\begin{pmatrix}
+ \sigma_0^2 & \rho\sigma_0\sigma_1\\
+ \rho\sigma_0\sigma_1 & \sigma_1^2
+ \end{pmatrix},
+ \qquad \sigma_0,\sigma_1>0,\quad |\rho|<1.
+\end{equation}
+An observation in group $g$ receives the contribution
+\begin{equation}
+ \alpha_{0g}+x_i\alpha_{1g}=[1\ \ x_i]\balpha_g.
+\end{equation}
+Its row of $\bZ$ therefore contains $[1\ \ x_i]$ in the columns for that group,
+regardless of $\rho$. For observations $i,j$ in the same group,
+\begin{equation}\label{eq:iid-crosscov}
+ \Cov(\alpha_{0g}+x_i\alpha_{1g},\alpha_{0g}+x_j\alpha_{1g}\mid\bSigma)
+ =\sigma_0^2+\rho\sigma_0\sigma_1(x_i+x_j)+\sigma_1^2x_ix_j.
+\end{equation}
+The off-diagonal covariance is thus present even though the design row is fixed.
+For this term, effects belonging to different groups have zero prior covariance.
+The prior precision contributes repeated small blocks
+\begin{equation}\label{eq:two-precision}
+ \bSigma^{-1}=\frac{1}{1-\rho^2}
+ \begin{pmatrix}
+ \sigma_0^{-2} & -\rho/(\sigma_0\sigma_1)\\
+ -\rho/(\sigma_0\sigma_1) & \sigma_1^{-2}
+ \end{pmatrix}.
+\end{equation}
+Updating $\rho$ or the variances changes these blocks of $\bQ$, not the supplied
+covariates or group memberships in $\bZ$.
+
+\subsection{Equivalent standardized coefficients and variable loadings}
+Let $\bSigma=\bC\bC\trans$ and set
+\begin{equation}\label{eq:standardize}
+ \balpha_g=\bC\bu_g,\qquad \bu_g\stackrel{\mathrm{iid}}{\sim}N_k(\bzero,\bI_k).
+\end{equation}
+The design becomes $\bZ(\bI_G\otimes\bC)$. In the intercept--slope example,
+\begin{equation}\label{eq:variable-row}
+ \bC=\begin{pmatrix}
+ \sigma_0&0\\\rho\sigma_1&\sigma_1\sqrt{1-\rho^2}
+ \end{pmatrix},\qquad
+ [1\ \ x_i]\bC=
+ [\sigma_0+x_i\rho\sigma_1\ \ \ x_i\sigma_1\sqrt{1-\rho^2}].
+\end{equation}
+These mapping entries are unknown functions of covariance parameters and change
+across posterior draws. In the combined system,
+\begin{equation}
+ \bH_{\mathrm{std}}=[\bZ(\bI_G\otimes\bC)\ \bA],\qquad
+ \bQ_{\mathrm{std}}=\blockdiag(\bI_{Gk},\bQ_w).
+\end{equation}
+The two representations induce exactly the same observation covariance and
+marginal likelihood. They define the same posterior model when the prior on
+$\bSigma$ is preserved under any parameter transformation. An arbitrary new prior
+on the entries of $\bC$ need not preserve that model.
+
+More generally, if $\bv=\bT\bu$ for a nonsingular $\bT$, then
+$\bH_u=\bH\bT$ and $\bQ_u=\bT\trans\bQ\bT$. Consequently,
+\begin{equation}\label{eq:invariance}
+ \bH_u\bQ_u^{-1}\bH_u\trans=\bH\bQ^{-1}\bH\trans.
+\end{equation}
+This identity holds at each parameter value even when $\bT$ depends on parameters.
+Collapsing either latent representation does not itself change the marginal
+target for identically parameterized covariance parameters. Numerical cost and
+conditioning can differ.
+
+\section{Jointly collapsed Gaussian calculations}
+Integrating $\bv$ out of \eqref{eq:general} gives
+\begin{equation}\label{eq:marginal}
+ \by\mid\bbeta,\btheta\sim N_n(\bo+\bX\bbeta,\bV),\qquad
+ \bV=\bR+\bH\bQ^{-1}\bH\trans.
+\end{equation}
+Define
+\begin{equation}\label{eq:M}
+ \bM=\bQ+\bH\trans\bW\bH,\qquad
+ \br=\by-\bo-\bX\bbeta,\qquad \bb=\bH\trans\bW\br.
+\end{equation}
+Completing the square in the joint Gaussian kernel yields
+\begin{align}
+ &(\br-\bH\bv)\trans\bW(\br-\bH\bv)+\bv\trans\bQ\bv\notag\\
+ &\quad=(\bv-\bM^{-1}\bb)\trans\bM(\bv-\bM^{-1}\bb)
+       +\br\trans\bW\br-\bb\trans\bM^{-1}\bb.
+\end{align}
+The determinant lemma and Woodbury identity give
+\begin{align}
+ \log|\bV|&=\log|\bR|+\log|\bM|-\log|\bQ|,\label{eq:det}\\
+ \bV^{-1}\br&=\bW\br-\bW\bH\bM^{-1}\bH\trans\bW\br,\label{eq:solve}\\
+ \br\trans\bV^{-1}\br&=\br\trans\bW\br-\bb\trans\bM^{-1}\bb.\label{eq:quad}
+\end{align}
+No observation covariance inverse is required: each occurrence of $\bM^{-1}$
+denotes a solve. The Gaussian log likelihood is
+\begin{equation}\label{eq:loglik}
+ \ell=-\frac n2\log(2\pi)-\frac12\left\{
+ \log|\bR|+\log|\bM|-\log|\bQ|
+ +\br\trans\bW\br-\bb\trans\bM^{-1}\bb\right\}.
+\end{equation}
+Equations \eqref{eq:M}--\eqref{eq:loglik} allow both $\bH(\btheta)$ and
+$\bQ(\btheta)$. Any parameter-dependent entries must be refreshed when evaluating
+a proposal. In the centered IID case,
+\begin{equation}\label{eq:M-blocks}
+ \bM=\begin{pmatrix}
+ \bD_\alpha^{-1}+\bZ\trans\bW\bZ & \bZ\trans\bW\bA\\
+ \bA\trans\bW\bZ & \bQ_w+\bA\trans\bW\bA
+ \end{pmatrix},\qquad
+ \log|\bQ|=\log|\bQ_w|-\sum_{b,h}G_{bh}\log|\bSigma_{bh}|.
+\end{equation}
+The sum denotes the appropriate independent term/parent blocks, including scalar
+blocks as $1\times1$ covariance matrices.
+
+\subsection{Fixed effects and latent recovery}
+For a normal fixed-effect prior with precision $\bP_\beta$ and mean $\bmu_\beta$,
+the conditional precision and mean after integrating the latent effects are
+\begin{align}
+ \bK_\beta&=\bP_\beta+\bX\trans\bV^{-1}\bX,\\
+ \bm{m}_\beta&=\bK_\beta^{-1}
+ \{\bP_\beta\bmu_\beta+\bX\trans\bV^{-1}(\by-\bo)\}.
+\end{align}
+A flat prior corresponds to $\bP_\beta=0$ when the resulting conditional precision
+is positive definite. The latent conditional is
+\begin{equation}\label{eq:latent-recovery}
+ \bv\mid\by,\bbeta,\btheta\sim N_q(\bM^{-1}\bb,\bM^{-1}).
+\end{equation}
+If a permutation satisfies $\bP\bM\bP\trans=\bL\bL\trans$, a draw is
+\begin{equation}
+ \bv=\bM^{-1}\bb+\bP\trans\bL^{-\mathsf T}\bz,
+ \qquad \bz\sim N_q(\bzero,\bI_q).
+\end{equation}
+This describes triangular solves, not an explicitly formed inverse or a requirement
+to extract the factor from CHOLMOD. The IID and structured components of a joint
+posterior draw generally cannot be replaced by independent draws from their two
+marginals. Output storage may retain selected components without changing the
+joint draw used internally.
+
+\section{Keeping IID effects separate}
+When only $\bw$ is integrated out, define
+\begin{equation}
+ \bV_w=\bR+\bA\bQ_w^{-1}\bA\trans,\qquad
+ \bM_w=\bQ_w+\bA\trans\bW\bA.
+\end{equation}
+The observation mean is then $\bo+\bX\bbeta+\bZ\balpha$. Conditional on
+$\bbeta$ and covariance parameters,
+\begin{align}
+ \bK_\alpha&=\bD_\alpha^{-1}+\bZ\trans\bV_w^{-1}\bZ,\label{eq:alpha-conditional}\\
+ \bm{m}_\alpha&=\bK_\alpha^{-1}\bZ\trans\bV_w^{-1}
+ (\by-\bo-\bX\bbeta).
+\end{align}
+The fixed-effect conditional similarly uses $\by-\bo-\bZ\balpha$ and $\bV_w$.
+The Schur complement of the structured block in \eqref{eq:M-blocks} is
+\begin{align}
+ &\bD_\alpha^{-1}+\bZ\trans\bW\bZ
+ -\bZ\trans\bW\bA\bM_w^{-1}\bA\trans\bW\bZ\notag\\
+ &\qquad=\bD_\alpha^{-1}+\bZ\trans\bV_w^{-1}\bZ
+ =\bK_\alpha.\label{eq:schur}
+\end{align}
+Thus the two systems are algebraically connected. Keeping IID coefficients
+separate avoids adding their nodes to the structured factorization, but its
+conditional IID precision can be dense.
+
+For one covariance block, let $\bS_\alpha=\sum_{g=1}^G\balpha_g\balpha_g\trans$.
+Its covariance-parameter target conditional on the coefficients is
+\begin{equation}\label{eq:conditional-covariance-target}
+ \log p(\bSigma\mid\balpha,\ldots)
+ =\log p(\bSigma)-\frac G2\log|\bSigma|
+ -\frac12\tr(\bSigma^{-1}\bS_\alpha)+\mathrm{constant}.
+\end{equation}
+For the inverse-Wishart convention
+\begin{equation}
+ p(\bSigma)\propto |\bSigma|^{-(\nu+k+1)/2}
+ \exp\{-\tfrac12\tr(\bm{\Psi}\bSigma^{-1})\},
+\end{equation}
+with $\nu>k-1$ and positive-definite $\bm{\Psi}$, the conditional is
+$\operatorname{IW}_k(\nu+G,\bm{\Psi}+\bS_\alpha)$.
+For a scalar variance with $\operatorname{IG}(a,b)$ density proportional to
+$v^{-a-1}\exp(-b/v)$, it is
+$\operatorname{IG}(a+G/2,b+\sum_g\alpha_g^2/2)$.
+Other priors can use \eqref{eq:conditional-covariance-target} in a Metropolis step.
+That step uses small covariance blocks and does not require changing $\bM_w$.
+
+\section{Marginal covariance targets and prior transformations}
+When the IID effects are integrated out in the covariance update, the target is
+\begin{equation}\label{eq:marginal-target}
+ \log p(\btheta\mid\by,\bbeta)=\ell(\btheta)+\log p(\btheta)+\mathrm{constant}.
+\end{equation}
+The IG/IW priors remain valid choices, but their usual conditional conjugacy is
+generally lost. For an unconstrained proposal coordinate $\bxi$ with
+$\btheta=t(\bxi)$, the target density with respect to $\bxi$ is
+\begin{equation}
+ \ell\{t(\bxi)\}+\log p\{t(\bxi)\}
+ +\log\left|\frac{\partial t(\bxi)}{\partial\bxi}\right|.
+\end{equation}
+The prior measure must be specified. A prior on a full covariance matrix differs
+from independent priors on its marginal variances and correlation matrix.
+
+For the two-coefficient case, write $v_j=\sigma_j^2=e^{\xi_j}$,
+$\rho=\tanh\zeta$. The Jacobian from $(v_0,v_1,\rho)$ to the distinct covariance
+entries $(\Sigma_{00},\Sigma_{11},\Sigma_{01})$ is $\sqrt{v_0v_1}$.
+Consequently, an IW density specified on those covariance entries contributes
+\begin{equation}\label{eq:iw-jacobian}
+ \log p_{\Sigma}\{\bSigma(\xi_0,\xi_1,\zeta)\}
+ +\tfrac32(\xi_0+\xi_1)+\log(1-\rho^2)
+\end{equation}
+to the transformed log-prior target. In contrast, separately specified densities
+on $(v_0,v_1,\rho)$ contribute
+\begin{equation}\label{eq:separation-jacobian}
+ \log p_0(v_0)+\log p_1(v_1)+\log p_\rho(\rho)
+ +\xi_0+\xi_1+\log(1-\rho^2).
+\end{equation}
+For a prior on a standard deviation, its variance density is
+$p_v(v)=p_\sigma(\sqrt v)/(2\sqrt v)$ before applying the log-variance transform.
+For $k>2$, independently transformed pairwise correlations do not guarantee a
+positive-definite correlation matrix. A valid matrix parameterization and its
+complete Jacobian are required.
+
+\section{Augmented likelihoods and update order}
+Conditional on augmentation variables, a Gaussian working likelihood can be
+written using $\by^*$ and $\bW$, so that
+\begin{equation}
+ p(\by,\text{augmentation}\mid\bbeta,\bv,\ldots)
+ \propto\exp\left[-\tfrac12
+ (\by^*-\bo-\bX\bbeta-\bH\bv)\trans\bW
+ (\by^*-\bo-\bX\bbeta-\bH\bv)\right].
+\end{equation}
+Proportionality here omits only terms constant in the parameters being updated;
+it is not permission to omit augmentation-dependent normalizing terms when those
+terms depend on a proposed parameter.
+
+For binomial logit observations with trial counts $m_i$, let
+$\eta_i=o_i+\bx_i\trans\bbeta+(\bH\bv)_i$, where
+$\bx_i\trans$ denotes row $i$ of $\bX$. Then
+\begin{equation}
+ \omega_i\mid\cdots\sim\operatorname{PG}(m_i,\eta_i),\qquad
+ y_i^*=\frac{y_i-m_i/2}{\omega_i},\qquad W_{ii}=\omega_i.
+\end{equation}
+For negative-binomial observations with mean $\exp(\eta_i)$ and size $r$,
+\begin{equation}\label{eq:nb-working}
+ \omega_i\mid\cdots\sim\operatorname{PG}(y_i+r,\eta_i-\log r),\qquad
+ y_i^*=\frac{y_i-r}{2\omega_i}+\log r,\qquad W_{ii}=\omega_i.
+\end{equation}
+For probit observations, the working response is a unit-variance normal latent
+response truncated above or below zero according to the observed outcome, and
+$\bW=\bI$.
+
+A jointly IID-collapsed iteration for an augmented model has the following order:
+\begin{enumerate}
+\item If NB size is estimated, update it using the ordinary NB likelihood with
+the current full predictor and its prior.
+\item Refresh augmentation variables conditional on the current full predictor
+and the resulting size. Rebuild any working response/precision affected by size.
+\item Update $\bbeta$ with all components of $\bv$ integrated out.
+\item Update covariance/loading parameters using their marginal targets with
+the augmentation held fixed.
+\item Draw a compatible joint $\bv$ using the resulting parameters before the
+next augmentation or size update that conditions on it.
+\end{enumerate}
+The Gaussian case omits augmentation and size updates. An ordinary NB size target
+cannot be replaced by the covariance-only Gaussian working target while retaining
+stale augmentation. Initialization and warmup must maintain the same conditioning
+relationships. The separate-IID schedule instead uses explicit IID coefficients
+in the coefficient and structured-covariance conditionals, with conditional IID
+covariance updates as in \eqref{eq:conditional-covariance-target}.
+
+\section{Multivariate processes and misalignment}
+\subsection{Loadings may be unknown}
+A linear model of coregionalization writes a response-specific spatial vector as
+\begin{equation}\label{eq:lmc}
+ \bw(s)=\bC\bu(s),\qquad
+ \Cov\{\bu(s),\bu(t)\}=\diag\{r_1(s,t),\ldots,r_K(s,t)\}.
+\end{equation}
+The component processes are independent; each can have its own spatial kernel.
+The resulting cross-covariance is
+\begin{equation}
+ \Cov\{\bw(s),\bw(t)\}=\bC\diag\{r_k(s,t)\}\bC\trans.
+\end{equation}
+Unknown entries of $\bC$ enter the observation mapping when the latent variables
+are $\bu$. Alternatively, use $\bw$ as the latent vector and carry its joint
+dependence in the prior. A reduced-rank loading construction may give $\bw$ a
+singular prior; retaining $\bu$ then avoids applying the positive-definite
+precision formulas to that singular covariance. These constructions connect
+directly to multivariate process modeling and marginalization in \cite{Finley2008}.
+
+Spatially varying loadings $\bC(s)$ give
+$\bC(s)\diag\{r_k(s,t)\}\bC(t)\trans$ \cite{Gelfand2004}.
+If the loadings themselves have a stochastic-process prior, the model is Gaussian
+in $\bu$ conditional on those loadings. It is generally not jointly Gaussian in
+both sets of unknowns because they enter multiplicatively. The Gaussian collapse
+then conditions on the loading realization; it does not automatically integrate
+both loading and component processes analytically.
+
+Conditional multivariate models can instead give dependence directly to the
+prior precision. For example, writing $\bw=\bB\bw+\bm{e}$ with strictly block
+lower-triangular $\bB$ and innovation precision $\bLambda$ gives
+\begin{equation}
+ \bQ_w=(\bI-\bB)\trans\bLambda(\bI-\bB).
+\end{equation}
+This includes the conditional construction used by multivariate DAGAR models
+\cite{Gao2022}. It illustrates why both the observation mapping and the prior
+precision must be allowed to carry parameters.
+
+\subsection{Known misalignment is an observation-selection problem}
+Suppose response $j$ is observed only on locations $S_j$. Stack the actual
+observations and let $\bS_{\mathrm{obs}}$ select the relevant response--location
+pairs from a latent construction. If $\bL(\btheta)$ maps component fields to the
+full response-specific field vector, then
+\begin{equation}\label{eq:misalignment}
+ \bH(\btheta)=\bS_{\mathrm{obs}}\bL(\btheta).
+\end{equation}
+For known locations and observation patterns, $\bS_{\mathrm{obs}}$ is fixed.
+Misalignment alone does not make its entries stochastic. Unknown loadings can
+still make $\bH$ parameter-dependent. A model with uncertain locations or unknown
+alignment would introduce additional unknowns and is a different specification.
+Response-specific designs and unequal observation counts fit this framework
+\cite{Finley2014}; no fabricated observed outcomes are needed to create a complete
+rectangular data array. Missing covariates require separate treatment.
+
+Independent realizations within stands or ecoregions can be represented by prior
+blocks for each parent. Shared versus parent-specific covariance parameters are
+a separate modeling choice. Cross-response process covariance is also distinct
+from cross-response observation-error covariance. The latter requires appropriate
+blocks in $\bR$, rather than merely changing the latent loadings.
+
+\section{Sparse computation and verification requirements}
+The same-group covariance in \eqref{eq:iid-crosscov} does not require additional
+design entries. Nevertheless, including group nodes in the joint precision
+\eqref{eq:M-blocks} can connect many structured nodes through $\bZ\trans\bW\bA$.
+These connections can create Cholesky fill. A fill-reducing ordering can help,
+but sparse input alone does not guarantee a sparse factor. Crossed IID terms can
+also create fill without any structured process. Conversely, the separate
+strategy can incur a dense IID Schur complement \eqref{eq:schur}.
+
+The two representations and sampler strategies should be assessed using the
+number of nonzeros in $\bM$ and its factor, memory, factorization and recovery
+cost, and effective samples per second. Factorization patterns should be reused
+when structural sparsity is fixed; changing numerical weights or sampled
+loadings still requires the relevant numerical updates. Standardizing a CAR or
+DAGAR scale does not generally make every node's marginal variance one.
+
+Small independent numerical references should verify:
+\begin{enumerate}
+\item the intercept--slope covariance and the centered/standardized equivalence;
+\item determinant and quadratic-form identities against a directly formed small
+observation covariance;
+\item the IID Schur complement and joint conditional moments;
+\item transformed covariance-prior Jacobians and scalar special cases;
+\item unchanged observation covariance when known misalignment is expressed by
+selection rather than by direct row construction;
+\item restoration of all affected matrices and caches after rejected proposals.
+\end{enumerate}
+Explicit matrix inverses in such small reference calculations are mathematical
+checks; the fitting implementation should use factors, solves, and small-block
+operations.
+
+\begin{thebibliography}{9}
+\bibitem{Finley2008}
+Finley, A. O., Banerjee, S., Ek, A. R., and McRoberts, R. E. (2008).
+Bayesian multivariate process modeling for prediction of forest attributes.
+\emph{Journal of Agricultural, Biological, and Environmental Statistics},
+13, 60--83. \url{https://doi.org/10.1198/108571108X273160}.
+
+\bibitem{Gelfand2004}
+Gelfand, A. E., Schmidt, A. M., Banerjee, S., and Sirmans, C. F. (2004).
+Nonstationary multivariate process modeling through spatially varying
+coregionalization. \emph{TEST}, 13, 263--312.
+
+\bibitem{Finley2014}
+Finley, A. O., Banerjee, S., and Cook, B. D. (2014).
+Bayesian hierarchical models for spatially misaligned data in R.
+\emph{Methods in Ecology and Evolution}, 5, 514--523.
+\url{https://doi.org/10.1111/2041-210X.12189}.
+
+\bibitem{Gao2022}
+Gao, L., Datta, A., and Banerjee, S. (2022).
+Hierarchical multivariate directed acyclic graph autoregressive models for spatial
+diseases mapping. \emph{Statistics in Medicine}, 41, 3057--3075.
+\url{https://doi.org/10.1002/sim.9404}.
+\end{thebibliography}
+\end{document}

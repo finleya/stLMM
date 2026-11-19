@@ -7,11 +7,29 @@ Branch: collapsed-iid, created from this baseline for staged development.
 Current stage: 1 -- interface and mathematical design review. Implementation
 has not started. Discuss and agree on one implementation increment at a time.
 
-This plan is explicitly shared on the branch so work can continue from another
-checkout. It is the exception to keeping internal development material local;
-other working notes, conversations, validation artifacts, and roadmaps remain
-excluded. After each agreed stage, update its status and record the relevant
-commit and validation results here.
+This plan and the requested algebra note are explicitly shared on the branch so
+work can continue from another checkout. These are exceptions to keeping internal
+development material local; other working notes, conversations, validation
+artifacts, and roadmaps remain excluded. After each agreed stage, update its
+status and record the relevant commit and validation results here.
+
+Algebra note: dev/collapsed-iid-algebra.tex and its rendered PDF,
+dev/collapsed-iid-algebra.pdf. It derives the separate and jointly collapsed
+systems and allows both H(theta) and Q(theta). A fixed design is the initial
+centered representation, not a restriction on future unknown loadings. Known
+misalignment uses fixed observation selection. The note is a development
+specification for review, not a claim that the proposed sampler is implemented.
+To rebuild from the package root without leaving auxiliary files in dev/:
+  latexmk -pdf -interaction=nonstopmode -halt-on-error \
+    -outdir=/tmp/stlmm-algebra-build dev/collapsed-iid-algebra.tex
+  cp /tmp/stlmm-algebra-build/collapsed-iid-algebra.pdf dev/
+
+2026-11-19 algebra verification: 17 checks passed across 24 small matrix systems,
+25 finite-difference Jacobian points, and three NB sizes. These cover equivalent
+parameterizations, determinants, quadratic forms, Schur complements, conditional
+moments, triangular recovery, selection, and NB working kernels. Matrix identities
+agreed within 1e-14 relative error; Jacobians within 8e-11. These validate the
+equations only; sampler implementation and its tests remain separate stages.
 
 Scope and decisions
 -------------------
@@ -160,8 +178,9 @@ Staged implementation and review
 --------------------------------
 1. Agree on the interface, latent representation, prior specification, parameter
    transforms, blocking meanings, and exact Gaussian/augmented update schedules.
-   The branch currently contains this plan only. Use small commits and review
-   the result of each implementation stage before proceeding to the next.
+   The branch currently contains this plan and its mathematical specification.
+   Use small commits and review the result of each implementation stage before
+   proceeding to the next.
 
 2. Extract the necessary iteration orchestration/helpers with no algorithm change.
    Verify seeded legacy samples and RNG state, existing public output, and all
@@ -200,8 +219,8 @@ Staged implementation and review
    Update manuals and the technical document with implemented behavior at each
    completed stage; update teaching articles after the interface stabilizes.
    Public commits contain package code, tests, documentation, and this explicitly
-   shared plan. Other internal plans, working notes, exploratory scripts, reports,
-   conversations, and generated fits remain local.
+   shared plan and algebra note. Other internal plans, working notes, exploratory
+   scripts, reports, conversations, and generated fits remain local.
 
 Longer-term design requirements
 -------------------------------
