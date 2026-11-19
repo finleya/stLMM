@@ -1322,6 +1322,7 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   s->reCovScale = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
   s->reCovariance = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
   s->reCovPrecision = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->reCovLogDet = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
   s->nRECovElements = 0;
   {
     SEXP blocks, block, dim, df, scale, start, matrices[2], d;
@@ -1426,6 +1427,8 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
     s->qLatTotal += s->terms[i].qLat;
     s->nThetaTotal += s->terms[i].thetaDim;
   }
+
+  s->qLatSystem = s->qLatTotal;
 
   s->scratch_BF_m = 0;
   for(i = 0; i < s->nGraphs; i++){

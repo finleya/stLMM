@@ -116,6 +116,9 @@ void refresh_iid_covariance_precision(SamplerState *s, int b)
   F77_CALL(dpotrf)(&lower, &k, L, &k, &info FCONE);
   if(info != 0)
     Rf_error("iid covariance Cholesky failed");
+  s->reCovLogDet[b] = 0.0;
+  for(j = 0; j < k; j++)
+    s->reCovLogDet[b] += 2.0 * std::log(L[j + k * j]);
   F77_CALL(dpotrs)(&lower, &k, &k, L, &k, P, &k, &info FCONE);
   if(info != 0)
     Rf_error("iid covariance precision solve failed");
@@ -499,6 +502,8 @@ int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, do
 
   if(!logdet_Qw_blocks_try(s, &logdetQw))
     return 0;
+  if(s->collapseIid)
+    logdetQw += logdet_Qiid_blocks(s);
 
   logdetR = 0.0;
   for(i = 0; i < s->n; i++)
@@ -1389,7 +1394,7 @@ void update_beta_draw_collapsed(SamplerState *s, const double *alpha, double *be
   Prec = (double*)R_alloc(s->p * s->p, sizeof(double));
   rhs = (double*)R_alloc(s->p, sizeof(double));
 
-  if(s->q > 0)
+  if(s->q > 0 && !s->collapseIid)
     sparse_Z_mult(s, alpha, s->Za);
   else
     for(i = 0; i < s->n; i++) s->Za[i] = 0.0;
@@ -1414,6 +1419,8 @@ void update_alpha_draw_collapsed(SamplerState *s, const double *beta, double *al
 
   if(s->q <= 0)
     return;
+  if(s->collapseIid)
+    Rf_error("separate IID coefficient draw requires the conditional structured system");
 
   ytilde = (double*)R_alloc(s->n, sizeof(double));
   Prec = (double*)R_alloc(s->q * s->q, sizeof(double));

@@ -15,43 +15,43 @@ int should_recover_iteration(SamplerState *s, int iter1)
   return (delta % s->recoverThin) == 0;
 }
 
-void recover_w_draw_collapsed(SamplerState *s,
-                                     const double *resid,
-                                     double *wDraw)
+void recover_latent_draw_collapsed(SamplerState *s,
+                                    const double *resid,
+                                    double *draw)
 {
   cholmod_dense *rhs_r, *sol_r, *z_r, *noise_perm_r, *noise_r;
   double *rhsx, *solx, *zx, *noisex;
   int i;
 
-  if(s->qLatTotal <= 0)
+  if(s->qLatSystem <= 0)
     return;
 
-  rhs_r = M_cholmod_allocate_dense(s->qLatTotal, 1, s->qLatTotal, CHOLMOD_REAL, &s->cm);
+  rhs_r = M_cholmod_allocate_dense(s->qLatSystem, 1, s->qLatSystem, CHOLMOD_REAL, &s->cm);
   if(rhs_r == NULL || s->cm.status != CHOLMOD_OK)
-    Rf_error("recover_w_draw_collapsed: failed to allocate rhs");
+    Rf_error("recover_latent_draw_collapsed: failed to allocate rhs");
 
   rhsx = (double*)rhs_r->x;
-  apply_A_transpose_weighted(s, resid, rhsx);
+  apply_H_transpose_weighted(s, resid, rhsx);
 
   sol_r = M_cholmod_solve(CHOLMOD_A, s->M_lat_fac, rhs_r, &s->cm);
   if(sol_r == NULL || s->cm.status != CHOLMOD_OK){
     M_cholmod_free_dense(&rhs_r, &s->cm);
-    Rf_error("recover_w_draw_collapsed: cholmod_solve(A) failed for posterior mean");
+    Rf_error("recover_latent_draw_collapsed: cholmod_solve(A) failed for posterior mean");
   }
 
   solx = (double*)sol_r->x;
-  for(i = 0; i < s->qLatTotal; i++)
-    wDraw[i] = solx[i];
+  for(i = 0; i < s->qLatSystem; i++)
+    draw[i] = solx[i];
 
-  z_r = M_cholmod_allocate_dense(s->qLatTotal, 1, s->qLatTotal, CHOLMOD_REAL, &s->cm);
+  z_r = M_cholmod_allocate_dense(s->qLatSystem, 1, s->qLatSystem, CHOLMOD_REAL, &s->cm);
   if(z_r == NULL || s->cm.status != CHOLMOD_OK){
     M_cholmod_free_dense(&sol_r, &s->cm);
     M_cholmod_free_dense(&rhs_r, &s->cm);
-    Rf_error("recover_w_draw_collapsed: failed to allocate z");
+    Rf_error("recover_latent_draw_collapsed: failed to allocate z");
   }
 
   zx = (double*)z_r->x;
-  for(i = 0; i < s->qLatTotal; i++)
+  for(i = 0; i < s->qLatSystem; i++)
     zx[i] = rnorm(0.0, 1.0);
 
   noise_perm_r = M_cholmod_solve(CHOLMOD_Lt, s->M_lat_fac, z_r, &s->cm);
@@ -59,7 +59,7 @@ void recover_w_draw_collapsed(SamplerState *s,
     M_cholmod_free_dense(&z_r, &s->cm);
     M_cholmod_free_dense(&sol_r, &s->cm);
     M_cholmod_free_dense(&rhs_r, &s->cm);
-    Rf_error("recover_w_draw_collapsed: cholmod_solve(Lt) failed for posterior noise draw");
+    Rf_error("recover_latent_draw_collapsed: cholmod_solve(Lt) failed for posterior noise draw");
   }
 
   noise_r = M_cholmod_solve(CHOLMOD_Pt, s->M_lat_fac, noise_perm_r, &s->cm);
@@ -68,18 +68,25 @@ void recover_w_draw_collapsed(SamplerState *s,
     M_cholmod_free_dense(&z_r, &s->cm);
     M_cholmod_free_dense(&sol_r, &s->cm);
     M_cholmod_free_dense(&rhs_r, &s->cm);
-    Rf_error("recover_w_draw_collapsed: cholmod_solve(Pt) failed for posterior noise draw");
+    Rf_error("recover_latent_draw_collapsed: cholmod_solve(Pt) failed for posterior noise draw");
   }
 
   noisex = (double*)noise_r->x;
-  for(i = 0; i < s->qLatTotal; i++)
-    wDraw[i] += noisex[i];
+  for(i = 0; i < s->qLatSystem; i++)
+    draw[i] += noisex[i];
 
   M_cholmod_free_dense(&noise_r, &s->cm);
   M_cholmod_free_dense(&noise_perm_r, &s->cm);
   M_cholmod_free_dense(&z_r, &s->cm);
   M_cholmod_free_dense(&sol_r, &s->cm);
   M_cholmod_free_dense(&rhs_r, &s->cm);
+}
+
+void recover_w_draw_collapsed(SamplerState *s, const double *resid, double *wDraw)
+{
+  if(s->collapseIid)
+    Rf_error("structured recovery requires the conditional separate-IID system");
+  recover_latent_draw_collapsed(s, resid, wDraw);
 }
 
 static void recover_fixed_random_resid(SamplerState *s,

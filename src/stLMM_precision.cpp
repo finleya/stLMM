@@ -3,11 +3,10 @@
 /* Sparse precision assembly for the collapsed likelihood.
  *
  * This file owns the CHOLMOD sparsity pattern for
- *   M = Q_w + A' W A
+ *   M = Q + H' W H
  * plus cache indices that let each MCMC iteration overwrite numeric values
- * without rebuilding the sparse structure. The current public model still
- * uses W = tau_sq^{-1} I; representing it as a vector is the foundation for
- * direct-estimate and other diagonal observation precision models.
+ * without rebuilding the sparse structure. H maps the coefficients integrated
+ * out of the working Gaussian likelihood; W is diagonal observation precision.
  */
 
 int cmp_int_asc(const void *a, const void *b)
@@ -276,7 +275,7 @@ void build_M_lat_pattern_sparse(SamplerState *s)
   TermState *term;
   GraphState *g;
 
-  q = s->qLatTotal;
+  q = s->qLatSystem;
 
   cols = R_Calloc(q > 0 ? q : 1, PatternCol);
   for(col = 0; col < q; col++){
@@ -307,7 +306,10 @@ void build_M_lat_pattern_sparse(SamplerState *s)
       Rf_error("unsupported graph type in sparse latent pattern build");
   }
 
-  append_AtA_pattern_sparse(cols, s);
+  if(s->collapseIid)
+    append_joint_iid_pattern(cols, s);
+  else
+    append_AtA_pattern_sparse(cols, s);
 
   nnz = 0;
   for(col = 0; col < q; col++){
@@ -737,7 +739,10 @@ void build_M_lat_index_caches(SamplerState *s)
       Rf_error("unsupported graph type while building M caches");
   }
 
-  build_AtA_cache(s);
+  if(s->collapseIid)
+    build_joint_iid_caches(s);
+  else
+    build_AtA_cache(s);
 }
 
 /*==========================================================================*/
@@ -1239,7 +1244,10 @@ void assemble_M_lat_numeric(SamplerState *s)
       Rf_error("unsupported graph type in M_lat numeric assembly");
   }
 
-  add_observation_precision_AtA_into_M(s);
+  if(s->collapseIid)
+    assemble_joint_iid_into_M(s);
+  else
+    add_observation_precision_AtA_into_M(s);
 }
 
 void apply_A_transpose(SamplerState *s, const double *vObs, double *outLat)
@@ -1306,14 +1314,14 @@ void solve_M_lat(SamplerState *s, const double *b, double *x)
     M_cholmod_solve() to allocate the returned solution object, but avoid
     allocating/copying into a fresh CHOLMOD RHS object on every call.
   */
-  for(i = 0; i < s->qLatTotal; i++)
+  for(i = 0; i < s->qLatSystem; i++)
     s->latentSolveRhs[i] = b[i];
 
   std::memset(&rhs_view, 0, sizeof(cholmod_dense));
-  rhs_view.nrow = s->qLatTotal;
+  rhs_view.nrow = s->qLatSystem;
   rhs_view.ncol = 1;
-  rhs_view.nzmax = s->qLatTotal;
-  rhs_view.d = s->qLatTotal;
+  rhs_view.nzmax = s->qLatSystem;
+  rhs_view.d = s->qLatSystem;
   rhs_view.xtype = CHOLMOD_REAL;
   rhs_view.dtype = CHOLMOD_DOUBLE;
   rhs_view.x = (void*)s->latentSolveRhs;
@@ -1324,7 +1332,7 @@ void solve_M_lat(SamplerState *s, const double *b, double *x)
     Rf_error("solve_M_lat: cholmod_solve(A) failed");
 
   solx = (double*)sol->x;
-  for(i = 0; i < s->qLatTotal; i++)
+  for(i = 0; i < s->qLatSystem; i++)
     x[i] = solx[i];
 
   M_cholmod_free_dense(&sol, &s->cm);
@@ -1334,19 +1342,19 @@ void apply_Vinv(SamplerState *s, const double *vObs, double *outObs)
 {
   int i;
   double wi;
-  double *Atv, *MinvAtv, *A_Minv_Atv;
+  double *Htv, *MinvHtv, *H_Minv_Htv;
 
-  Atv = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
-  MinvAtv = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
-  A_Minv_Atv = (double*)R_alloc(s->n > 0 ? s->n : 1, sizeof(double));
+  Htv = (double*)R_alloc(s->qLatSystem > 0 ? s->qLatSystem : 1, sizeof(double));
+  MinvHtv = (double*)R_alloc(s->qLatSystem > 0 ? s->qLatSystem : 1, sizeof(double));
+  H_Minv_Htv = (double*)R_alloc(s->n > 0 ? s->n : 1, sizeof(double));
 
-  apply_A_transpose_weighted(s, vObs, Atv);
-  solve_M_lat(s, Atv, MinvAtv);
-  apply_A(s, MinvAtv, A_Minv_Atv);
+  apply_H_transpose_weighted(s, vObs, Htv);
+  solve_M_lat(s, Htv, MinvHtv);
+  apply_H(s, MinvHtv, H_Minv_Htv);
 
   for(i = 0; i < s->n; i++){
     wi = s->obsPrecision[i];
-    outObs[i] = wi * vObs[i] - wi * A_Minv_Atv[i];
+    outObs[i] = wi * vObs[i] - wi * H_Minv_Htv[i];
   }
 }
 
@@ -1359,7 +1367,8 @@ double compute_logDetV(SamplerState *s)
   for(i = 0; i < s->n; i++)
     logDetR -= std::log(s->obsPrecision[i]);
 
-  return logDetR + logDetFactor(s->M_lat_fac) - logdet_Qw_blocks(s);
+  return logDetR + logDetFactor(s->M_lat_fac) - logdet_Qw_blocks(s) -
+    (s->collapseIid ? logdet_Qiid_blocks(s) : 0.0);
 }
 
 double quadform_Vinv(SamplerState *s, const double *vObs)
@@ -1437,14 +1446,14 @@ void solve_M_lat_multiple(SamplerState *s, const double *B, int ncol, double *X)
   double *rhsx, *solx;
   int i, j;
 
-  rhs = M_cholmod_allocate_dense(s->qLatTotal, ncol, s->qLatTotal, CHOLMOD_REAL, &s->cm);
+  rhs = M_cholmod_allocate_dense(s->qLatSystem, ncol, s->qLatSystem, CHOLMOD_REAL, &s->cm);
   if(rhs == NULL || s->cm.status != CHOLMOD_OK)
     Rf_error("solve_M_lat_multiple: failed to allocate rhs");
 
   rhsx = (double*)rhs->x;
   for(j = 0; j < ncol; j++)
-    for(i = 0; i < s->qLatTotal; i++)
-      rhsx[i + s->qLatTotal * j] = B[i + s->qLatTotal * j];
+    for(i = 0; i < s->qLatSystem; i++)
+      rhsx[i + s->qLatSystem * j] = B[i + s->qLatSystem * j];
 
   sol = M_cholmod_solve(CHOLMOD_A, s->M_lat_fac, rhs, &s->cm);
   if(sol == NULL || s->cm.status != CHOLMOD_OK){
@@ -1454,8 +1463,8 @@ void solve_M_lat_multiple(SamplerState *s, const double *B, int ncol, double *X)
 
   solx = (double*)sol->x;
   for(j = 0; j < ncol; j++)
-    for(i = 0; i < s->qLatTotal; i++)
-      X[i + s->qLatTotal * j] = solx[i + s->qLatTotal * j];
+    for(i = 0; i < s->qLatSystem; i++)
+      X[i + s->qLatSystem * j] = solx[i + s->qLatSystem * j];
 
   M_cholmod_free_dense(&sol, &s->cm);
   M_cholmod_free_dense(&rhs, &s->cm);
@@ -1465,20 +1474,20 @@ void apply_Vinv_multiple(SamplerState *s, const double *Vobs, int ncol, double *
 {
   int i, j;
   double wi;
-  double *AtV, *MinvAtV, *A_Minv_AtV;
+  double *HtV, *MinvHtV, *H_Minv_HtV;
 
-  AtV = (double*)R_alloc((s->qLatTotal > 0 ? s->qLatTotal : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
-  MinvAtV = (double*)R_alloc((s->qLatTotal > 0 ? s->qLatTotal : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
-  A_Minv_AtV = (double*)R_alloc((s->n > 0 ? s->n : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
+  HtV = (double*)R_alloc((s->qLatSystem > 0 ? s->qLatSystem : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
+  MinvHtV = (double*)R_alloc((s->qLatSystem > 0 ? s->qLatSystem : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
+  H_Minv_HtV = (double*)R_alloc((s->n > 0 ? s->n : 1) * (ncol > 0 ? ncol : 1), sizeof(double));
 
-  apply_A_transpose_weighted_multiple(s, Vobs, ncol, AtV);
-  solve_M_lat_multiple(s, AtV, ncol, MinvAtV);
-  apply_A_multiple(s, MinvAtV, ncol, A_Minv_AtV);
+  apply_H_transpose_weighted_multiple(s, Vobs, ncol, HtV);
+  solve_M_lat_multiple(s, HtV, ncol, MinvHtV);
+  apply_H_multiple(s, MinvHtV, ncol, H_Minv_HtV);
 
   for(j = 0; j < ncol; j++)
     for(i = 0; i < s->n; i++){
       wi = s->obsPrecision[i];
-      outObs[i + s->n * j] = wi * Vobs[i + s->n * j] - wi * A_Minv_AtV[i + s->n * j];
+      outObs[i + s->n * j] = wi * Vobs[i + s->n * j] - wi * H_Minv_HtV[i + s->n * j];
     }
 }
 
@@ -1504,47 +1513,47 @@ static void form_XtWX_and_XtWy(SamplerState *s, const double *ytilde, double *Xt
   }
 }
 
-static void form_AtWX_and_AtWy(SamplerState *s, const double *ytilde, double *AtWX, double *AtWy)
+static void form_HtWX_and_HtWy(SamplerState *s, const double *ytilde, double *HtWX, double *HtWy)
 {
-  apply_A_transpose_weighted_multiple(s, s->X, s->p, AtWX);
-  apply_A_transpose_weighted(s, ytilde, AtWy);
+  apply_H_transpose_weighted_multiple(s, s->X, s->p, HtWX);
+  apply_H_transpose_weighted(s, ytilde, HtWy);
 }
 
 void form_XtVinvX_and_rhs(SamplerState *s, const double *ytilde, double *XtVinvX, double *XtVinvy)
 {
   int i, j, inc;
   double correction;
-  double *AtWX, *AtWy, *MinvAtWX, *MinvAtWy;
+  double *HtWX, *HtWy, *MinvHtWX, *MinvHtWy;
 
   if(s->p <= 0)
     return;
 
   form_XtWX_and_XtWy(s, ytilde, XtVinvX, XtVinvy);
 
-  if(s->qLatTotal <= 0)
+  if(s->qLatSystem <= 0)
     return;
 
   inc = 1;
 
-  AtWX = (double*)R_alloc(s->qLatTotal * s->p, sizeof(double));
-  AtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
-  MinvAtWX = (double*)R_alloc(s->qLatTotal * s->p, sizeof(double));
-  MinvAtWy = (double*)R_alloc(s->qLatTotal, sizeof(double));
+  HtWX = (double*)R_alloc(s->qLatSystem * s->p, sizeof(double));
+  HtWy = (double*)R_alloc(s->qLatSystem, sizeof(double));
+  MinvHtWX = (double*)R_alloc(s->qLatSystem * s->p, sizeof(double));
+  MinvHtWy = (double*)R_alloc(s->qLatSystem, sizeof(double));
 
-  form_AtWX_and_AtWy(s, ytilde, AtWX, AtWy);
-  solve_M_lat_multiple(s, AtWX, s->p, MinvAtWX);
-  solve_M_lat(s, AtWy, MinvAtWy);
+  form_HtWX_and_HtWy(s, ytilde, HtWX, HtWy);
+  solve_M_lat_multiple(s, HtWX, s->p, MinvHtWX);
+  solve_M_lat(s, HtWy, MinvHtWy);
 
   for(j = 0; j < s->p; j++){
-    correction = F77_CALL(ddot)(&s->qLatTotal,
-                                AtWX + s->qLatTotal * j, &inc,
-                                MinvAtWy, &inc);
+    correction = F77_CALL(ddot)(&s->qLatSystem,
+                                HtWX + s->qLatSystem * j, &inc,
+                                MinvHtWy, &inc);
     XtVinvy[j] -= correction;
 
     for(i = j; i < s->p; i++){
-      correction = F77_CALL(ddot)(&s->qLatTotal,
-                                  AtWX + s->qLatTotal * i, &inc,
-                                  MinvAtWX + s->qLatTotal * j, &inc);
+      correction = F77_CALL(ddot)(&s->qLatSystem,
+                                  HtWX + s->qLatSystem * i, &inc,
+                                  MinvHtWX + s->qLatSystem * j, &inc);
       XtVinvX[i + s->p * j] -= correction;
     }
   }

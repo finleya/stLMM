@@ -4,8 +4,9 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 2 complete -- the separate-IID iteration is shared by warmup and
-regular sampling with unchanged numerical updates. Stage 3 is next. Early
+Current stage: 3 complete for known covariance -- joint sparse algebra and Gaussian
+coefficient updates are implemented and validated; stage 4 covariance sampling
+is next. The public fitting path and automatic default are unchanged. Early
 implementation stages may proceed in small, validated commits for review, as
 agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
 
@@ -223,6 +224,7 @@ Staged implementation and review
    and combined summaries. The complete suite passed 5,537 assertions across
    248 test cases, with zero failures, warnings, or skips. Source changes are
    confined to src/stLMM_sampler.cpp; the numerical update functions are unchanged.
+   Commit: 4f0deb2.
 
 3. Implement the joint Gaussian latent calculations using known covariance
    parameters in small reference problems. Cover IID-only and IID-plus-structured
@@ -231,6 +233,36 @@ Staged implementation and review
    log determinants, marginal quadratic forms, and conditional recovery moments
    against independently constructed dense formulas. Test rejected proposals and
    cache restoration explicitly.
+   IMPLEMENTED: fixed row-wise H mapping, full IID precision-block patterns and
+   numeric caches, joint marginal solves/determinants, fixed-effect updates, and
+   joint conditional draws. Internal order is (w, alpha) to retain structured
+   offsets; output dimensions remain separate. No public collapse control or
+   covariance proposal is enabled in this increment.
+   Validation: 80 dense-reference cases cover ten IID formulations, without
+   structured effects and with AR(1), NNGP, or GP terms, using equal/unequal
+   residual variances. Another 14 cases cover CAR, DAGAR, and their temporal
+   variants, including offsets, no fixed effects, and unobserved spatial support.
+   All matrix identities agreed within 3e-14 absolute error; 6,000 conditional
+   draws per case passed independently whitened mean/covariance checks. Numeric
+   covariance changes restored the original matrix exactly using fixed caches.
+   Each case also passed joint posterior mean/covariance checks for beta, alpha,
+   and w from 3,000 known-covariance joint-schedule iterations.
+   Actual rejected-Metropolis-proposal restoration is a stage 4 test.
+   The standalone reproducible suite is tests/native/run-latent-checks.R. It
+   adds native probes only to an isolated test installation, with no extra
+   registered entry point in the distributed package.
+   The separate path remained identical in 240 iteration cases and 96 downstream
+   cases; the full package suite passed 5,537 assertions with no failures,
+   warnings, or skips. Synthetic known-covariance comparisons cover 18 model
+   cases with 30 groups and four cases with 200 groups, each using three chains
+   under both schedules. These check Gaussian coefficient posterior recovery,
+   R-hat, ESS, and timing against analytical moments. They do not benchmark
+   covariance sampling: each chain reuses one factorization, and both schedules
+   generate/store all structured coefficients on every iteration. Full-sampler
+   comparisons, including numerical refactorization costs, remain stages 4--7.
+   R CMD check --no-manual --no-vignettes completed with zero errors; tests and
+   examples passed. Two warnings concern the checkout's absent rendered
+   vignette files in inst/doc; one note reports installed size (5.3 MB).
 
 4. Add IG/IW covariance sampling in reviewable increments: scalar variances first,
    then correlated blocks and by-parent matrices. Share prior

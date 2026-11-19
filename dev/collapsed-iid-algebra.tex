@@ -558,6 +558,15 @@ from cross-response observation-error covariance. The latter requires appropriat
 blocks in $\bR$, rather than merely changing the latent loadings.
 
 \section{Sparse computation and verification requirements}
+The joint sparse implementation stores the coefficients in the order
+$(\bw\trans,\balpha\trans)\trans$, retaining the existing offsets for structured
+terms. This is a fixed permutation of the order used in \eqref{eq:M-blocks};
+the observation mapping and prior precision are permuted together. It changes
+neither the marginal likelihood nor the conditional distribution. The
+structured-effect output dimension remains distinct from the joint system
+dimension. Conditional structured-effect recovery given stored IID draws uses
+the separate system, whereas joint recovery draws both coefficient blocks.
+
 The same-group covariance in \eqref{eq:iid-crosscov} does not require additional
 design entries. Nevertheless, including group nodes in the joint precision
 \eqref{eq:M-blocks} can connect many structured nodes through $\bZ\trans\bW\bA$.

@@ -295,6 +295,8 @@ typedef struct {
   int p;
   int q;
   int qLatTotal;
+  int qLatSystem;
+  int collapseIid;
   int nGraphs;
   int nTerms;
   int nSamples;
@@ -347,6 +349,15 @@ typedef struct {
   double *Zx;
   int Z_nnz;
 
+  /* Fixed row-wise mapping for the joint system, ordered as (w, alpha).
+     qLatTotal continues to count structured coefficients only. */
+  int *Hp;
+  int *Hj;
+  double *Hx;
+  int *HtHIdx;
+  int *iidDiagIdx;
+  int **iidCovIdx;
+
   GraphState *graphs;
   TermState *terms;
 
@@ -392,6 +403,7 @@ typedef struct {
   double **reCovScale;
   double **reCovariance;
   double **reCovPrecision;
+  double *reCovLogDet;
   int nRECovElements;
   int *reBlockID;
   int *reBlockSize;
@@ -472,6 +484,16 @@ SEXP char_vector_from_term_labels(SamplerState *s);
 
 void build_M_lat_pattern_sparse(SamplerState *s);
 void build_M_lat_index_caches(SamplerState *s);
+int find_M_lat_entry_index(SamplerState *s, int row, int col);
+void init_joint_iid_mapping(SamplerState *s);
+void append_joint_iid_pattern(PatternCol *cols, SamplerState *s);
+void build_joint_iid_caches(SamplerState *s);
+void assemble_joint_iid_into_M(SamplerState *s);
+double logdet_Qiid_blocks(SamplerState *s);
+void apply_H(SamplerState *s, const double *vLat, double *outObs);
+void apply_H_transpose_weighted(SamplerState *s, const double *vObs, double *outLat);
+void apply_H_multiple(SamplerState *s, const double *vLat, int ncol, double *outObs);
+void apply_H_transpose_weighted_multiple(SamplerState *s, const double *vObs, int ncol, double *outLat);
 void refresh_observation_precision(SamplerState *s);
 void assemble_M_lat_numeric(SamplerState *s);
 void apply_A_transpose(SamplerState *s, const double *vObs, double *outLat);
@@ -481,6 +503,7 @@ void solve_M_lat(SamplerState *s, const double *b, double *x);
 void apply_Vinv(SamplerState *s, const double *vObs, double *outObs);
 double compute_logDetV(SamplerState *s);
 double quadform_Vinv(SamplerState *s, const double *vObs);
+void apply_A_transpose_weighted_multiple(SamplerState *s, const double *vObs, int ncol, double *outLat);
 void apply_A_transpose_multiple(SamplerState *s, const double *vObs, int ncol, double *outLat);
 void apply_A_multiple(SamplerState *s, const double *vLat, int ncol, double *outObs);
 void solve_M_lat_multiple(SamplerState *s, const double *B, int ncol, double *X);
@@ -531,6 +554,7 @@ SEXP list_B_by_term(SamplerState *s);
 SEXP list_F_by_term(SamplerState *s);
 int should_recover_iteration(SamplerState *s, int iter1);
 void recover_w_draw_collapsed(SamplerState *s, const double *resid, double *wDraw);
+void recover_latent_draw_collapsed(SamplerState *s, const double *resid, double *draw);
 int term_prior_block_nnz(TermState *term, GraphState *g);
 SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamplesDone);
 void print_rule(char ch, int n);
