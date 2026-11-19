@@ -4,8 +4,10 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 1 -- interface and mathematical design review. Implementation
-has not started. Discuss and agree on one implementation increment at a time.
+Current stage: 2 complete -- the separate-IID iteration is shared by warmup and
+regular sampling with unchanged numerical updates. Stage 3 is next. Early
+implementation stages may proceed in small, validated commits for review, as
+agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
 
 This plan and the requested algebra note are explicitly shared on the branch so
 work can continue from another checkout. These are exceptions to keeping internal
@@ -56,12 +58,13 @@ An explicit setting can select either IID strategy in either model class.
 Grouped Gaussian residual variances are not structured latent process terms for
 this decision. Crossing and nesting of IID groups do not change the rule.
 
-Proposed control: collapse_iid = NULL, TRUE, or FALSE.
+Agreed control: collapse_iid = NULL, TRUE, or FALSE, applying to all IID terms in
+a fit. There is no selection of individual IID terms for collapsing.
 NULL applies the automatic rule; TRUE requests joint collapsing; FALSE selects
 the separate-IID path. Resolve this once during R-side setup and record both the
 requested and resolved setting in the fit. Do not silently change modes because
-of a prior choice or a runtime performance heuristic. Settle behavior of an
-explicit TRUE when there are no IID terms during interface review.
+of a prior choice or a runtime performance heuristic. An explicit TRUE without
+IID terms raises an error; NULL or FALSE retains the applicable existing sampler.
 
 This changes the default MCMC path for existing IID-only calls. Their model and
 prior stay the same, but seeded draws will change. collapse_iid=FALSE must retain
@@ -194,24 +197,32 @@ density on transformed Cholesky coordinates. Primary references:
   https://mc-stan.org/docs/functions-reference/correlation_matrix_distributions.html
 
 Reuse adaptive proposal machinery and the existing metropolis control object.
-Before coding, specify how joint, by_term, residual_process, variance_theta,
-process_variance, and scalar blocking treat IID scales and correlations, including
-separate parent covariance matrices. Large by-parent collections must not acquire
-an undocumented blocking rule. Test both joint and small-block proposals.
+The agreed default remains joint; by_term jointly proposes each independent IID
+covariance matrix, including separate parent matrices, and scalar updates its
+individual unconstrained coordinates. Complete the parameter assignment for
+residual_process, variance_theta, and process_variance when extending covariance
+metadata. Large by-parent collections must not acquire an undocumented blocking
+rule. Test both joint and small-block proposals.
 
 Staged implementation and review
 --------------------------------
-1. The centered latent representation, four compatibility targets below, and IW
-   log-Cholesky proposal coordinates are agreed. Settle the interface, broader
-   prior specification and transforms, blocking meanings, and exact
-   Gaussian/augmented update schedules.
-   The branch currently contains this plan and its mathematical specification.
-   Use small commits and review the result of each implementation stage before
-   proceeding to the next.
+1. The centered latent representation, four compatibility targets below,
+   all-or-none collapse control, IW log-Cholesky coordinates, existing blocking
+   conventions, and IG/IW-first sequence are agreed. Broader prior syntax and
+   transforms remain later design work. The algebra note specifies the proposed
+   Gaussian/augmented update order. Keep implementation commits small and
+   independently validated.
 
 2. Extract the necessary iteration orchestration/helpers with no algorithm change.
    Verify seeded legacy samples and RNG state, existing public output, and all
    package tests. Keep unrelated numerical-core cleanup out of this stage.
+   COMPLETE: update_separate_iid_iteration() now supplies both warmup and regular
+   sampling. Fresh baseline/candidate installations produced identical results
+   in 240 iteration cases and 96 downstream cases. Comparisons include draws,
+   adaptation records, reporting, warnings, RNG state, recovery, predictions,
+   and combined summaries. The complete suite passed 5,537 assertions across
+   248 test cases, with zero failures, warnings, or skips. Source changes are
+   confined to src/stLMM_sampler.cpp; the numerical update functions are unchanged.
 
 3. Implement the joint Gaussian latent calculations using known covariance
    parameters in small reference problems. Cover IID-only and IID-plus-structured
@@ -221,11 +232,12 @@ Staged implementation and review
    against independently constructed dense formulas. Test rejected proposals and
    cache restoration explicitly.
 
-4. Add covariance sampling and broader priors in reviewable increments: scalar
-   variances first, then correlated blocks and by-parent matrices. Share prior
+4. Add IG/IW covariance sampling in reviewable increments: scalar variances first,
+   then correlated blocks and by-parent matrices. Share prior
    and transform calculations between separate and collapsed paths, while keeping
    their conditional and marginal targets distinct. Compare against quadrature
    where small and against the existing sampler under identical IG/IW priors.
+   Broader priors are a separate increment after the IG/IW sampler is validated.
 
 5. Integrate binomial, probit, and negative-binomial models, including estimated
    size. Derive the order before coding: in a fully IID-collapsed augmented path,

@@ -1098,6 +1098,79 @@ void update_resid_for_current_fixed_random(SamplerState *s,
     resid[i] -= s->Za[i];
 }
 
+struct SamplerIterationResult {
+  int covAccepted;
+  int sizeAccepted;
+  int wCurrentFresh;
+};
+
+static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
+                                                           double *betaCurrent,
+                                                           double *alphaCurrent,
+                                                           double *resid,
+                                                           double *wCurrent,
+                                                           BayesLogit_rpg_hybrid_t pg,
+                                                           int warmup)
+{
+  SamplerIterationResult result;
+  CovProposalState *p;
+  int i, block, accepted;
+
+  result.covAccepted = 0;
+  result.sizeAccepted = 0;
+  result.wCurrentFresh = 0;
+  p = &s->covProp;
+
+  /* The size step integrates out omega; redraw omega immediately before
+     any Gaussian working-model update. */
+  if(s->nbSizeEstimate){
+    result.sizeAccepted = update_nb_size(s, betaCurrent, alphaCurrent, wCurrent);
+    if(warmup){
+      s->nbSizeProposal.warmupNAttempted++;
+      s->nbSizeProposal.warmupNAccepted += result.sizeAccepted;
+    } else
+      update_adaptive_scalar_block_state(&s->nbSizeProposal, result.sizeAccepted);
+  }
+  if(is_pg_likelihood(s))
+    update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
+  else if(is_probit_likelihood(s))
+    update_probit_working_model(s, betaCurrent, alphaCurrent, wCurrent);
+
+  if(s->p > 0)
+    update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
+  if(s->q > 0){
+    update_alpha_draw_collapsed(s, betaCurrent, alphaCurrent);
+    for(i = 0; i < s->q; i++)
+      s->alpha[i] = alphaCurrent[i];
+  }
+  if(s->nRE > 0)
+    update_sigmaSqRE_gibbs(s);
+
+  update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
+  if(warmup){
+    for(block = 0; block < p->nBlocks; block++){
+      accepted = cov_params_block_mh_collapsed_step(s, p->blocks + block, resid);
+      result.covAccepted += accepted;
+      p->blocks[block].batchAccept += accepted;
+      p->blocks[block].warmupNAccepted += accepted;
+      p->blocks[block].warmupNAttempted++;
+    }
+    p->warmupNAccepted += result.covAccepted;
+    p->warmupNAttempted += p->nBlocks;
+  } else {
+    result.covAccepted = update_cov_params_mh_collapsed(s, resid);
+    s->covParamAccept += result.covAccepted;
+  }
+
+  if(is_augmented_likelihood(s) && s->qLatTotal > 0){
+    update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
+    recover_w_draw_collapsed(s, resid, wCurrent);
+    result.wCurrentFresh = 1;
+  }
+
+  return result;
+}
+
 static int adapt_warmup_block(CovProposalBlock *b, double acceptance, int batch)
 {
   b->warmupBatchAcceptHistory[batch] = acceptance;
@@ -1145,7 +1218,8 @@ void run_covariance_warmup(SamplerState *s,
                            int nReport)
 {
   CovProposalState *p;
-  int b, j, k, block, accepted, batchAccepted, allBlocksInTarget, canStop, reportEveryBatches;
+  SamplerIterationResult iteration;
+  int b, j, k, block, batchAccepted, allBlocksInTarget, canStop, reportEveryBatches;
   double rhat;
   int sizeAccepted;
   CovProposalBlock *sizeBlock;
@@ -1203,46 +1277,10 @@ void run_covariance_warmup(SamplerState *s,
       R_CheckUserInterrupt();
       vmax_iter = vmaxget();
 
-      /* The size step integrates out omega; redraw omega immediately before
-         any Gaussian working-model update. */
-      if(s->nbSizeEstimate){
-        accepted = update_nb_size(s, betaCurrent, alphaCurrent, wCurrent);
-        sizeAccepted += accepted;
-        sizeBlock->warmupNAttempted++;
-        sizeBlock->warmupNAccepted += accepted;
-      }
-      if(is_pg_likelihood(s))
-        update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
-      else if(is_probit_likelihood(s))
-        update_probit_working_model(s, betaCurrent, alphaCurrent, wCurrent);
-
-      if(s->p > 0)
-        update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
-      if(s->q > 0){
-        update_alpha_draw_collapsed(s, betaCurrent, alphaCurrent);
-        for(k = 0; k < s->q; k++)
-          s->alpha[k] = alphaCurrent[k];
-      }
-      if(s->nRE > 0)
-        update_sigmaSqRE_gibbs(s);
-
-      update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
-      accepted = 0;
-      for(block = 0; block < p->nBlocks; block++){
-        int blockAccepted = cov_params_block_mh_collapsed_step(s, p->blocks + block, resid);
-        accepted += blockAccepted;
-        p->blocks[block].batchAccept += blockAccepted;
-        p->blocks[block].warmupNAccepted += blockAccepted;
-        p->blocks[block].warmupNAttempted++;
-      }
-      batchAccepted += accepted;
-      p->warmupNAccepted += accepted;
-      p->warmupNAttempted += p->nBlocks;
-
-      if(is_augmented_likelihood(s) && s->qLatTotal > 0){
-        update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
-        recover_w_draw_collapsed(s, resid, wCurrent);
-      }
+      iteration = update_separate_iid_iteration(s, betaCurrent, alphaCurrent,
+                                                resid, wCurrent, pg, 1);
+      sizeAccepted += iteration.sizeAccepted;
+      batchAccepted += iteration.covAccepted;
 
       vmaxset(vmax_iter);
     }
@@ -1825,6 +1863,7 @@ extern "C" {
     typedef std::chrono::steady_clock SamplerClock;
     const SamplerClock::time_point initialization_start = SamplerClock::now();
     SamplerState s;
+    SamplerIterationResult iteration;
     SEXP out, outNames, term_description_r, iid_cov_samples_r;
     SEXP phase_seconds_r, phase_names_r;
     SEXP beta_samples_r, alpha_samples_r, tau_samples_r, residual_variance_samples_r, sigma_re_samples_r, theta_samples_r, process_sigma_samples_r;
@@ -1833,14 +1872,12 @@ extern "C" {
     double *betaSamples, *alphaSamples, *tauSamples, *residualVarianceSamples, *sigmaSqRESamples, *thetaSamples, *processSigmaSamples;
     double *betaCurrent, *alphaCurrent, *resid, *wSamples, *wCurrent;
     int *recoverIter;
-    int i, j, iter, iter1, b, thetaOffset, describeTerms, nReport, reportLen, tauAcceptReport, doVerbose, wCurrentFresh;
+    int i, j, iter, iter1, b, thetaOffset, describeTerms, nReport, reportLen, tauAcceptReport, doVerbose;
     int recoverIdx, covColumn, covDim, covCol, covRow;
     size_t z;
     const void *vmax_iter;
     BayesLogit_rpg_hybrid_t pg = BayesLogit_rpg_hybrid();
 
-    int covAccepted;
-    
     init_sampler_state(&s, backend_r);
     
     for(i = 0; i < s.nTerms; i++){
@@ -1947,41 +1984,9 @@ extern "C" {
 	persistent objects allocated before the loop.
       */
       vmax_iter = vmaxget();
-      if(s.nbSizeEstimate){
-        covAccepted = update_nb_size(&s, betaCurrent, alphaCurrent, wCurrent);
-        update_adaptive_scalar_block_state(&s.nbSizeProposal, covAccepted);
-      }
-      if(is_pg_likelihood(&s))
-        update_pg_working_model(&s, pg, betaCurrent, alphaCurrent, wCurrent);
-      else if(is_probit_likelihood(&s))
-        update_probit_working_model(&s, betaCurrent, alphaCurrent, wCurrent);
-
-      if(s.p > 0)
-	update_beta_draw_collapsed(&s, alphaCurrent, betaCurrent);
-      if(s.q > 0){
-	update_alpha_draw_collapsed(&s, betaCurrent, alphaCurrent);
-	for(i = 0; i < s.q; i++)
-	  s.alpha[i] = alphaCurrent[i];
-      }
-      
-      if(s.nRE > 0)
-	update_sigmaSqRE_gibbs(&s);
-      
-      update_resid_for_current_fixed_random(&s, betaCurrent, alphaCurrent, resid);
-      
-      {
-
-	covAccepted = update_cov_params_mh_collapsed(&s, resid);
-	s.covParamAccept += covAccepted;
-	tauAcceptReport += covAccepted;
-      }
-
-      wCurrentFresh = 0;
-      if(is_augmented_likelihood(&s) && s.qLatTotal > 0){
-        update_resid_for_current_fixed_random(&s, betaCurrent, alphaCurrent, resid);
-        recover_w_draw_collapsed(&s, resid, wCurrent);
-        wCurrentFresh = 1;
-      }
+      iteration = update_separate_iid_iteration(&s, betaCurrent, alphaCurrent,
+                                                resid, wCurrent, pg, 0);
+      tauAcceptReport += iteration.covAccepted;
       
       reportLen++;
       if(nReport > 0 && doVerbose && (reportLen >= nReport || iter == s.nSamples - 1)){
@@ -2032,7 +2037,7 @@ extern "C" {
           that draw instead of drawing another iid conditional sample only
           to store it.
         */
-        if(!wCurrentFresh)
+        if(!iteration.wCurrentFresh)
           recover_w_draw_collapsed(&s, resid, wCurrent);
 
         if(recoverIdx >= s.nRecover)
