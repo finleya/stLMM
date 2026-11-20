@@ -429,10 +429,10 @@ stLMM <- function(formula, data = parent.frame(),
         list(sigma_sq = value[[term$coefficient]])
     }
 
-    collect_re_pairs <- function(x_list, re_names, where){
+    collect_re_priors <- function(x_list, re_names, where){
         
-        out <- matrix(NA_real_, length(re_names), 2,
-                      dimnames = list(re_names, c("shape", "scale")))
+        out <- matrix(NA_real_, length(re_names), 6,
+                      dimnames = list(re_names, NULL))
         
         for(i in seq_along(re_names)){
             xi <- x_list[[re_names[i]]]
@@ -441,8 +441,7 @@ stLMM <- function(formula, data = parent.frame(),
                 stop("error: missing entry for ", re_names[i], " in ", where)
             
             xi <- normalize_iid_sigma_block(xi, paste0(where, "$", re_names[i]))
-            xi <- validate_variance_prior(xi, paste0(where, "$", re_names[i], "$sigma_sq"), allow_only_ig = TRUE)
-            out[i, ] <- xi[2:3]
+            out[i, ] <- validate_variance_prior(xi, paste0(where, "$", re_names[i], "$sigma_sq"))
         }
         
         out
@@ -664,12 +663,10 @@ stLMM <- function(formula, data = parent.frame(),
         list(type = 1L, mean = as.double(mean), precision = as.double(1 / sd^2))
     }
 
-    validate_variance_prior <- function(x, where, allow_only_ig = FALSE){
+    validate_variance_prior <- function(x, where){
         pr <- validate_prior_hyperparameters(require_prior_object(x, where), where)
-        allowed <- if(allow_only_ig) "ig" else c("ig", "log_normal", "gamma_dist", "half_normal", "half_t")
+        allowed <- c("ig", "log_normal", "gamma_dist", "half_normal", "half_t")
         if(!pr$family %in% allowed){
-            if(allow_only_ig)
-                stop("error: ", where, " must use ig(); grouped random-effect variances are currently Gibbs-updated with conjugate inverse-gamma priors")
             stop("error: ", where, " uses unsupported variance prior ", pr$family)
         }
         if(!is.null(pr$support))
@@ -1447,10 +1444,6 @@ stLMM <- function(formula, data = parent.frame(),
     scalar_control_names <- re_control_names[!iid_is_covariance]
     scalar_terms <- iid_design$terms[!iid_is_covariance]
     iid_covariance <- stats::setNames(vector("list", n_re), re_names)
-    for(term in scalar_terms){
-        if(!collapse_iid && identical(term$cov_model, "independent") && !is.null(tuning[[term$formula_name]]))
-            stop("error: ", term$formula_name, " variances use Gibbs sampling and do not accept tuning")
-    }
     if(length(scalar_re_names)){
         if("sigma_sq_re" %in% names(starting))
             stop("error: starting$sigma_sq_re is no longer supported; use starting = list(iid_1 = list(sigma_sq = value))")
@@ -1484,23 +1477,30 @@ stLMM <- function(formula, data = parent.frame(),
             stop("error: missing prior(s) for grouped random-effect variance ",
                  paste(missing_re_prior, collapse = ", "), " in ", prior_where_re)
 
-        sigma_sq_re_IG <- collect_re_pairs(
+        sigma_sq_re_prior <- collect_re_priors(
             sigma_sq_re_prior_list,
             scalar_re_names,
             prior_where_re
         )
+        sigma_sq_re_IG <- t(vapply(seq_along(scalar_re_names), function(i)
+            legacy_ig_pair(sigma_sq_re_prior[i, ]), numeric(2)))
+        dimnames(sigma_sq_re_IG) <- list(scalar_re_names, c("shape", "scale"))
     } else {
         sigma_sq_re_starting <- numeric(0)
         sigma_sq_re_IG <- matrix(0, 0, 2)
+        sigma_sq_re_prior <- matrix(0, 0, 6)
     }
 
     if(any(iid_is_covariance)){
         scalar_start <- sigma_sq_re_starting
         scalar_ig <- sigma_sq_re_IG
+        scalar_prior <- sigma_sq_re_prior
         sigma_sq_re_starting <- rep(1, n_re)
         sigma_sq_re_IG <- matrix(1, n_re, 2L)
+        sigma_sq_re_prior <- matrix(rep(c(0, 1, 1, 0, 0, 0), each = n_re), n_re, 6L)
         sigma_sq_re_starting[!iid_is_covariance] <- scalar_start
         sigma_sq_re_IG[!iid_is_covariance, ] <- scalar_ig
+        sigma_sq_re_prior[!iid_is_covariance, ] <- scalar_prior
         for(i in which(iid_is_covariance)){
             nm <- re_control_names[i]
             k <- re_ncoef[i]
@@ -1527,9 +1527,16 @@ stLMM <- function(formula, data = parent.frame(),
         }
     }
 
+    iid_metropolis <- collapse_iid | (!iid_is_covariance & sigma_sq_re_prior[, 1] != 0)
+    for(term in scalar_terms){
+        nm <- term$formula_name
+        if(identical(term$cov_model, "independent") && !is.null(tuning[[nm]]) &&
+           !any(iid_metropolis[re_control_names == nm]))
+            stop("error: ", nm, " variances use Gibbs sampling and do not accept tuning")
+    }
     sigma_sq_re_tuning <- rep(0.2, n_re)
-    if(collapse_iid){
-        for(i in seq_len(n_re)){
+    if(any(iid_metropolis)){
+        for(i in which(iid_metropolis)){
             nm <- re_control_names[i]
             parameter <- if(iid_is_covariance[i]) "covariance" else "sigma_sq"
             value <- if(iid_is_covariance[i]) 0.1 else 0.2
@@ -1667,6 +1674,14 @@ stLMM <- function(formula, data = parent.frame(),
             )
             if(!is.null(iid_term$formula_name))
                 re_term_description[[i]]$formula_term <- iid_term$formula_name
+            if(!iid_is_covariance[i] && sigma_sq_re_prior[i, 1] != 0){
+                pr <- normalize_iid_sigma_block(sigma_sq_re_prior_list[[re_names[i]]],
+                    paste0("priors$", re_control_names[i]))
+                re_term_description[[i]]$sigma_sq$prior_family <- pr$family
+                re_term_description[[i]]$sigma_sq$prior_hyperparameters <- pr$parameters
+                re_term_description[[i]]$sigma_sq$prior_scale <-
+                    if(identical(pr$scale, "sd")) "standard deviation" else "variance"
+            }
             if(identical(iid_term$cov_model, "independent"))
                 re_term_description[[i]]$cov_model <- "independent"
             if(!is.null(iid_term$by_name)){
@@ -1902,6 +1917,7 @@ stLMM <- function(formula, data = parent.frame(),
         ## random effects
         sigma_sq_re_starting = as.double(sigma_sq_re_starting),
         sigma_sq_re_IG = sigma_sq_re_IG,
+        sigma_sq_re_prior = sigma_sq_re_prior,
         sigma_sq_re_tuning = as.double(sigma_sq_re_tuning),
         collapse_iid_requested = collapse_iid_requested,
         collapse_iid = collapse_iid,
@@ -2034,7 +2050,7 @@ stLMM <- function(formula, data = parent.frame(),
                 }
                 if(!is.null(start_entry))
                     b$sigma_sq_re_starting[i] <- chain_value(start_entry, chain, chains, re_names[i], positive = TRUE)
-                else if(chains > 1L && (!collapse_iid || sigma_sq_re_tuning[i] > 0))
+                else if(chains > 1L && (!iid_metropolis[i] || sigma_sq_re_tuning[i] > 0))
                     b$sigma_sq_re_starting[i] <- log_jitter(sigma_sq_re_starting[i], chain_control$dispersion)
             }
         }

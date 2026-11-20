@@ -196,6 +196,8 @@ void update_sigmaSqRE_gibbs(SamplerState *s)
       update_iid_covariance_gibbs(s, b);
       continue;
     }
+    if(s->sigmaSqREPrior[b].family != PRIOR_IG)
+      continue;
     mb = s->reBlockSize[b];
     k = 0;
     for(j = 0; j < s->q; j++){
@@ -493,7 +495,7 @@ double log_cov_params_target_collapsed(SamplerState *s, const double *resid)
              + theta_log_jacobian(term->theta[j], term->thetaLower[j], term->thetaUpper[j]);
   }
 
-  if(s->collapseIid)
+  if(s->iidMetropolis)
     out += log_iid_covariance_target(s);
 
   return out;
@@ -547,7 +549,7 @@ int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, do
               + theta_log_jacobian(term->theta[j], term->thetaLower[j], term->thetaUpper[j]);
   }
 
-  if(s->collapseIid)
+  if(s->iidMetropolis)
     *out += log_iid_covariance_target(s);
 
   return R_FINITE(*out);
@@ -592,7 +594,7 @@ CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
   save.Q = (double**)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double*));
   save.logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
 
-  if(s->collapseIid){
+  if(s->iidMetropolis){
     s->sigmaSqRE = p->sigmaSqRE;
     s->reCovariance = p->reCovariance;
     s->reCovPrecision = p->reCovPrecision;
@@ -663,7 +665,7 @@ void accept_cov_proposal_state(SamplerState *s, CovProposalState *p)
   cholmod_sparse *tmpSparse;
   cholmod_factor *tmpFactor;
 
-  if(s->collapseIid){
+  if(s->iidMetropolis){
     tmpPtr = s->sigmaSqRE;
     s->sigmaSqRE = p->sigmaSqRE;
     p->sigmaSqRE = tmpPtr;
@@ -792,8 +794,10 @@ void unpack_cov_eta_to_proposal(SamplerState *s, const double *eta)
   CovProposalState *p;
 
   p = &s->covProp;
-  if(s->collapseIid){
+  if(s->iidMetropolis){
     copy_iid_covariance_proposal(s, p);
+  }
+  if(s->collapseIid){
     changed = (int*)R_alloc(s->nRE, sizeof(int));
     for(i = 0; i < s->nRE; i++)
       changed[i] = 0;
@@ -1063,7 +1067,7 @@ static int update_nb_size(SamplerState *s, const double *beta,
 
 int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block, const double *resid)
 {
-  int i, factorized, factorStatus, tryCatch;
+  int i, factorized, factorStatus, tryCatch, conditionalIid;
   double logPostOld, logPostProp, logu;
   CovProposalState *p;
   CovBindingSave save;
@@ -1076,15 +1080,22 @@ int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block,
   if(p->dim == 0 || block->dim == 0)
     return 0;
 
+  conditionalIid = !s->collapseIid;
+  for(i = 0; conditionalIid && i < block->dim; i++)
+    if(p->paramType[block->paramIndex[i]] != 4)
+      conditionalIid = 0;
+  if(conditionalIid)
+    return update_iid_variance_block(s, block);
+
   accepted = 0;
   logPostOld = log_cov_params_target_collapsed(s, resid);
-  if(s->collapseIid && !R_FINITE(logPostOld))
-    Rf_error("non-finite collapsed IID covariance target at the current state");
+  if(s->iidMetropolis && !R_FINITE(logPostOld))
+    Rf_error("non-finite IID covariance target at the current state");
 
   draw_adaptive_cov_block_proposal(s, block);
   if(s->collapseIid && !p->iidValid)
     return 0;
-  if(s->collapseIid)
+  if(s->iidMetropolis)
     for(i = 0; i < s->nRE; i++)
       if(!R_FINITE(p->sigmaSqRE[i]) || p->sigmaSqRE[i] <= 0.0 ||
          !R_FINITE(1.0 / p->sigmaSqRE[i]))
@@ -2862,7 +2873,7 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
       } else {
         setListElementByName(sigma_r, "current", Rf_ScalarReal(s->sigmaSqRE[i]));
       }
-      if(s->collapseIid){
+      if(s->collapseIid || (s->reCovDim[i] == 0 && s->sigmaSqREPrior[i].family != PRIOR_IG)){
         int j, active;
 
         active = 0;
@@ -2870,7 +2881,8 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
           if(s->covProp.paramType[j] >= 4 && s->covProp.paramTerm[j] == i)
             active = 1;
         setListElementByName(sampler_r, "status",
-                            Rf_mkString(active ? "collapsed Metropolis" : "fixed"));
+                            Rf_mkString(active ? (s->collapseIid ? "collapsed Metropolis" :
+                                                 "conditional Metropolis") : "fixed"));
         if(sigma_r != R_NilValue)
           setListElementByName(sigma_r, "tuning", Rf_ScalarReal(s->sigmaSqRETune[i]));
       }

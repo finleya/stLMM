@@ -35,7 +35,9 @@ extern "C" SEXP stLMM_iid_mh_probe(SEXP backend)
   double *before, *after, *matrix, *proposal, target, quadratic;
   const void *vmax;
 
-  init_sampler_state(&s, backend, 1);
+  init_sampler_state(&s, backend, Rf_asLogical(getListElement(backend, "collapse_iid")));
+  if(!s.collapseIid)
+    for(i = 0; i < s.q; i++) s.alpha[i] = (i + 1.0) / (s.q + 1.0);
   for(i = 0; i < s.nTerms; i++){
     GraphState *g = s.graphs + s.terms[i].graphIndex;
     if(g->type == GRAPH_NNGP) update_nngp_BF(&s, g, s.terms+i);
@@ -71,7 +73,11 @@ extern "C" SEXP stLMM_iid_mh_probe(SEXP backend)
         if(s.covProp.paramType[block->paramIndex[j]] < 4) iidOnly = 0;
       if(iteration % 3 == 0 && iidOnly)
         for(j = 0; j < block->dim*block->dim; j++) block->proposalChol[j] *= 10000;
+      cholmod_factor *factorBefore = s.M_lat_fac;
       accepted = cov_params_block_mh_collapsed_step(&s,block,s.y);
+      if(!s.collapseIid && iidOnly && (factorBefore != s.M_lat_fac ||
+         std::memcmp(matrix,s.M_lat->x,s.M_lat->nzmax*sizeof(double))))
+        Rf_error("conditional IID proposal changed the structured system");
       std::memcpy(block->proposalChol,proposal,block->dim*block->dim*sizeof(double));
       copy_covariance_parameters(&s,after);
       if(!accepted){
@@ -109,9 +115,25 @@ extern "C" SEXP stLMM_iid_density_probe(SEXP backend, SEXP eta_r)
   int k, row, col, j, valid;
   const char *labels[] = {"valid", "target", "covariance", "precision", "cholesky", "logdet"};
 
-  init_sampler_state(&s, backend);
-  if(s.nRE != 1 || s.reCovDim[0] < 1) Rf_error("density probe requires one covariance block");
+  init_sampler_state(&s, backend, 1);
+  if(s.nRE != 1) Rf_error("density probe requires one IID block");
   k = s.reCovDim[0];
+  if(k == 0){
+    SEXP alpha = getListElement(backend, "probe_alpha");
+    if(TYPEOF(eta_r) != REALSXP || TYPEOF(alpha) != REALSXP || LENGTH(alpha) != s.q)
+      Rf_error("invalid scalar density probe inputs");
+    std::memcpy(s.alpha, REAL(alpha), s.q * sizeof(double));
+    PROTECT(out = Rf_allocMatrix(REALSXP, LENGTH(eta_r), 2));
+    for(j = 0; j < LENGTH(eta_r); j++){
+      s.collapseIid = 1;
+      REAL(out)[j] = log_iid_variance_target(&s, 0, std::exp(REAL(eta_r)[j]));
+      s.collapseIid = 0;
+      REAL(out)[j + LENGTH(eta_r)] = log_iid_variance_target(&s, 0, std::exp(REAL(eta_r)[j]));
+    }
+    free_sampler_state(&s);
+    UNPROTECT(1);
+    return out;
+  }
   if(TYPEOF(eta_r) != REALSXP || LENGTH(eta_r) != k*(k+1)/2) Rf_error("invalid probe coordinates");
   std::memset(&p,0,sizeof(CovProposalState));
   init_iid_covariance_proposal(&s,&p);
@@ -154,8 +176,7 @@ extern "C" SEXP stLMM_latent_probe(SEXP backend, SEXP ndraw_r)
   const void *vmax;
   const char *labels[] = {"H", "M", "Vinv", "mean", "draws", "Xprec", "Xrhs", "logs", "restored"};
 
-  init_sampler_state(&s, backend);
-  init_joint_iid_mapping(&s);
+  init_sampler_state(&s, backend, 1);
   for(i = 0; i < s.nTerms; i++){
     GraphState *g = s.graphs + s.terms[i].graphIndex;
     if(g->type == GRAPH_NNGP) update_nngp_BF(&s, g, s.terms + i);
@@ -265,8 +286,7 @@ extern "C" SEXP stLMM_known_covariance_chain(SEXP backend, SEXP ndraw_r, SEXP jo
 
   nDraw = Rf_asInteger(ndraw_r);
   joint = Rf_asLogical(joint_r);
-  init_sampler_state(&s, backend);
-  if(joint) init_joint_iid_mapping(&s);
+  init_sampler_state(&s, backend, joint);
   for(j = 0; j < s.nTerms; j++){
     GraphState *g = s.graphs + s.terms[j].graphIndex;
     if(g->type == GRAPH_NNGP) update_nngp_BF(&s, g, s.terms + j);

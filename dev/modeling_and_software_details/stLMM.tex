@@ -233,7 +233,7 @@ Standard R formula offsets are supported through \texttt{offset()}. The offset i
 
 Priors are supplied through explicit prior constructors. Fixed effects may use \texttt{flat()} or \texttt{normal(mean, sd)}. The Gaussian likelihood defaults to \texttt{flat()} for $\bbeta$, while augmented non-Gaussian likelihoods default to \texttt{normal(mean = 0, sd = 10)}. The \texttt{normal()} constructor defines independent normal priors and allows scalar or coefficient-specific mean and standard-deviation vectors. The \texttt{flat()} and \texttt{normal()} constructors are accepted only for \texttt{priors\$beta}.
 
-The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, except scalar iid grouped random-effect variances, which use \texttt{ig()} under either IID sampling strategy. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
+The inverse-gamma constructor \texttt{ig(shape, scale)} uses the shape--scale parameterization. Variance parameters may use \texttt{ig()}, \texttt{log\_normal()}, \texttt{gamma\_dist()}, \texttt{half\_normal()}, or \texttt{half\_t()}, including scalar iid grouped random-effect variances under either IID sampling strategy. The half-normal and half-\textit{t} priors are specified on the standard deviation scale but are applied to the corresponding variance parameter with the appropriate density transformation. Covariance theta parameters use prior families allowed by the correlation-model registry and must have finite support so the sampler can use the bounded-logit transformation.
 
 Parameter names are local to the model term. This follows the software API and keeps user-supplied \texttt{starting}, \texttt{tuning}, and \texttt{priors} lists readable, but it means the same symbol can have different meanings in different terms. For example, \texttt{phi} is a spatial decay parameter in an exponential GP or NNGP term, but it is an ordered-support one-step correlation in an \texttt{ar1()} term.
 
@@ -348,7 +348,10 @@ coefficient updates. In mixed models it also handles posterior dependence betwee
 IID and structured coefficients in their joint draw. These are potential
 advantages in computation and mixing, rather than guarantees for every parameter.
 
-Joint collapsing gives up conjugate IID covariance updates. IG/IW priors now
+Both strategies allow IG, log-normal, gamma, half-normal, and half-$t$ scalar
+variance priors. Separate updates preserve conjugacy for IG variances and IW
+matrices, while other scalar priors use conditional Metropolis updates.
+Joint collapsing gives up conjugate IID covariance updates: all IID priors
 enter a marginal Metropolis target, so acceptance, proposal blocking, and
 adaptation matter. Shared groups and crossed terms can add Cholesky fill;
 factorizing the larger system may cost more than the separate updates. The joint
@@ -368,7 +371,7 @@ uses the existing applicable sampler.
 \end{itemize}
 The fit records the requested setting as \texttt{collapse\_iid\_requested}
 and the resolved setting as \texttt{collapse\_iid} in its \texttt{backend}.
-Formulas, data scales, IG/IW priors, coefficient names, and new-group prediction
+Formulas, data scales, prior choices, coefficient names, and new-group prediction
 rules are the same under both strategies. The random-number sequence changes
 when the strategy changes.
 
@@ -436,9 +439,9 @@ priors = list(iid_1 = list(sigma_sq = list(
   "(Intercept)" = ig(3, 1), x = ig(4, 0.5)
 )))
 \end{verbatim}
-sets $\Sigma_b=\operatorname{diag}(\sigma^2_{b1},\ldots,\sigma^2_{bk_b})$, with an independent inverse-gamma prior for each variance. With matching priors it is the same model as separate scalar terms such as \texttt{iid(group) + x:iid(group)}. The coefficient-formula default remains \texttt{cov\_model = "unstructured"}.
+sets $\Sigma_b=\operatorname{diag}(\sigma^2_{b1},\ldots,\sigma^2_{bk_b})$, with an independent scalar prior for each variance. With matching priors it is the same model as separate scalar terms such as \texttt{iid(group) + x:iid(group)}. The coefficient-formula default remains \texttt{cov\_model = "unstructured"}.
 
-A single \texttt{sigma\_sq = ig(a, b)} applies the same hyperparameters independently to every coefficient variance; it does not constrain those variances to equality. A coefficient-named list specifies different priors, with names matched exactly and independently of their order. Starting values under \texttt{starting\$iid\_1\$sigma\_sq} may be a positive scalar or a coefficient-named numeric vector or list. Each variance uses the scalar inverse-gamma Gibbs update when IID effects are separate, or a log-variance Metropolis update when IID effects are jointly collapsed. Coefficients can be dependent in the posterior through the likelihood even though their population covariance is diagonal.
+A single \texttt{sigma\_sq = ig(a, b)} applies the same hyperparameters independently to every coefficient variance; it does not constrain those variances to equality. A coefficient-named list specifies different priors, with names matched exactly and independently of their order. Starting values under \texttt{starting\$iid\_1\$sigma\_sq} may be a positive scalar or a coefficient-named numeric vector or list. The scalar prior families listed above are available, including different families for different coefficients. With separate IID effects, IG variances use Gibbs updates and other scalar variances use conditional Metropolis updates. Joint IID collapsing uses log-variance Metropolis updates for all scalar priors. Coefficients can be dependent in the posterior through the likelihood even though their population covariance is diagonal.
 
 Independent formulas expand into scalar blocks in coefficient order. Those blocks use the same sparse design construction, coefficient draws, variance updates, and prediction routines as separate scalar iid terms. Parameter names identify the originating formula term and coefficient, for example \texttt{iid\_1[coefficient="x"]\_sigma\_sq}. Combined summaries select the original formula identifier \texttt{iid\_1} and then the requested coefficient names.
 
@@ -448,13 +451,13 @@ The term \texttt{iid(plot, by = stand)} assigns a separate scalar child-effect v
  \balpha_{bhg}\mid\Sigma_{bh}\stackrel{\mathrm{iid}}{\sim}
  N_{k_b}(0,\Sigma_{bh}),\qquad g=1,\ldots,m_{bh},
 \end{equation}
-within parent $h$, with independent priors on the parent covariance matrices. The same supplied inverse-Wishart hyperparameters are applied independently to every parent; no shared covariance hyperparameters are estimated. Scalar terms analogously use independent copies of the supplied inverse-gamma prior. An additional \texttt{iid(stand)} term supplies a parent intercept if desired. The \texttt{by} term itself has zero-mean child coefficients within every parent.
+within parent $h$, with independent priors on the parent covariance matrices. The same supplied inverse-Wishart hyperparameters are applied independently to every parent; no shared covariance hyperparameters are estimated. Scalar terms analogously use independent copies of the supplied variance prior. An additional \texttt{iid(stand)} term supplies a parent intercept if desired. The \texttt{by} term itself has zero-mean child coefficients within every parent.
 
-With \texttt{cov\_model = "independent"}, $\Sigma_{bh}$ is diagonal and each coefficient has a separate variance within each parent. Its supplied IG hyperparameters are reused independently across parents. Expansion is by coefficient first, then parent, matching the scalar-term order. Names identify both, for example \texttt{iid\_1[coefficient="x"][stand="north"]\_sigma\_sq}.
+With \texttt{cov\_model = "independent"}, $\Sigma_{bh}$ is diagonal and each coefficient has a separate variance within each parent. Its supplied variance prior is reused independently across parents. Expansion is by coefficient first, then parent, matching the scalar-term order. Names identify both, for example \texttt{iid\_1[coefficient="x"][stand="north"]\_sigma\_sq}.
 
 Parent and child labels are stored separately: identical plot labels in two stands identify distinct coefficient vectors. Only parent-child pairs represented in the supplied data enter these blocks, including rows whose responses are missing. Unused factor levels do not introduce extra parents or pairs for a \texttt{by} term. Parent order follows factor levels after unused parents are removed; child order follows the corresponding levels within each parent. Terms without \texttt{by} retain unused grouping-factor levels.
 
-At construction, \texttt{build\_iid\_design()} expands a scalar or unstructured term into one sampler block per parent, with contiguous child-coefficient columns. Independent coefficient formulas first expand into scalar terms as described above. The sparse design contains entries only for observations belonging to the corresponding parent, so a formula term contributes at most $n k_b$ stored entries across all its blocks. The separate-IID covariance sampler updates these blocks independently conditional on their coefficient draws. The jointly collapsed sampler instead includes their parameters in the chosen marginal Metropolis blocks. Controls are keyed by the formula term name; sample columns and term-description entries include parent labels, for example \texttt{iid\_2[stand="north"]\_cov[x,(Intercept)]}. A supplied starting value or covariance is reused for each parent; default multi-chain starts are perturbed independently for each block.
+At construction, \texttt{build\_iid\_design()} expands a scalar or unstructured term into one sampler block per parent, with contiguous child-coefficient columns. Independent coefficient formulas first expand into scalar terms as described above. The sparse design contains entries only for observations belonging to the corresponding parent, so a formula term contributes at most $n k_b$ stored entries across all its blocks. With separate IID effects, covariance updates condition on their coefficient draws; non-IG scalar variances enter the chosen Metropolis blocks. The jointly collapsed sampler instead includes their parameters in the chosen marginal Metropolis blocks. Controls are keyed by the formula term name; sample columns and term-description entries include parent labels, for example \texttt{iid\_2[stand="north"]\_cov[x,(Intercept)]}. A supplied starting value or covariance is reused for each parent; default multi-chain starts are perturbed independently for each block.
 
 The sparse CSC design $\bZ$ is stacked by sampler block, then group, then coefficient within a block. Each observation contributes its coefficient covariates only to its group's columns. No large Kronecker matrix is constructed. The prior precision for an unstructured coefficient block consists of repeated $\Sigma_b^{-1}$ blocks. Independent coefficient formulas and separate scalar terms use diagonal prior precision with one variance per scalar block.
 
@@ -1275,7 +1278,7 @@ implemented in \texttt{update\_alpha\_draw\_collapsed()}, with
 
 \subsection{Update of explicit random-effect variances}
 
-For scalar iid random-effect block $b$, $\sigma^2_{\alpha,b}$ is the variance used in the corresponding diagonal block of $\bD_\alpha$. The inverse-gamma prior parameters $a_b$ and $b_b$ are supplied through \texttt{priors}. Given the current random effects in block $b$, the block variance update is Gibbs with an inverse-gamma full conditional. For block size $m_b$ and
+For scalar iid random-effect block $b$, $\sigma^2_{\alpha,b}$ is the variance used in the corresponding diagonal block of $\bD_\alpha$. With an inverse-gamma prior, parameters $a_b$ and $b_b$ are supplied through \texttt{priors}. Given the current random effects in block $b$, the block variance update is Gibbs with an inverse-gamma full conditional. For block size $m_b$ and
 \begin{equation}
   s_b = \balpha_b\trans \balpha_b,
 \end{equation}
@@ -1289,6 +1292,36 @@ the update is
 \end{aligned}
 \end{equation}
 This is implemented by \texttt{update\_sigmaSqRE\_gibbs()}.
+
+\paragraph{Other scalar variance priors.}
+Scalar IID variances also accept log-normal, gamma, half-normal, and half-$t$
+priors. Let $\pi_b(v_b)$ denote the density on variance $v_b=\sigma^2_{\alpha,b}$.
+For these non-IG priors, separate IID sampling updates $\eta_b=\log v_b$ by
+Metropolis, conditional on the current coefficients. Its log target is
+\begin{equation}\label{eq:iid-conditional-variance-target}
+ \ell_b(\eta_b\mid\balpha_b)
+ =\log\pi_b(e^{\eta_b})+\left(1-\frac{m_b}{2}\right)\eta_b
+   -\frac{s_b}{2e^{\eta_b}},
+\end{equation}
+up to constants. The $+\eta_b$ contribution is the log-variance proposal
+Jacobian. For a half-normal or half-$t$ density $p_s$ on standard deviation,
+$\pi_b(v_b)=p_s(\sqrt{v_b})/(2\sqrt{v_b})$ first converts the prior to variance
+scale; both transformations are included exactly once. This conditional target
+applies to every supported likelihood because the variance enters through
+the Gaussian coefficient prior.
+
+These variances use the existing adaptive Metropolis blocks and warmup. The
+default log-variance proposal scale is 0.2, controlled by
+\texttt{tuning\$iid\_1\$sigma\_sq}. Coefficient-named controls and parent-specific
+blocks follow the same rules as joint collapsing. Zero tuning fixes a
+Metropolis-updated variance across chains; it does not fix an IG variance or IW
+matrix updated by Gibbs. An independent formula may mix IG and other priors,
+with tuning applying only to the latter under separate IID sampling. Every
+variance requires an explicit prior. A proposal block containing only these
+conditional IID variances evaluates the sum of Equation~\eqref{eq:iid-conditional-variance-target}
+without assembling or factoring $\bM$. A block that also changes structured
+or residual parameters includes the same conditional contribution in its full
+Metropolis target.
 
 \paragraph{Correlated iid covariance Gibbs update.}
 For unstructured coefficient-formula terms, the explicit prior is
@@ -1311,7 +1344,7 @@ For a \texttt{by} term, apply the same update separately to each represented par
  \Sigma_{bh}\mid\balpha_{bh}\sim\mathrm{IW}_{k_b}\left(
  \nu_b+m_{bh},\;\Psi_b+\sum_{g=1}^{m_{bh}}\balpha_{bhg}\balpha_{bhg}\trans\right).
 \end{equation}
-Here $m_{bh}$ counts the child vectors represented within parent $h$, not all child labels appearing elsewhere in the data. For scalar child effects,
+Here $m_{bh}$ counts the child vectors represented within parent $h$, not all child labels appearing elsewhere in the data. For scalar child effects with an IG prior,
 \begin{equation}
  \sigma^2_{bh}\mid\balpha_{bh}\sim\mathrm{IG}\left(
  a_b+\frac{m_{bh}}{2},\;b_b+\frac12\sum_{g=1}^{m_{bh}}\alpha_{bhg}^{2}\right).
@@ -1322,7 +1355,7 @@ The generator uses a triangular-solve formulation of the standard Bartlett-based
 \begin{equation}
  \Sigma_b=T\trans T=L(AA\trans)^{-1}L\trans
 \end{equation}
-connects the triangular solve to the inverse-Wishart construction. The implementation evaluates this expression using a triangular solve and a symmetric crossproduct. A small Cholesky solve against the identity caches $\Sigma_b^{-1}$ once per covariance update; that precision is added directly to each group block in the existing coefficient precision. No large covariance inverse or new factorization of the structured precision $\bM$ is required. There is no Metropolis step for iid covariances under this separate-IID strategy.
+connects the triangular solve to the inverse-Wishart construction. The implementation evaluates this expression using a triangular solve and a symmetric crossproduct. A small Cholesky solve against the identity caches $\Sigma_b^{-1}$ once per covariance update; that precision is added directly to each group block in the existing coefficient precision. No large covariance inverse or new factorization of the structured precision $\bM$ is required. IW covariance matrices retain this Gibbs update under the separate-IID strategy.
 
 The existing full conditional coefficient precision and its Cholesky factor are still dense $q\times q$. Sparse $\bZ$ does not imply a sparse collapsed conditional precision when a structured process is present. The separate-IID strategy uses this dense coefficient solve for scalar, independent, and unstructured iid terms.
 
@@ -1397,7 +1430,7 @@ vector or list under \texttt{sigma\_sq}; the covariance control is one scalar
 initial scale for all log-Cholesky coordinates. A \texttt{by} specification reuses
 these controls for each independent parent block. Zero tuning holds the supplied
 starting variance or whole covariance fixed, or its default when omitted, without
-dispersing that block across chains. IG/IW priors remain required. The
+dispersing that block across chains. An explicit scalar variance or IW prior remains required. The
 \texttt{fixed()} wrapper is not supported for IID controls.
 
 After the marginal updates, draw
@@ -1416,7 +1449,7 @@ coefficients; the temporary joint draw of $\bw$ is not saved.
 
 The current sampler updates covariance and sampled residual variance parameters with adaptive random-walk Metropolis steps on transformed scales. The adaptive Metropolis strategy draws on unpublished adaptive Metropolis notes by Benjamin Shaby and on the broader adaptive MCMC literature \citep{andrieu2008tutorial, Roberts01012009, RobertsRosenthal2007Coupling}.
 
-We use $\btheta_k$ for the covariance-function parameters of structured process term $k$, for example a range, decay, correlation, smoothness, or nonseparable mixing parameter. The broader Metropolis-updated parameter collection is denoted $\bpsi$ and can include scalar residual variance parameters, process variances, and $\btheta_k$ values. With joint IID collapsing, $\bpsi$ also includes IID variances and covariances. The default is still one joint block over all entries of $\bpsi$, but the \texttt{metropolis} control list can choose a different blocking rule without changing the model being fit.
+We use $\btheta_k$ for the covariance-function parameters of structured process term $k$, for example a range, decay, correlation, smoothness, or nonseparable mixing parameter. The broader Metropolis-updated parameter collection is denoted $\bpsi$ and can include scalar residual variance parameters, process variances, and $\btheta_k$ values. With separate IID effects, $\bpsi$ also includes scalar IID variances with non-IG priors. With joint IID collapsing, it includes all IID variances and covariances. The default is still one joint block over all entries of $\bpsi$, but the \texttt{metropolis} control list can choose a different blocking rule without changing the model being fit.
 
 On the model scale, the parameter collection can include:
 \begin{itemize}
@@ -1449,7 +1482,7 @@ The implemented blocking choices are:
 \item \texttt{"scalar"}: one parameter per block, using scalar random-walk adaptation.
 \end{itemize}
 
-With joint IID collapsing, \texttt{"by\_term"} assigns each independent IID
+For IID parameters updated by Metropolis, \texttt{"by\_term"} assigns each independent IID
 variance or covariance its own block, including separate parent blocks and
 independent coefficient variances. \texttt{"residual\_process"} places IID
 coordinates with process parameters. \texttt{"variance\_theta"} and
@@ -1477,10 +1510,22 @@ For the separate-IID strategy, with current offset-adjusted residual $\br=\by-\b
     +
     \br\trans\mathcal{V}^{-1}_{\mathrm{op},\bpsi}(\br)
   \right\}
-  + \log p(\bpsi)
-  + \log J(\boldsymbol{\eta}),
+  + \log p(\bpsi_S)
+  + \log J_S(\boldsymbol{\eta}_S)
+  + \ell_{\mathrm{IID,cond}},
 \end{equation}
-where $J(\boldsymbol{\eta})=|\det\{\partial h^{-1}(\boldsymbol{\eta})/\partial\boldsymbol{\eta}\}|$ converts the prior density on model parameters to the proposal coordinates. The first two terms are the collapsed likelihood in Equation~\eqref{eq:collapsed-loglik}, evaluated at the proposed covariance and residual-precision values. Operationally, each proposal assembles a candidate $\bM$, refreshes its CHOLMOD factor, computes $\log|\bV|$ with Equation~\eqref{eq:logdet-V}, computes the quadratic form by applying $\mathcal{V}^{-1}_{\mathrm{op},\bpsi}$ to $\br$, and then accepts or rejects the proposal. No dense $\bV$, $\bV^{-1}$, $\bM^{-1}$, or $\bQ_w^{-1}$ is formed.
+where $\bpsi_S$ collects the structured-process and residual parameters and
+$J_S$ is their transformation Jacobian. The term $\ell_{\mathrm{IID,cond}}$
+sums Equation~\eqref{eq:iid-conditional-variance-target} over scalar IID blocks
+with non-IG priors; it is zero when there are none. The determinant and quadratic
+form are the collapsed likelihood in Equation~\eqref{eq:collapsed-loglik},
+evaluated at the proposed covariance and residual-precision values. A proposal
+that changes these values assembles a candidate $\bM$, refreshes its CHOLMOD
+factor, computes $\log|\bV|$ with Equation~\eqref{eq:logdet-V}, and evaluates
+the quadratic form using $\mathcal{V}^{-1}_{\mathrm{op},\bpsi}$. For a block
+containing only separate IID variances, these terms are constant and only the
+conditional IID target is evaluated. No dense $\bV$, $\bV^{-1}$, $\bM^{-1}$,
+or $\bQ_w^{-1}$ is formed.
 
 The fitted object reports:
 \begin{itemize}
@@ -1501,7 +1546,7 @@ The nested \texttt{adaptive\_metropolis\$warmup} list records:
 
 This metadata is intentionally separate from posterior samples. It makes automatic tuning auditable without confusing warmup draws with posterior draws. Diagnostics that intentionally set tuning values to zero may show flat covariance chains or no covariance acceptance; that is expected because those parameters are fixed and the corresponding blocks are omitted.
 
-Blocking changes the proposal partition, not the posterior distribution. It can improve a difficult fit when one large joint proposal is poorly scaled, but it can also be slower because every block proposal repeats the collapsed likelihood calculation and sparse factorization work. The scalar option is mainly a diagnostic and robustness option; it is not expected to be the fastest choice for expensive process models. There is no Gibbs update for sampled residual variances in the collapsed likelihood; they are Metropolis parameters because the structured process has been marginalized.
+Blocking changes the proposal partition, not the posterior distribution. It can improve a difficult fit when one large joint proposal is poorly scaled, but it can also be slower when several blocks repeat the collapsed likelihood calculation and sparse factorization work. Separate-IID blocks containing only conditional scalar variance updates do not repeat that work. The scalar option is mainly a diagnostic and robustness option; it is not expected to be the fastest choice for expensive process models. There is no Gibbs update for sampled residual variances in the collapsed likelihood; they are Metropolis parameters because the structured process has been marginalized.
 
 \section{Collapsed sampler algorithm}
 
@@ -1514,9 +1559,9 @@ The main routine is \texttt{stLMM\_collapsed\_sampler()}. After initialization, 
 \item For negative-binomial models with estimated size, first update size using the ordinary likelihood and the current full predictor. For an augmented likelihood, refresh the augmentation variables, working response, observed-row precision $\bW$, collapsed matrix $\bM$, and CHOLMOD factor using \texttt{update\_pg\_working\_model()} or \texttt{update\_probit\_working\_model()}.
 \item Sample $\bbeta$ from its Gaussian full conditional using $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bX)$ and $\bX\trans\mathcal{V}^{-1}_{\mathrm{op}}(\widetilde\by-\bZ\balpha)$.
 \item Sample $\balpha$ from its Gaussian full conditional using $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\bZ)$ and $\bZ\trans\mathcal{V}^{-1}_{\mathrm{op}}(\widetilde\by-\bX\bbeta)$.
-\item Sample explicit iid random-effect variances or covariances with \texttt{update\_sigmaSqRE\_gibbs()}.
+\item Sample IG iid variances and IW iid covariances with \texttt{update\_sigmaSqRE\_gibbs()}. Scalar variances with other priors enter the subsequent Metropolis step.
 \item Form the running residual $\br=\widetilde\by-\bX\bbeta-\bZ\balpha$ for the covariance-parameter update.
-\item For each adaptive Metropolis block, propose covariance or sampled residual variance parameters, assemble and factor the candidate $\bM$, evaluate Equation~\eqref{eq:collapsed-mh-target}, and accept or reject the proposal.
+\item For each adaptive Metropolis block, propose its covariance or variance parameters and evaluate Equation~\eqref{eq:collapsed-mh-target}. Assemble and factor a candidate $\bM$ only when the block includes structured-process or residual parameters; an IID-only conditional block uses Equation~\eqref{eq:iid-conditional-variance-target}. Accept or reject the proposal.
 \item If the likelihood is augmented and structured process terms are present, refresh $\br$ and draw the current latent process from its conditional distribution. This draw is always made to seed the next augmentation refresh; it is stored only on the \texttt{save\_process} grid.
 \end{enumerate}
 \end{minipage}

@@ -69,9 +69,13 @@ named list such as
 Names must match all coefficient names exactly, including case; their order
 does not matter. A shared prior does not impose a shared variance. Starting
 variances under \code{starting$iid_1$sigma_sq} may be one positive number or a
-coefficient-named numeric vector or list. Variances use conjugate IG updates
-under the default separate IID strategy. With \code{collapse_iid = TRUE}, they
-use Metropolis updates and accept matching \code{tuning$iid_1$sigma_sq} controls.
+coefficient-named numeric vector or list. Variance priors may be \code{ig()},
+\code{log_normal()}, \code{gamma_dist()}, \code{half_normal()}, or \code{half_t()},
+with different families allowed for different coefficients. Under the default
+separate IID strategy, IG variances use Gibbs updates and other scalar variances
+use conditional Metropolis updates. With \code{collapse_iid = TRUE}, all use
+Metropolis updates. Matching \code{tuning$iid_1$sigma_sq} controls apply to the
+variances updated by Metropolis.
 Output names identify each coefficient, for example
 \code{iid_1[coefficient="x"]_sigma_sq}, while controls and combined-summary
 selection use the original formula term name \code{iid_1}.
@@ -85,13 +89,13 @@ An additional \code{iid(stand)} term supplies parent intercepts when desired.
 The scalar slope form \code{x:iid(plot, by = stand)} is also supported.
 Adding \code{cov_model = "independent"} to the coefficient-formula form gives
 a separate variance for every coefficient within every stand. The supplied
-coefficient-specific IG priors and starting values are reused across stands;
+coefficient-specific variance priors and starting values are reused across stands;
 each coefficient/stand variance has its own posterior draws. An output name
 such as \code{iid_1[coefficient="x"][stand="north"]_sigma_sq} identifies both.
 
 Controls use the original formula term name, for example
 \code{priors = list(iid_1 = list(covariance = iw(4, diag(2))))} for a single
-correlated \code{by} term. The same supplied IG or IW hyperparameters are
+correlated \code{by} term. The supplied scalar variance or IW priors are
 applied independently to every parent block; no shared covariance
 hyperparameters are estimated. A supplied starting value or matrix is used
 for every parent. Only parent-child pairs represented by data rows enter
@@ -382,7 +386,10 @@ Term-specific covariance controls use generated names such as \code{iid_1},
 \code{car_time_1}, and \code{dagar_time_1}. The names are assigned by term
 type in formula order.
 
-IID variance priors are inverse-gamma prior objects, for example:
+Scalar IID variances accept \code{ig()}, \code{log_normal()}, \code{gamma_dist()},
+\code{half_normal()}, or \code{half_t()}; an explicit prior is required.
+The half-normal and half-t priors are on the standard deviation scale.
+For example:
 \preformatted{
 priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))
 }

@@ -33,8 +33,9 @@ residual variance parameters can be fixed with \code{\link{fixed}}, for
 example \code{starting = list(resid = list(tau_sq = fixed(0.5)))}.}
 \item{tuning}{Optional named list of initial Metropolis proposal scales for
 structured-process covariance, residual variance, and estimated negative-binomial
-size parameters. With \code{collapse_iid = TRUE}, IID variances and covariances
-also use Metropolis updates; see the IID sampling strategies below. A zero Metropolis tuning value fixes the
+size parameters. Scalar IID variances with non-IG priors also use Metropolis
+updates, as do all IID variances and covariances with \code{collapse_iid = TRUE};
+see the IID sampling strategies below. A zero Metropolis tuning value fixes the
 corresponding parameter. Parameters supplied with \code{\link{fixed}} are
 assigned zero tuning automatically.}
 \item{priors}{Named list of prior objects created with constructors such as
@@ -52,15 +53,19 @@ internally to the variance scale. Process terms require
 term-specific blocks, for example
 \code{priors = list(nngp_1 = list(sigma_sq = ig(shape, scale), phi = uniform(lower, upper)))}.
 IID random-effect variance priors use the same term-block convention, for
-example \code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))}.
+example \code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))} or
+\code{priors = list(iid_1 = list(sigma_sq = half_t(df, scale)))}. Scalar IID
+variances accept \code{ig()}, \code{log_normal()}, \code{gamma_dist()},
+\code{half_normal()}, and \code{half_t()}; the last two specify a prior on
+the standard deviation. There is no default IID variance prior.
 Unstructured coefficient-formula iid terms require
 \code{priors = list(iid_1 = list(covariance = iw(df, scale)))}. These
 covariances use Gibbs updates when IID effects are separate and Metropolis
 updates when collapsed. Use zero tuning to hold an IID covariance fixed under
 collapsing; \code{fixed()} is not accepted for IID covariance matrices.
 Independent coefficient-formula terms use \code{cov_model = "independent"}
-and require \code{sigma_sq = ig(shape, scale)} or a coefficient-named list
-of IG priors under their formula term name. A shared IG specification sets
+and require a scalar variance prior or a coefficient-named list
+of variance priors under their formula term name. A shared specification sets
 the same prior independently on each variance. Starting variances may be a
 positive scalar or a coefficient-named numeric vector or list under
 \code{starting$iid_1$sigma_sq}. Independent variances use the selected IID sampling strategy.
@@ -151,7 +156,8 @@ starting values.}
 \item{describe_terms}{Logical; print model term diagnostics before sampling.}
 \item{collapse_iid}{IID sampling strategy, applied to all IID terms. The default
 \code{FALSE} keeps IID coefficients separate from the marginalized structured
-effects and uses conjugate IG/IW covariance updates. \code{TRUE} integrates IID
+effects. IG variances and IW covariances use conjugate Gibbs updates; scalar
+variances with other priors use conditional Metropolis updates. \code{TRUE} integrates IID
 and structured coefficients together for fixed-effect and covariance updates,
 then jointly draws their coefficients. This experimental strategy uses Metropolis
 updates for IID covariances and requires at least one IID term. \code{NULL}
@@ -401,14 +407,19 @@ value to zero fixes that structured-process covariance or residual variance para
 marked with \code{fixed()} use their supplied values and are omitted from
 Metropolis proposal blocks.
 
-Separate IID updates use Gibbs sampling. Under joint IID collapsing, zero IID
-tuning holds the supplied starting variance or covariance fixed. If its starting
+IID parameters updated by Metropolis accept zero tuning to hold the supplied
+starting variance or covariance fixed. If its starting
 value is omitted, the default is held fixed across chains. IID priors remain
 required, including when tuning is zero; \code{fixed()} is not an IID control.
+With separate IID effects, IG variances and IW covariances use Gibbs updates
+and cannot be fixed through tuning. In an independent coefficient formula
+mixing IG and other priors, tuning applies only to the non-IG variances.
 
 \item \strong{IID sampling strategies (experimental joint collapsing).}
-The default \code{collapse_iid = FALSE} retains conjugate IID covariance updates
-and keeps the structured sparse factorization smaller. With
+The default \code{collapse_iid = FALSE} keeps IID coefficients separate and
+the structured sparse factorization smaller. IG variances and IW covariances
+retain conjugate updates. Other scalar variance priors use Metropolis updates
+conditional on the IID coefficients. With
 \code{collapse_iid = TRUE}, a single sparse system includes both IID and
 structured coefficients. Integrating them together can reduce dependence in the
 fixed-effect updates, but IID covariance updates then require Metropolis steps.
@@ -418,7 +429,7 @@ better mixing. Compare posterior agreement, R-hat, effective sample sizes per
 second, and memory for the quantities relevant to the analysis. Joint collapsing
 is experimental; it changes the sampling strategy, not the model or prior.
 
-For collapsed scalar or independent variances, use
+For scalar or independent variances updated by Metropolis, use
 \code{tuning = list(iid_1 = list(sigma_sq = 0.2))}. Independent coefficient
 formulas also accept coefficient-named numeric vectors or lists, just as their
 starting values do. For an unstructured covariance, use
@@ -427,9 +438,9 @@ initial scale for every log-Cholesky coordinate. These are also the default
 scales. A \code{by} term reuses its tuning specification for each parent's
 separate matrix or variance. Tuning entries must be finite and nonnegative.
 
-Collapsed IID variances use log coordinates. Unstructured covariances use a
+IID variance Metropolis updates use log coordinates. Collapsed unstructured covariances use a
 lower Cholesky factor with log diagonal and unrestricted off-diagonal entries.
-The IG/IW densities include the corresponding Jacobians in the Metropolis
+The prior densities include the corresponding Jacobians in the Metropolis
 target. All existing \code{metropolis} blocking options apply. \code{"by_term"}
 uses a separate block for each independent IID variance or covariance, including
 each parent-specific block. \code{"variance_theta"} and

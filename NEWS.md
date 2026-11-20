@@ -3,10 +3,16 @@
 ## New features
 
 - Added experimental joint IID collapsing through `collapse_iid = TRUE`, with
-  IG/IW covariance priors and the existing adaptive Metropolis controls.
+  the existing adaptive Metropolis controls.
   `FALSE` preserves separate IID updates and remains the default. `NULL`
   selects collapsing for IID-only models and separate updates when structured
   effects are present. Both strategies use the same output and prediction API.
+
+- Scalar IID variances now accept `ig()`, `log_normal()`, `gamma_dist()`,
+  `half_normal()`, and `half_t()` under either sampling strategy. Half-normal
+  and half-t priors are on standard deviations. Separate IID effects retain
+  Gibbs updates for IG variances and IW covariance matrices; other scalar
+  priors use conditional Metropolis updates. An explicit prior is required.
 
 - Added correlated grouped coefficients through `iid(group, ~ 1 + x)` with
   inverse-Wishart covariance priors. The `cov_model = "independent"` form

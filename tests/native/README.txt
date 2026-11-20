@@ -44,6 +44,20 @@ Carlo standard errors, including fixed-plus-IID contributions and full predictor
 These are small-system checks, not a guarantee of faster sampling for all models.
 The covariance suites require the suggested posterior package for diagnostics.
 
+Scalar variance prior checks cover IG, log-normal, gamma, half-normal and half-t
+densities, including the standard-deviation and log-variance Jacobians.
+Independent quadrature checks posterior moments in 30 Gaussian and 24 augmented
+cases under both strategies. Gaussian cases include AR(1) effects and zero-valued
+IID designs whose variance posterior is determined by its prior. Proposal checks
+cover all six blocking rules, accepted/rejected states, and preservation of the
+structured factor for conditional IID-only proposals. These checks use three
+chains, Monte Carlo standard errors and rank-normalized diagnostics.
+To repeat synthetic separate-versus-collapsed comparisons with other scalar
+priors, set STLMM_TEST_IID_PRIOR to log_normal, gamma, half_normal or half_t when
+running iid-posterior-reference.R. STLMM_TEST_STRUCTURE optionally selects none,
+ar1 or nngp, and STLMM_TEST_IID selects the IID form. The additional by_scalar
+case is available with these prior options. Correlated blocks retain IW priors.
+
 Augmented-model checks cover binomial logit, probit, and negative-binomial
 likelihoods with fixed or estimated size. Ten ordinary-likelihood quadrature
 problems independently check posterior coefficient and covariance moments,

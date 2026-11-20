@@ -1,4 +1,4 @@
-# Posterior comparisons under matched IG/IW priors.
+# Posterior comparisons under matched priors (IG/IW by default).
 # Calls the native sampler with an explicit collapsing flag.
 Sys.setenv(STLMM_REFERENCE_ONLY='1')
 source('tests/native/latent-reference.R')
@@ -16,6 +16,11 @@ d$nested <- interaction(d$parent,d$child,drop=TRUE)
 cases <- expand.grid(kind=c('scalar','independent','covariance','crossed','nested','by'),
   structure=c('none','ar1','nngp'),stringsAsFactors=FALSE)
 cases$family <- 'gaussian'
+iid_prior <- Sys.getenv('STLMM_TEST_IID_PRIOR')
+if(nzchar(iid_prior)) {
+  stopifnot(iid_prior %in% c('log_normal','gamma','half_normal','half_t'))
+  cases <- rbind(cases, data.frame(kind='by_scalar',structure=c('none','ar1','nngp'),family='gaussian'))
+}
 if(augmented) {
   cases <- expand.grid(kind=unique(cases$kind),
     family=c('binomial','probit','negative_binomial','estimated_size'),stringsAsFactors=FALSE)
@@ -26,18 +31,23 @@ if(nzchar(Sys.getenv('STLMM_TEST_FAMILY')))
   case_ids <- which(cases$family==Sys.getenv('STLMM_TEST_FAMILY'))
 if(nzchar(Sys.getenv('STLMM_TEST_IID')))
   case_ids <- intersect(case_ids,which(cases$kind==Sys.getenv('STLMM_TEST_IID')))
+if(nzchar(Sys.getenv('STLMM_TEST_STRUCTURE')))
+  case_ids <- intersect(case_ids,which(cases$structure==Sys.getenv('STLMM_TEST_STRUCTURE')))
 results <- list()
 for(cc in case_ids) {
   kind <- cases$kind[cc];structure <- cases$structure[cc]
   family <- cases$family[cc];gaussian <- family=='gaussian'
   beta <- if(gaussian) c(1,.4) else c(.1,.35)
-  by_term <- !gaussian && kind=='by'
+  by_term <- (!gaussian && kind=='by') || (nzchar(iid_prior) && kind=='by_scalar')
   ns <- if(gaussian || by_term) 12000L else 6000L
   keep <- (ns/4+1L):ns
   if(!gaussian) d$y <- rep(c(0,1),length.out=n)
   form <- as.formula(paste('y~x+',forms[[kind]],switch(structure,none='',
     ar1='+ar1(time)',nngp='+nngp(lon,lat,m=8,cov_model="exp")')))
   pr <- get_priors(kind)
+  if(nzchar(iid_prior)) for(term in names(pr)) if(!is.null(pr[[term]]$sigma_sq))
+    pr[[term]]$sigma_sq <- switch(iid_prior,log_normal=log_normal(-.4,.7),
+      gamma=gamma_dist(2,3),half_normal=half_normal(.8),half_t=half_t(4,.8))
   st <- if(gaussian) list(tau_sq=.25) else list()
   if(family=='estimated_size') pr$size <- gamma_dist(2,1)
   if(structure=='ar1') {

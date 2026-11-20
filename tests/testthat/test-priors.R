@@ -102,19 +102,21 @@ test_that("theta priors are checked against parameter domains", {
   )
 })
 
-test_that("grouped random-effect variances remain conjugate IG", {
+test_that("grouped random-effect variances accept nonconjugate priors", {
   dat <- data.frame(y = rnorm(10), x = rnorm(10), group = rep(letters[1:5], each = 2))
 
-  expect_error(
-    stLMM(
+  for(collapse in c(FALSE, TRUE)){
+    fit <- stLMM(
       y ~ x + iid(group),
       data = dat,
       priors = list(tau_sq = ig(2, 1), iid_1 = list(sigma_sq = half_t(4, 1))),
-      n_samples = 4,
+      n_samples = 4, collapse_iid = collapse,
       verbose = FALSE
-    ),
-    "must use ig"
-  )
+    )
+    expect_equal(unname(fit$backend$sigma_sq_re_prior[1, 1]), 5)
+    expect_identical(fit$term_description$random_effects$terms[[1]]$sampler$status,
+                     if(collapse) "collapsed Metropolis" else "conditional Metropolis")
+  }
 })
 
 test_that("beta priors are accepted for unit-interval theta parameters", {

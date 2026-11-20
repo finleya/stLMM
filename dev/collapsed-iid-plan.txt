@@ -4,14 +4,14 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 7 controlled performance comparisons completed, following validated
-public control, output integration, and documentation. collapse_iid = FALSE remains
+Current stage: 8 scalar variance prior extension implemented and validated,
+following the completed stage 7 benchmarks. collapse_iid = FALSE remains
 the default; explicit TRUE enables joint collapsing, and explicit NULL uses the
 agreed IID-only automatic rule.
 Both strategies support the four likelihoods, including estimated NB size.
 The benchmarks favor different strategies for covariance parameters and predictors;
-any automatic-default change needs further discussion. Broader IID priors remain
-unimplemented and follow validation of the IG/IW implementation.
+any automatic-default change needs further discussion. Scalar IID variances now
+accept the same five prior families under both sampling strategies.
 
 This plan and the requested algebra note are explicitly shared on the branch so
 work can continue from another checkout. These are exceptions to keeping internal
@@ -78,9 +78,9 @@ Default mixed IID-plus-structured models should retain that legacy behavior too.
 The automatic rule is currently explicit opt-in. Any default change needs both
 validation and review of the performance trade-offs below.
 
-Broader priors should be independent of the collapsing choice. The proposed
-separate path retains conjugate IG/IW updates for those priors and uses a
-conditional Metropolis target for nonconjugate priors. The collapsed path uses
+Broader priors are independent of the collapsing choice. The separate path
+retains conjugate IG/IW updates for those priors and uses a conditional Metropolis
+target for other scalar variance priors. The collapsed path uses
 the marginal target for its IID covariance parameters, including IG/IW priors.
 Acceptance of nonconjugate updates for the collapsed path is already settled.
 
@@ -445,6 +445,44 @@ Staged implementation and review
    generated reports and the isolated profiling probe remain local. Keep FALSE
    as the default pending further discussion. Broader scalar IID priors are a
    possible next focused extension, not an implemented part of this stage.
+
+8. Extend scalar IID variance priors under both strategies. Implemented families
+   are ig, log_normal, gamma_dist, half_normal, and half_t. The last two retain
+   the package's standard-deviation interpretation. No default prior is added.
+   The separate path retains IG/IW Gibbs updates and uses conditional Metropolis
+   for other scalar variance priors. The collapsed path uses marginal Metropolis
+   for all IID variances/covariances. Existing proposal blocking, adaptation and
+   tuning controls are shared. Conditional IID-only proposal blocks do not
+   assemble or factor the structured system. IW covariance handling and the
+   coefficient solve remain unchanged.
+   Legacy separate and collapsed compatibility checks each reproduce all 240
+   cases exactly, including RNG states; all 96 downstream recovery, prediction
+   and summary comparisons also remain identical. Independent scalar density checks agree
+   within 2.9e-15; 48 proposal-state checks and 30 Gaussian posterior quadrature
+   cases pass, including AR(1) and zero-valued IID covariates. Gaussian posterior
+   means agree within 2.64 MCSE, with maximum R-hat 1.0035.
+   Four additional simulated comparisons cover independent, crossed, nested and
+   parent-specific effects, mixed scalar/IW priors, AR(1) and NNGP. Three chains
+   per strategy agree within 2.21 combined MCSE; maximum R-hat is 1.0089 and
+   minimum bulk ESS exceeds 614. These are correctness checks, not controlled
+   timing benchmarks. Existing dense-system, areal, public recovery, scalar
+   quadrature, proposal-state and IW reference suites also pass.
+   All 8,051 assertions across 259 package test cases pass without failures,
+   warnings or skips. A fresh source-package R CMD check with manual and vignette
+   rendering excluded passes with no errors or warnings and the existing
+   installed-size note. Manuals, the formal technical document and its PDF, the
+   algebra note and affected article prose describe the implemented behavior.
+   All 24 ordinary-likelihood quadrature checks for binomial, probit and fixed-size
+   negative-binomial models pass under both strategies. Across the new priors,
+   posterior means agree within 2.99 MCSE and maximum R-hat is below 1.0011.
+   The half-t reference required finer integration, verified at 600 and 840 nodes;
+   no sampler change was needed. Public integration tests additionally cover
+   estimated NB size, mixed IG/non-IG/IW terms, NNGP effects, offsets, missing
+   responses, recovery, paired predictions and log likelihoods. Final review
+   also corrected non-IG prior reporting for normalized SIGMA_SQ control names.
+   The rendered technical PDF and algebra note have been rebuilt and inspected.
+   Article prose was aligned; article computations and timings were not rerun.
+   Internal numerical results and reports remain local under dev/validation.
 
 Possible later optimization -- not scheduled
 -------------------------------------------

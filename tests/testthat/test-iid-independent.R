@@ -149,7 +149,7 @@ test_that("independent coefficient controls reject ambiguous or invalid inputs",
   expect_error(fit(list(sigma_sq = list(x = ig(3, 1)))), "coefficient names")
   expect_error(fit(list(sigma_sq = list("(Intercept)" = ig(3, 1), X = ig(3, 1)))), "coefficient names")
   expect_error(fit(list(sigma_sq = setNames(list(ig(3, 1), ig(3, 1)), c("x", "x")))), "coefficient names")
-  expect_error(fit(list(sigma_sq = list("(Intercept)" = ig(3, 1), x = half_t(3, 1)))), "ig")
+  expect_error(fit(list(sigma_sq = list("(Intercept)" = ig(3, 1), x = normal()))), "variance prior")
   expect_error(fit(list(sigma_sq = ig(-1, 1))), "positive")
   expect_error(fit(starting = list(iid_1 = list(sigma_sq = c(.2, .3)))), "coefficient names")
   expect_error(fit(starting = list(iid_1 = list(sigma_sq = c(x = .2)))), "coefficient names")

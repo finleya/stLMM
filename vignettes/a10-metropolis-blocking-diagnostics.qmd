@@ -48,7 +48,7 @@ This vignette focuses on the Metropolis part of the `stLMM` sampler: which param
 
 The discussion is about the sampler implemented in `stLMM`, not a claim that the collapsed parameterization is best for every model or even the most natural parameterization for blocking. Similar models, and much more sophisticated hierarchical models, can be fit in general Bayesian modeling software. Those tools can represent the model in different ways: latent variables may be retained as parameters, centered or non-centered parameterizations may be used, and groups of model nodes or parameters may be updated with customized samplers. Those choices can be more favorable for a particular posterior geometry [@PapaspiliopoulosRobertsSkold2007; @StanUserGuideReparameterization]. Software built around programmable model graphs, such as NIMBLE, exposes this kind of sampler customization and even automated blocking because useful blocks are model- and parameterization-specific [@deValpineEtAl2017NIMBLE; @NimbleManualMCMC].
 
-The useful role for `stLMM` is narrower. It gives formula-level access to a specific family of spatial and space-time linear mixed models, including structured covariance terms, NNGP approximations, residual-variance options used in small area estimation, recovery and prediction methods, and fixed-parameter controls. The aim is to make these models easier to fit without requiring users to write the full latent model and sampler themselves. The collapsed sampler reduces the Markov chain dimension and gives one coherent implementation across these terms, but blocking then operates only on the covariance and residual-variance parameters through the collapsed target. That can be an advantage for routine models and a limitation for difficult posterior geometries.
+The useful role for `stLMM` is narrower. It gives formula-level access to a specific family of spatial and space-time linear mixed models, including structured covariance terms, NNGP approximations, residual-variance options used in small area estimation, recovery and prediction methods, and fixed-parameter controls. The aim is to make these models easier to fit without requiring users to write the full latent model and sampler themselves. The collapsed sampler reduces the Markov chain dimension and gives one coherent implementation across these terms, but covariance blocking operates on the variance and covariance parameters through their marginal or conditional targets, depending on the IID strategy and priors. That can be an advantage for routine models and a limitation for difficult posterior geometries.
 
 `stLMM` uses a collapsed sampler for structured latent process terms such as `ar1()`, `gp()`, `nngp()`, `car()`, and `car_time()`. The uncollapsed Gaussian model can be written as
 
@@ -110,11 +110,13 @@ This collapsed-sampler choice is deliberate, but it has real costs. It reduces t
 
 Blocking is the choice of which Metropolis-updated parameters are proposed together. One large block can be efficient when posterior dependence is well captured by the adaptive proposal covariance, but it can struggle when different parameter groups move on different scales or have different posterior dependence patterns. Splitting parameters into smaller blocks can sometimes improve mixing because each proposal is tuned to a more focused part of the posterior. There is no free lunch: each extra Metropolis block can add another target evaluation and factorization within the same retained iteration.
 
-For the Gaussian model, the coefficient and IID covariance updates use Gibbs steps:
+For the Gaussian model with separate IID effects (`collapse_iid = FALSE`), the following updates use Gibbs steps:
 
 - fixed effects $\mathbf{\beta}$ are updated by Gibbs steps;
 - unstructured grouped random effects $\mathbf{\alpha}$, when included through terms such as `iid(group)`, are updated by Gibbs steps;
-- scalar IID variances use inverse-gamma Gibbs updates, and correlated IID coefficient covariances use inverse-Wishart Gibbs updates.
+- scalar IID variances with inverse-gamma priors use inverse-gamma Gibbs updates, and correlated IID coefficient covariances use inverse-Wishart Gibbs updates.
+
+Other scalar IID variance priors (`log_normal()`, `gamma_dist()`, `half_normal()`, and `half_t()`) use conditional Metropolis updates. An IID-only conditional proposal block does not change the structured matrix or repeat its factorization. With `collapse_iid = TRUE`, all IID variances and covariances instead enter the marginal Metropolis target. The half-normal and half-t priors describe standard deviations, as they do for process and residual variances.
 
 Gaussian structured process effects $\mathbf{w}$ are recovered after fitting with `recover()`. For augmented non-Gaussian models, process draws are refreshed within each iteration and saved by default, while covariance updates still integrate them out.
 

@@ -112,23 +112,26 @@ of variances and correlations, so hyperparameters should be chosen with
 regard to the supplied covariate scales.
 
 For \code{iid(group, ~ 1 + x, cov_model = "independent")}, each coefficient
-variance has an independent IG prior and conjugate update. Specify
+variance has an independent scalar variance prior. Specify
 \code{priors = list(iid_1 = list(sigma_sq = ig(3, 1)))} to reuse the same
 hyperparameters independently, or
 \code{priors = list(iid_1 = list(sigma_sq = list("(Intercept)" = ig(3, 1), x = ig(4, 0.5))))}
-for coefficient-specific hyperparameters. A named list must contain exactly
+for coefficient-specific hyperparameters. Different coefficients may use
+different prior families, for example \code{x = half_t(3, 1)} in this list.
+A named list must contain exactly
 the coefficient names, including case. These independent variances remain
 separate parameters even when their prior hyperparameters are identical.
-An explicit IG prior is required; no IW covariance is sampled for this form.
+An explicit variance prior is required; no IW covariance is sampled for this form.
 
 For \code{iid(child, by = parent)} and
-\code{iid(child, ~ 1 + x, by = parent)}, specify the IG or IW prior under
+\code{iid(child, ~ 1 + x, by = parent)}, specify the scalar variance or IW prior under
 the original formula term name, such as \code{iid_1}. Its hyperparameters
 are reused for independent priors on every parent's variance or covariance.
 Each parent has its own posterior covariance draws. This interface
 does not estimate hyperparameters shared across the parent distributions.
 For an independent coefficient-formula term with \code{by}, each coefficient's
-IG hyperparameters are reused independently for that coefficient in every parent.
+prior family and hyperparameters are reused independently for that coefficient
+in every parent.
 
 Other positive variance priors use the following parameterizations. The
 \code{log_normal(meanlog, sdlog)} prior is the usual log-normal density with
@@ -145,15 +148,17 @@ Jacobian \eqn{1/(2\sqrt{x})}. Up to normalizing constants, this gives
 \eqn{p(x) \propto x^{a-1}(1-x)^{b-1}} on \eqn{0 < x < 1}.
 
 Variance parameters, including \code{tau_sq} and process \code{sigma_sq}, are
-strictly positive. Sampled residual and process variances may use
+strictly positive. Sampled residual, process, and scalar IID variances may use
 \code{ig()}, \code{log_normal()}, \code{gamma_dist()}, \code{half_normal()}, or
 \code{half_t()}. The half-normal and half-t priors are defined on the standard
-deviation scale and transformed internally to the variance scale. Scalar IID
-grouped random-effect variances, including independent coefficient-formula
-variances, must use \code{ig()}. Separate IID effects use conjugate Gibbs
-updates; jointly collapsed IID effects use Metropolis updates with the same
-IG/IW priors.
-Unstructured IID coefficient covariances use \code{iw()}.
+deviation scale and transformed internally to the variance scale. These choices
+also apply to independent coefficient-formula and parent-specific IID variances.
+With separate IID effects, IG variances use conjugate Gibbs updates; other
+scalar variance priors use Metropolis updates conditional on the IID coefficients.
+Jointly collapsed IID effects use Metropolis updates for every variance prior.
+Unstructured IID coefficient covariances use \code{iw()}, with Gibbs updates
+when separate and Metropolis updates when collapsed. An explicit prior is
+required for each IID variance or covariance under either strategy.
 
 When \code{resid(model = "group", group = group)} is used, the grouped residual
 variance priors are supplied through \code{priors$resid}. A single prior can

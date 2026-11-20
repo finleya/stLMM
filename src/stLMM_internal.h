@@ -303,6 +303,7 @@ typedef struct {
   int qLatTotal;
   int qLatSystem;
   int collapseIid;
+  int iidMetropolis;
   int nGraphs;
   int nTerms;
   int nSamples;
@@ -419,6 +420,7 @@ typedef struct {
   double *sigmaSqRE;
   double *sigmaSqREShape;
   double *sigmaSqREScale;
+  PriorSpec *sigmaSqREPrior;
   double *sigmaSqRETune;
   const char **reNames;
   double *alphaBlockBuf;
@@ -554,10 +556,14 @@ void update_mean_without_alpha(SamplerState *s, const double *beta, double *out)
 void update_sigmaSqRE_gibbs(SamplerState *s);
 void refresh_iid_covariance_precision(SamplerState *s, int b);
 double log_iid_covariance_target(SamplerState *s);
+double log_iid_variance_target(SamplerState *s, int b, double variance);
+int update_iid_variance_block(SamplerState *s, CovProposalBlock *block);
+void draw_adaptive_cov_block_proposal(SamplerState *s, CovProposalBlock *block);
 void init_iid_covariance_proposal(SamplerState *s, CovProposalState *p);
 void copy_iid_covariance_proposal(SamplerState *s, CovProposalState *p);
 int refresh_iid_covariance_proposal(SamplerState *s, CovProposalState *p, int b);
 double log_ig_kernel_collapsed(double x, double shape, double scale);
+double log_prior_kernel_original(double x, PriorSpec prior);
 double log_cov_params_target_collapsed(SamplerState *s, const double *resid);
 int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, double *out);
 int update_cov_params_mh_collapsed(SamplerState *s, const double *resid);

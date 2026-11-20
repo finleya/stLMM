@@ -301,6 +301,16 @@ $v^{-a-1}\exp(-b/v)$, it is
 $\operatorname{IG}(a+G/2,b+\sum_g\alpha_g^2/2)$.
 Other priors can use \eqref{eq:conditional-covariance-target} in a Metropolis step.
 That step uses small covariance blocks and does not require changing $\bM_w$.
+The implemented scalar choices are IG, log-normal, gamma, half-normal, and
+half-$t$ under either sampling strategy; half-normal and half-$t$ are specified
+on the standard deviation. With separate IID effects, non-IG variances use
+$\xi=\log v$ and conditional target
+\begin{equation}
+ \log p_v(e^\xi)+(1-G/2)\xi-\frac{\sum_g\alpha_g^2}{2e^\xi},
+\end{equation}
+including the log-variance Jacobian. IG variances and IW covariance matrices
+retain their conjugate updates. A conditional proposal block containing only
+scalar IID variances leaves the structured factorization unchanged.
 
 \section{Marginal covariance targets and prior transformations}
 When the IID effects are integrated out in the covariance update, the target is

@@ -114,7 +114,7 @@ stands, but `iid(plot)` alone would treat all occurrences of `p01` as the same
 group. `by = stand` distinguishes the nested parent–plot pairs internally
 and estimates separate plot-effect variance parameters for each stand.
 
-With matching IG priors, the two independent coefficient forms use the same
+With matching variance priors, the two independent coefficient forms use the same
 scalar sampler. The correlated form uses an IW covariance prior. Covariates
 enter on the supplied scale; the user chooses their centering and scaling.
 The [getting-started article](v01-getting-started.html#grouped-random-effects)
@@ -1545,7 +1545,10 @@ compares a fixed-size negative-binomial approximation with a native Poisson
 parameters and the combined group coefficients used for interpretation.
 The negative-binomial example estimates size in both packages, with prior information entering the `stLMM`
 fit. Correlated coefficients are supported by an IW covariance prior, while
-independent coefficients use separate IG variance priors. Use the posterior
+independent coefficients use separate IG variance priors in these examples.
+Scalar IID variances also accept `log_normal()`, `gamma_dist()`, `half_normal()`,
+and `half_t()`; the last two describe standard deviations. These choices apply
+to both independent formula forms and parent-specific variances. Use the posterior
 intervals and chain diagnostics to assess uncertainty and mixing; close point
 estimates alone are insufficient.
 

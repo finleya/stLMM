@@ -1,6 +1,59 @@
 #include "stLMM_internal.h"
 
-/* Densities in proposal coordinates: log variance for IG blocks and lower
+/* Scalar variance density in log coordinates. Separate IID updates also
+   condition on the current coefficients; collapsed updates integrate them out. */
+double log_iid_variance_target(SamplerState *s, int b, double variance)
+{
+  int j;
+  double out, ss;
+
+  if(!R_FINITE(variance) || variance <= 0.0 || !R_FINITE(1.0 / variance))
+    return R_NegInf;
+  out = log_prior_kernel_original(variance, s->sigmaSqREPrior[b]) + std::log(variance);
+  if(!s->collapseIid){
+    ss = 0.0;
+    for(j = 0; j < s->q; j++)
+      if(s->reBlockID[j] == b)
+        ss += s->alpha[j] * s->alpha[j];
+    out -= 0.5 * (s->reBlockSize[b] * std::log(variance) + ss / variance);
+  }
+  return out;
+}
+
+/* A separate-IID variance block does not change the structured system.
+   Reuse proposal/adaptation state without assembling or factoring M. */
+int update_iid_variance_block(SamplerState *s, CovProposalBlock *block)
+{
+  int j, b;
+  double current, proposal;
+  CovProposalState *p;
+
+  p = &s->covProp;
+  current = 0.0;
+  for(j = 0; j < block->dim; j++){
+    b = p->paramTerm[block->paramIndex[j]];
+    current += log_iid_variance_target(s, b, s->sigmaSqRE[b]);
+  }
+  if(!R_FINITE(current))
+    Rf_error("non-finite conditional IID variance target at the current state");
+  draw_adaptive_cov_block_proposal(s, block);
+  proposal = 0.0;
+  for(j = 0; j < block->dim; j++){
+    b = p->paramTerm[block->paramIndex[j]];
+    proposal += log_iid_variance_target(s, b, p->sigmaSqRE[b]);
+  }
+  if(!R_FINITE(proposal))
+    return 0;
+  if(std::log(runif(0.0, 1.0)) >= proposal - current)
+    return 0;
+  for(j = 0; j < block->dim; j++){
+    b = p->paramTerm[block->paramIndex[j]];
+    s->sigmaSqRE[b] = p->sigmaSqRE[b];
+  }
+  return 1;
+}
+
+/* Densities in proposal coordinates: log variance for scalar blocks and lower
    Cholesky entries with log diagonals for IW blocks. Each covariance contributes
    its prior and Jacobian once, irrespective of the number of groups. */
 double log_iid_covariance_target(SamplerState *s)
@@ -11,10 +64,10 @@ double log_iid_covariance_target(SamplerState *s)
   out = 0.0;
   for(b = 0; b < s->nRE; b++){
     k = s->reCovDim[b];
-    if(k == 0)
-      out += log_ig_kernel_collapsed(s->sigmaSqRE[b], s->sigmaSqREShape[b],
-                                     s->sigmaSqREScale[b]) + std::log(s->sigmaSqRE[b]);
-    else {
+    if(k == 0){
+      if(s->collapseIid || s->sigmaSqREPrior[b].family != PRIOR_IG)
+        out += log_iid_variance_target(s, b, s->sigmaSqRE[b]);
+    } else if(s->collapseIid){
       trace = 0.0;
       for(j = 0; j < k * k; j++)
         trace += s->reCovScale[b][j] * s->reCovPrecision[b][j];

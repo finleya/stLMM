@@ -1214,7 +1214,7 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
   }
 
   /*
-    Random-effects block metadata, starting variances, and IG priors for alpha.
+    Random-effects block metadata, starting variances, and legacy IG controls.
     Each alpha column j belongs to block reBlockID[j], and the prior
     scalar prior precision contribution is 1 / sigmaSqRE[reBlockID[j]].
     Optional iid_covariance metadata below overrides this for vector terms;
@@ -1315,7 +1315,7 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
     }
   }
 
-  /* Optional coefficient covariance blocks; dimension zero selects scalar IG updates. */
+  /* Optional coefficient covariance blocks; dimension zero selects scalar variances. */
   s->reCovDim = (int*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(int));
   s->reOffset = (int*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(int));
   s->reCovDF = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
@@ -1410,6 +1410,28 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
 
   if(collapseIid && s->q == 0)
     Rf_error("collapse_iid requires at least one IID term");
+  s->iidMetropolis = collapseIid;
+  s->sigmaSqREPrior = (PriorSpec*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(PriorSpec));
+  {
+    SEXP prior = getListElement(backend_r, "sigma_sq_re_prior");
+    if(prior != R_NilValue)
+      require_matrix_real(prior, s->nRE, 6, "backend$sigma_sq_re_prior");
+    for(i = 0; i < s->nRE; i++){
+      PriorSpec *pr = s->sigmaSqREPrior + i;
+      pr->family = prior == R_NilValue ? PRIOR_IG : (int)REAL(prior)[i];
+      pr->p1 = prior == R_NilValue ? s->sigmaSqREShape[i] : REAL(prior)[i + s->nRE];
+      pr->p2 = prior == R_NilValue ? s->sigmaSqREScale[i] : REAL(prior)[i + 2 * s->nRE];
+      if(pr->family != PRIOR_IG && pr->family != PRIOR_LOG_NORMAL &&
+         pr->family != PRIOR_GAMMA && pr->family != PRIOR_HALF_NORMAL && pr->family != PRIOR_HALF_T)
+        Rf_error("unsupported IID variance prior family");
+      if(!R_FINITE(pr->p1) || !R_FINITE(pr->p2) ||
+         (pr->family != PRIOR_LOG_NORMAL && pr->p1 <= 0.0) ||
+         (pr->family != PRIOR_HALF_NORMAL && pr->p2 <= 0.0))
+        Rf_error("invalid IID variance prior hyperparameters");
+      if(s->reCovDim[i] == 0 && pr->family != PRIOR_IG)
+        s->iidMetropolis = 1;
+    }
+  }
   s->sigmaSqRETune = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
   s->reNames = (const char**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(char*));
   {
@@ -1718,7 +1740,7 @@ static void assign_cov_proposal_blocks(SamplerState *s, CovProposalState *p)
     return;
   }
 
-  nRaw = s->metropolisBlocking == 5 ? p->dim : s->nTerms + (s->collapseIid ? s->nRE : 0) + 3;
+  nRaw = s->metropolisBlocking == 5 ? p->dim : s->nTerms + (s->iidMetropolis ? s->nRE : 0) + 3;
   rawToBlock = (int*)R_alloc(nRaw, sizeof(int));
   blockDim = (int*)R_alloc(nRaw, sizeof(int));
   blockPos = (int*)R_alloc(nRaw, sizeof(int));
@@ -1797,7 +1819,7 @@ void init_cov_proposal_state(SamplerState *s)
   p->Q = (double**)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double*));
   p->logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
   p->residualVariance = (double*)R_alloc(s->nResidualGroup > 0 ? s->nResidualGroup : 1, sizeof(double));
-  if(s->collapseIid)
+  if(s->iidMetropolis)
     init_iid_covariance_proposal(s, p);
 
   p->dim = 0;
@@ -1816,12 +1838,13 @@ void init_cov_proposal_state(SamplerState *s)
       if(term->thetaTune[j] > 0.0)
         p->dim++;
   }
-  if(s->collapseIid){
+  if(s->iidMetropolis){
     for(t = 0; t < s->nRE; t++){
       dim = s->reCovDim[t];
-      if(dim == 0 && s->sigmaSqRETune[t] > 0.0)
+      if(dim == 0 && s->sigmaSqRETune[t] > 0.0 &&
+         (s->collapseIid || s->sigmaSqREPrior[t].family != PRIOR_IG))
         p->dim++;
-      for(j = 0; j < dim * (dim + 1) / 2; j++)
+      for(j = 0; s->collapseIid && j < dim * (dim + 1) / 2; j++)
         if(s->reCovTune[t][j] > 0.0)
           p->dim++;
     }
@@ -1964,10 +1987,11 @@ void init_cov_proposal_state(SamplerState *s)
     }
   }
 
-  if(s->collapseIid){
+  if(s->iidMetropolis){
     for(t = 0; t < s->nRE; t++){
       dim = s->reCovDim[t];
-      if(dim == 0 && s->sigmaSqRETune[t] > 0.0){
+      if(dim == 0 && s->sigmaSqRETune[t] > 0.0 &&
+         (s->collapseIid || s->sigmaSqREPrior[t].family != PRIOR_IG)){
         p->Sigma0[k + p->dim * k] = s->sigmaSqRETune[t] * s->sigmaSqRETune[t];
         p->paramType[k] = 4;
         p->paramTerm[k] = t;
@@ -1975,7 +1999,7 @@ void init_cov_proposal_state(SamplerState *s)
         k++;
       }
       coord = 0;
-      for(col = 0; col < dim; col++){
+      for(col = 0; s->collapseIid && col < dim; col++){
         for(row = col; row < dim; row++){
           if(s->reCovTune[t][coord] > 0.0){
             p->Sigma0[k + p->dim * k] = s->reCovTune[t][coord] * s->reCovTune[t][coord];
