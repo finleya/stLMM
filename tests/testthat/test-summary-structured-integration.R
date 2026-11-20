@@ -42,13 +42,13 @@ test_that("iid summaries, recovery, and prediction compose with structured proce
     if(grepl("duplicated (time values|coordinates) detected", conditionMessage(w)))
       invokeRestart("muffleWarning")
   })
-  for(family in c("gaussian", "binomial", "probit", "negative_binomial")){
+  for(collapse_iid in c(FALSE, TRUE)) for(family in c("gaussian", "binomial", "probit", "negative_binomial")){
     dat <- d
     if(family != "gaussian") dat$y <- as.numeric(dat$y > 0)
     dat$y[1L] <- NA
     for(name in names(specs)){
       spec <- specs[[name]]
-      label <- paste(family, name)
+      label <- paste(family, name, collapse_iid)
       formula <- as.formula(paste("y ~ x + iid(parent) + iid(child, ~ 1 + x, by = parent) +", spec$term))
       fit <- support_notice(stLMM(formula, dat, family = family,
         trials = if(family == "binomial") rep(1, nrow(dat)) else NULL,
@@ -56,7 +56,7 @@ test_that("iid summaries, recovery, and prediction compose with structured proce
         starting = c(if(family == "gaussian") list(resid = list(tau_sq = fixed(.4))), spec$start),
         priors = list(iid_1 = list(sigma_sq = ig(2, 1)),
                       iid_2 = list(covariance = iw(4, diag(2)))),
-        n_samples = 60, chains = 2, warmup = FALSE, verbose = FALSE))
+        n_samples = 60, chains = 2, warmup = FALSE, verbose = FALSE, collapse_iid = collapse_iid))
       rec <- recover(fit)
       rng <- .Random.seed
       s <- summary(rec, type = "combined", terms = c("iid_1", "iid_2"), burn = 5,

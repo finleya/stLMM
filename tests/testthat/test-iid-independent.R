@@ -15,11 +15,11 @@ test_that("independent coefficient formulas share the scalar sampler and predict
   d <- independent_iid_data()
   prior <- list("(Intercept)" = ig(3, 1), x = ig(4, .4), X = ig(5, 2))
   starts <- c("(Intercept)" = .6, x = .3, X = .8)
-  for(family in c("gaussian", "binomial", "probit", "negative_binomial")){
+  for(collapse_iid in c(FALSE, TRUE)) for(family in c("gaussian", "binomial", "probit", "negative_binomial")){
     dat <- d
     if(family != "gaussian") dat$y <- as.numeric(dat$y > 0)
     for(by in c(FALSE, TRUE)) for(process in c("none", "ar1", "nngp")){
-      label <- paste(family, by, process)
+      label <- paste(family, by, process, collapse_iid)
       parent <- if(by) ", by = parent" else ""
       scalar <- paste0("iid(group", parent, ")")
       suffix <- switch(process, none = "", ar1 = " + ar1(time)",
@@ -35,7 +35,7 @@ test_that("independent coefficient formulas share the scalar sampler and predict
           trials = if(family == "binomial") rep(1, nrow(dat)) else NULL,
           size = if(family == "negative_binomial") 2 else NULL,
           priors = priors, starting = starting, n_samples = 20, chains = 2,
-          chain_control = list(seed = 85103), warmup = FALSE, verbose = FALSE)
+          chain_control = list(seed = 85103), warmup = FALSE, verbose = FALSE, collapse_iid = collapse_iid)
         list(fit = f, rng = .Random.seed)
       }
       old_start <- common_start; new_start <- common_start

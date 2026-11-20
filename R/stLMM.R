@@ -15,6 +15,7 @@ stLMM <- function(formula, data = parent.frame(),
                  chains = 1L,
                  chain_control = list(),
                  describe_terms = FALSE,
+                 collapse_iid = FALSE,
                  ...){
     
     ## stLMM() is intentionally the R-side orchestration point. The flow below
@@ -1049,6 +1050,11 @@ stLMM <- function(formula, data = parent.frame(),
     if(!inherits(formula, "formula"))
         stop("error: formula is misspecified")
 
+    if(!is.null(collapse_iid) &&
+       (!is.logical(collapse_iid) || length(collapse_iid) != 1L || is.na(collapse_iid)))
+        stop("error: collapse_iid must be NULL, TRUE, or FALSE")
+    collapse_iid_requested <- collapse_iid
+
     likelihood_family <- normalize_family(family)
     is_binomial <- identical(likelihood_family, "binomial")
     is_probit <- identical(likelihood_family, "probit")
@@ -1319,6 +1325,10 @@ stLMM <- function(formula, data = parent.frame(),
     
     graphs <- proc_info$graphs
     terms  <- proc_info$process_terms
+    if(is.null(collapse_iid))
+        collapse_iid <- n_re > 0L && length(terms) == 0L
+    if(collapse_iid && n_re == 0L)
+        stop("error: collapse_iid = TRUE requires at least one iid term")
     if(estimate_size && (n_re > 0L || length(terms) > 0L))
         warning("Estimating negative-binomial size with random effects: size and random-effect variances may be weakly identified. Check mixing and sensitivity to their priors.", call. = FALSE)
 
@@ -1438,7 +1448,7 @@ stLMM <- function(formula, data = parent.frame(),
     scalar_terms <- iid_design$terms[!iid_is_covariance]
     iid_covariance <- stats::setNames(vector("list", n_re), re_names)
     for(term in scalar_terms){
-        if(identical(term$cov_model, "independent") && !is.null(tuning[[term$formula_name]]))
+        if(!collapse_iid && identical(term$cov_model, "independent") && !is.null(tuning[[term$formula_name]]))
             stop("error: ", term$formula_name, " variances use Gibbs sampling and do not accept tuning")
     }
     if(length(scalar_re_names)){
@@ -1510,10 +1520,34 @@ stLMM <- function(formula, data = parent.frame(),
                 start <- validate_iid_covariance_matrix(sb$covariance, k,
                     paste0("starting$", nm, "$covariance"), coef_names)
             }
-            if(!is.null(tuning[[nm]]))
+            if(!collapse_iid && !is.null(tuning[[nm]]))
                 stop("error: ", nm, " covariance uses Gibbs sampling and does not accept tuning")
             iid_covariance[[i]] <- list(dim = as.integer(k), df = pr$df,
                                         scale = pr$scale, starting = start)
+        }
+    }
+
+    sigma_sq_re_tuning <- rep(0.2, n_re)
+    if(collapse_iid){
+        for(i in seq_len(n_re)){
+            nm <- re_control_names[i]
+            parameter <- if(iid_is_covariance[i]) "covariance" else "sigma_sq"
+            value <- if(iid_is_covariance[i]) 0.1 else 0.2
+            if(!is.null(tuning[[nm]])){
+                where <- paste0("tuning$", nm)
+                block <- resolve_iid_scalar_control(tuning[[nm]], iid_design$terms[[i]], where)
+                block <- normalize_param_block(block, where)
+                if(!identical(names(block), parameter))
+                    stop("error: ", where, " must contain ", parameter)
+                value <- block[[parameter]]
+                if(!is.numeric(value) || length(value) != 1L ||
+                   !is.finite(value) || value < 0)
+                    stop("error: ", where, "$", parameter, " must be a finite non-negative scalar")
+            }
+            if(iid_is_covariance[i])
+                iid_covariance[[i]]$tuning <- as.double(value)
+            else
+                sigma_sq_re_tuning[i] <- value
         }
     }
 
@@ -1868,6 +1902,9 @@ stLMM <- function(formula, data = parent.frame(),
         ## random effects
         sigma_sq_re_starting = as.double(sigma_sq_re_starting),
         sigma_sq_re_IG = sigma_sq_re_IG,
+        sigma_sq_re_tuning = as.double(sigma_sq_re_tuning),
+        collapse_iid_requested = collapse_iid_requested,
+        collapse_iid = collapse_iid,
         iid_covariance = iid_covariance,
         re = list(
             q = as.integer(re.q),
@@ -1981,7 +2018,8 @@ stLMM <- function(formula, data = parent.frame(),
         if(n_re){
             for(i in seq_along(re_names)){
                 if(iid_is_covariance[i]){
-                    if(chains > 1L && is.null(starting[[re_control_names[i]]])){
+                    if(chains > 1L && is.null(starting[[re_control_names[i]]]) &&
+                       (!collapse_iid || iid_covariance[[i]]$tuning > 0)){
                         # Congruence by a positive diagonal matrix preserves SPD.
                         d <- exp(stats::rnorm(re_ncoef[i], 0, chain_control$dispersion / 2))
                         b$iid_covariance[[i]]$starting <- iid_covariance[[i]]$starting * outer(d, d)
@@ -1996,7 +2034,7 @@ stLMM <- function(formula, data = parent.frame(),
                 }
                 if(!is.null(start_entry))
                     b$sigma_sq_re_starting[i] <- chain_value(start_entry, chain, chains, re_names[i], positive = TRUE)
-                else if(chains > 1L)
+                else if(chains > 1L && (!collapse_iid || sigma_sq_re_tuning[i] > 0))
                     b$sigma_sq_re_starting[i] <- log_jitter(sigma_sq_re_starting[i], chain_control$dispersion)
             }
         }

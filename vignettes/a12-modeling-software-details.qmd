@@ -21,4 +21,6 @@ The package vignettes focus on runnable examples. The technical reference provid
 
 The reference covers independent and correlated IID coefficients, parent-specific covariance distributions, combined coefficient diagnostics, and fixed or estimated negative-binomial size, including its prior, adaptive update, and use in prediction.
 
+It also explains the rationale and computational trade-offs for separate and experimental jointly collapsed IID sampling, the `collapse_iid` control, and the joint sparse algebra and covariance updates.
+
 The document is intended for readers who want implementation-level detail beyond the user-facing examples. It is most useful when checking how a model formula maps to the latent process representation, how the collapsed sampler is constructed, or how recovery and prediction use the sampled parameters and retained process draws.

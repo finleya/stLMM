@@ -125,7 +125,7 @@ For \code{iid(child, by = parent)} and
 \code{iid(child, ~ 1 + x, by = parent)}, specify the IG or IW prior under
 the original formula term name, such as \code{iid_1}. Its hyperparameters
 are reused for independent priors on every parent's variance or covariance.
-Each parent has its own posterior draw and Gibbs update. This interface
+Each parent has its own posterior covariance draws. This interface
 does not estimate hyperparameters shared across the parent distributions.
 For an independent coefficient-formula term with \code{by}, each coefficient's
 IG hyperparameters are reused independently for that coefficient in every parent.
@@ -150,7 +150,9 @@ strictly positive. Sampled residual and process variances may use
 \code{half_t()}. The half-normal and half-t priors are defined on the standard
 deviation scale and transformed internally to the variance scale. Scalar IID
 grouped random-effect variances, including independent coefficient-formula
-variances, use conjugate Gibbs updates and must use \code{ig()}.
+variances, must use \code{ig()}. Separate IID effects use conjugate Gibbs
+updates; jointly collapsed IID effects use Metropolis updates with the same
+IG/IW priors.
 Unstructured IID coefficient covariances use \code{iw()}.
 
 When \code{resid(model = "group", group = group)} is used, the grouped residual

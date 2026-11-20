@@ -64,3 +64,10 @@ separately, set STLMM_TEST_FAMILY to binomial, probit, negative_binomial, or
 estimated_size when running iid-augmented-posterior-reference.R with the library
 directory and output RDS path as arguments. STLMM_TEST_IID optionally selects an
 IID case (scalar, independent, covariance, crossed, nested, or by).
+
+The public fitting/recovery reference (iid-output-reference.R) checks the joint
+Gaussian posterior under fixed covariance parameters in 20 cases: ten IID
+formulations, with equal/unequal residual variances and no process, AR(1), NNGP,
+or GP effects. It includes offsets, missing responses, unused groups, collinear
+columns, and a nonzero normal fixed-effect prior. It compares the full retained
+(beta, w, alpha) posterior to independent dense calculations after recover().

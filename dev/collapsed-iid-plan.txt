@@ -4,11 +4,12 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 5 implemented and validated. The
-backend now supports binomial, probit, and negative-binomial likelihoods, including
-estimated size. The public fitting path and automatic default are unchanged. Early
-implementation stages may proceed in small, validated commits for review, as
-agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
+Current stage: 6 public control, output integration, and documentation implemented
+and validated. collapse_iid = FALSE remains the default; explicit TRUE enables
+joint collapsing, and explicit NULL uses the agreed IID-only automatic rule.
+Both strategies support the four likelihoods, including estimated NB size.
+Stage 7 controlled performance benchmarks and any automatic-default change remain
+separate work. Broader priors follow validation of the IG/IW implementation.
 
 This plan and the requested algebra note are explicitly shared on the branch so
 work can continue from another checkout. These are exceptions to keeping internal
@@ -60,7 +61,7 @@ Grouped Gaussian residual variances are not structured latent process terms for
 this decision. Crossing and nesting of IID groups do not change the rule.
 
 Agreed control: collapse_iid = NULL, TRUE, or FALSE, applying to all IID terms in
-a fit. There is no selection of individual IID terms for collapsing.
+a fit. Stage 6 exposes all three settings with FALSE as the public default. There is no selection of individual IID terms for collapsing.
 NULL applies the automatic rule; TRUE requests joint collapsing; FALSE selects
 the separate-IID path. Resolve this once during R-side setup and record both the
 requested and resolved setting in the fit. Do not silently change modes because
@@ -353,13 +354,43 @@ Staged implementation and review
    dominates at these dimensions; collapsing gave no consistent runtime gain.
    The report separates
    covariance-parameter and combined-predictor ESS/sec. The public interface and
-   defaults remain unchanged; stage 6 covers their integration and output checks.
+   defaults were unchanged in stage 5. Commit: c20a0c8.
 
 6. Validate prediction, recovery, log_lik, fitted values, combined summaries,
    modern diagnostics, and new-level behavior for both modes. Use synthetic
    recovery studies, comparisons under matched priors, prior-sensitivity cases,
    and lme4 as an external estimation comparison. Compare combined coefficients
    and predictors as well as marginal fixed and random effects.
+
+   2026-11-20 integration: the public collapse_iid argument accepts FALSE
+   (default), TRUE, or NULL. It records the requested and resolved choice in
+   backend metadata, including each chain. Collapsed IID tuning follows the
+   existing term grammar: sigma_sq for scalar/independent variances, covariance
+   for one initial scale shared across a matrix's log-Cholesky coordinates.
+   Independent coefficient names and by-parent reuse follow the existing controls.
+   Zero tuning holds the starting block fixed, without automatic multi-chain
+   dispersion of that block. IG/IW priors remain required. No C++ change or
+   alternate recovery/prediction implementation was needed in this stage.
+   Public tests now exercise both modes across all structured process families,
+   both independent IID syntaxes, parent-specific covariance matrices, missing
+   responses, new-level rules, combined diagnostics, fitted values, and log_lik.
+   NB posterior predictive samples use the matching estimated-size draws.
+   All six covariance blocking rules passed public tuning and warmup tests.
+   Twenty independent dense Gaussian posterior checks validate the complete
+   (beta, w, alpha) output after public fitting and recovery, with ten IID forms,
+   equal/unequal residual variances, offsets, missing responses, proper nonzero
+   beta priors, and AR(1), NNGP, GP, or no structured terms. Maximum standardized
+   mean/covariance errors were 3.37/3.94. The 240 iteration and 96 downstream
+   legacy comparisons remained identical. All 7,862 assertions across 252 package
+   test cases passed without failures, warnings, or skips. A fresh source-package
+   R CMD check passed with no errors, the existing two missing-vignette warnings,
+   and the installed-size note.
+   The manual pages and rendered technical PDF describe the implemented controls,
+   covariance transformations, and both update/recovery schedules. At the user's
+   request, the technical document explains the original rationale for separate
+   IID effects, the benefits and costs of joint collapsing, its experimental status,
+   and the scope for investigation and extensions. Broader multivariate models
+   are described as possibilities, not implemented capabilities.
 
 7. Benchmark representative group structures and structured graphs, including a
    few hundred groups and groups spanning distant spatial nodes. Enable the

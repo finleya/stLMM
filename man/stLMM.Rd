@@ -7,7 +7,7 @@ stLMM(formula, data = parent.frame(), starting = list(), tuning = NULL,
   size = NULL, n_samples, n_omp_threads = 1, nngp_search = c("fast", "brute"),
   verbose = TRUE, n_report = 100, warmup = TRUE, metropolis = list(),
   cholmod_control = list(), save_process = NULL, chains = 1L,
-  chain_control = list(), describe_terms = FALSE, ...)
+  chain_control = list(), describe_terms = FALSE, collapse_iid = FALSE, ...)
 }
 \arguments{
 \item{formula}{A model formula with fixed effects, optional \code{offset()}
@@ -33,7 +33,8 @@ residual variance parameters can be fixed with \code{\link{fixed}}, for
 example \code{starting = list(resid = list(tau_sq = fixed(0.5)))}.}
 \item{tuning}{Optional named list of initial Metropolis proposal scales for
 structured-process covariance, residual variance, and estimated negative-binomial
-size parameters. IID variances and covariances use Gibbs updates. A zero Metropolis tuning value fixes the
+size parameters. With \code{collapse_iid = TRUE}, IID variances and covariances
+also use Metropolis updates; see the IID sampling strategies below. A zero Metropolis tuning value fixes the
 corresponding parameter. Parameters supplied with \code{\link{fixed}} are
 assigned zero tuning automatically.}
 \item{priors}{Named list of prior objects created with constructors such as
@@ -54,13 +55,15 @@ IID random-effect variance priors use the same term-block convention, for
 example \code{priors = list(iid_1 = list(sigma_sq = ig(shape, scale)))}.
 Unstructured coefficient-formula iid terms require
 \code{priors = list(iid_1 = list(covariance = iw(df, scale)))}. These
-covariances use Gibbs updates and accept neither tuning nor fixed matrices.
+covariances use Gibbs updates when IID effects are separate and Metropolis
+updates when collapsed. Use zero tuning to hold an IID covariance fixed under
+collapsing; \code{fixed()} is not accepted for IID covariance matrices.
 Independent coefficient-formula terms use \code{cov_model = "independent"}
 and require \code{sigma_sq = ig(shape, scale)} or a coefficient-named list
 of IG priors under their formula term name. A shared IG specification sets
 the same prior independently on each variance. Starting variances may be a
 positive scalar or a coefficient-named numeric vector or list under
-\code{starting$iid_1$sigma_sq}. Independent variances use Gibbs updates.
+\code{starting$iid_1$sigma_sq}. Independent variances use the selected IID sampling strategy.
 Priors
 are not required for covariance or residual variance parameters supplied with
 \code{\link{fixed}}.}
@@ -146,6 +149,15 @@ sequential chains and return an \code{stLMM_chains} object.}
 supplied. \code{dispersion} controls log-scale jitter for omitted positive
 starting values.}
 \item{describe_terms}{Logical; print model term diagnostics before sampling.}
+\item{collapse_iid}{IID sampling strategy, applied to all IID terms. The default
+\code{FALSE} keeps IID coefficients separate from the marginalized structured
+effects and uses conjugate IG/IW covariance updates. \code{TRUE} integrates IID
+and structured coefficients together for fixed-effect and covariance updates,
+then jointly draws their coefficients. This experimental strategy uses Metropolis
+updates for IID covariances and requires at least one IID term. \code{NULL}
+selects collapsing for IID-only models and separate IID updates when structured
+process terms are present. Grouped residual variances do not count as structured
+process terms. See Details for tuning and computational trade-offs.}
 \item{...}{Currently unused.}
 }
 \value{
@@ -164,7 +176,9 @@ returned as \code{covariance_acceptance} and \code{adaptive_metropolis}. The
 default is one global covariance block; optional blocking and scalar-update
 diagnostics are stored in \code{adaptive_metropolis$blocks}. The object also
 contains \code{term_description} and the stored \code{backend} used by recovery
-and prediction.
+and prediction. \code{backend$collapse_iid_requested} records the supplied
+strategy (including \code{NULL}), and \code{backend$collapse_iid} records the
+resolved logical choice. Both are retained within every chain.
 For unstructured coefficient-formula iid terms, \code{iid_covariance_samples} and
 \code{samples$iid_covariance} contain the lower triangle of each covariance,
 including the diagonal, column by column, in iid term order. Columns are named
@@ -212,7 +226,7 @@ with structured process terms. The default in that case is
 \code{save_process = list(start = 1, thin = 1)}, because those in-chain process
 draws are already needed by the likelihood augmentation and post-fit
 augmented process reconstruction is not used. For Gaussian process models,
-the sampler remains fully collapsed with respect to the process terms and
+structured draws are not retained during fitting and
 \code{recover()} is the intended post-fit step for drawing latent process
 samples.
 Multi-chain fits can be converted to a
@@ -387,8 +401,46 @@ value to zero fixes that structured-process covariance or residual variance para
 marked with \code{fixed()} use their supplied values and are omitted from
 Metropolis proposal blocks.
 
-IID variances and covariances use Gibbs updates; covariance and independent
-coefficient-formula terms do not accept tuning or fixed variance/covariance controls.
+Separate IID updates use Gibbs sampling. Under joint IID collapsing, zero IID
+tuning holds the supplied starting variance or covariance fixed. If its starting
+value is omitted, the default is held fixed across chains. IID priors remain
+required, including when tuning is zero; \code{fixed()} is not an IID control.
+
+\item \strong{IID sampling strategies (experimental joint collapsing).}
+The default \code{collapse_iid = FALSE} retains conjugate IID covariance updates
+and keeps the structured sparse factorization smaller. With
+\code{collapse_iid = TRUE}, a single sparse system includes both IID and
+structured coefficients. Integrating them together can reduce dependence in the
+fixed-effect updates, but IID covariance updates then require Metropolis steps.
+Groups connecting many structured nodes, or crossed IID groups, can increase
+Cholesky fill and factorization cost. Neither strategy is uniformly faster or
+better mixing. Compare posterior agreement, R-hat, effective sample sizes per
+second, and memory for the quantities relevant to the analysis. Joint collapsing
+is experimental; it changes the sampling strategy, not the model or prior.
+
+For collapsed scalar or independent variances, use
+\code{tuning = list(iid_1 = list(sigma_sq = 0.2))}. Independent coefficient
+formulas also accept coefficient-named numeric vectors or lists, just as their
+starting values do. For an unstructured covariance, use
+\code{tuning = list(iid_1 = list(covariance = 0.1))}; this scalar supplies the
+initial scale for every log-Cholesky coordinate. These are also the default
+scales. A \code{by} term reuses its tuning specification for each parent's
+separate matrix or variance. Tuning entries must be finite and nonnegative.
+
+Collapsed IID variances use log coordinates. Unstructured covariances use a
+lower Cholesky factor with log diagonal and unrestricted off-diagonal entries.
+The IG/IW densities include the corresponding Jacobians in the Metropolis
+target. All existing \code{metropolis} blocking options apply. \code{"by_term"}
+uses a separate block for each independent IID variance or covariance, including
+each parent-specific block. \code{"variance_theta"} and
+\code{"process_variance"} place all IID coordinates in their variance block;
+\code{"residual_process"} places them with process covariance parameters.
+
+Both strategies retain IID coefficients in \code{alpha_samples}. Gaussian
+process predictions still use \code{recover()}, conditional on those coefficients.
+Augmented non-Gaussian models use paired in-chain IID and process draws on the
+\code{save_process} grid. Formula syntax, combined summaries, and explicit
+\code{allow_new_levels} prediction rules are the same for both strategies.
 
 \item \strong{Priors and parameter transforms.}
 Process terms require priors for parameters that are sampled. The Gaussian

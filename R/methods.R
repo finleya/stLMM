@@ -172,6 +172,9 @@ print.stLMM <- function(x, ...){
   else
     cat("  residual variance: global tau_sq\n", sep = "")
 
+  if(isTRUE(x$backend$collapse_iid))
+    cat("  IID sampler: collapsed\n")
+
   active <- names(Filter(Negate(is.null), x$samples))
   if(length(active))
     cat("  samples: ", paste(active, collapse = ", "), "\n", sep = "")
@@ -219,6 +222,9 @@ print.stLMM_chains <- function(x, ...){
   accept <- vapply(x$chains, function(z) z$covariance_acceptance %||% NA_real_, numeric(1))
   if(length(accept))
     cat("  covariance acceptance: ", paste(round(accept, 3), collapse = ", "), "\n", sep = "")
+
+  if(isTRUE(x$backend$collapse_iid))
+    cat("  IID sampler: collapsed\n")
 
   if(!is.null(x$timing$phases_total))
     cat("  post-warmup sampling elapsed: ", round(unname(x$timing$phases_total[["sampling"]]), 3), " seconds total\n", sep = "")

@@ -35,7 +35,7 @@ Recover posterior draws of latent process terms from a fitted collapsed
 }
 \details{
 For Gaussian process models, the collapsed sampler integrates latent process
-values out during fitting. This function reconstructs the posterior
+values out during parameter updates. This function reconstructs the posterior
 conditional distribution of the latent process for selected posterior draws and
 samples from it using the stored backend, posterior parameter samples, and
 CHOLMOD sparse factorization.
@@ -59,7 +59,12 @@ Recovery is only needed for models with structured process terms such as
 \code{ar1()}, \code{gp()}, \code{nngp()}, \code{car()}, \code{dagar()}, or
 \code{car_time()}, or \code{dagar_time()}.
 Explicit iid grouped random effects are sampled during fitting and do not need
-this recovery step. When the fitted data include rows with missing numeric
+this recovery step under either IID sampling strategy. Even with
+\code{collapse_iid = TRUE}, Gaussian recovery conditions on the retained
+\code{alpha_samples}; it draws only the structured effects and preserves
+coefficient/parameter alignment. For augmented models, recovery selects the
+paired in-chain draws and does not resample IID coefficients. When the fitted
+data include rows with missing numeric
 responses, recovered process samples are on the full latent support, including
 latent nodes associated only with those missing-response rows.
 

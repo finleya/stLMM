@@ -42,7 +42,7 @@ run(file.path(R.home('bin'),'R'),
     c('CMD','INSTALL','--preclean',shQuote(paste0('--library=',file.path(work,'lib'))),
       shQuote(file.path(work,'stLMM'))),file.path(work,'install.log'))
 setwd(package)
-for(test in c('latent-reference','latent-areal-reference','iid-scalar-reference',
+for(test in c('latent-reference','latent-areal-reference','iid-output-reference','iid-scalar-reference',
              'iid-proposal-reference','iid-iw-reference','iid-posterior-reference',
              'iid-augmented-reference','iid-augmented-schedules',
              'iid-augmented-posterior-reference')) {
