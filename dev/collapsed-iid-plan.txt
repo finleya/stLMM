@@ -4,6 +4,8 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
+Merged into main at d033ceb on 2026-11-20. Release 0.0.7 records the expanded IID
+functionality and the three-way separate-IID/collapsed-IID/lme4 article comparison.
 Current stage: 8 scalar variance prior extension implemented and validated,
 following the completed stage 7 benchmarks. collapse_iid = FALSE remains
 the default; explicit TRUE enables joint collapsing, and explicit NULL uses the
@@ -522,9 +524,10 @@ small dimension limit. Unrestricted versus structured covariance is a modeling
 choice; priors, proposal blocks, and numerical costs must reflect the resulting
 dimension. Full-rank vector terms do not require reduced-rank factor models.
 
-Structured processes nested within parent groups remain the next substantive
-modeling extension after the IID work, together with the planned progression to
-correlated structured coefficients and then multivariate responses. Nested
+The next modeling extension will be chosen in discussion: structured processes
+within parent groups, or correlated multivariate latent structured terms, followed
+by multivariate responses. Neither direction starts automatically after this
+documentation release. Nested
 processes can use independent prior blocks for each parent, with shared versus
 parent-specific process parameters specified separately. Cross-outcome process
 models must supply a valid joint spatial covariance/precision, not only a

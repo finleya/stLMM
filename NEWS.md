@@ -1,4 +1,4 @@
-# stLMM 0.0.6
+# stLMM 0.0.7
 
 ## New features
 
@@ -13,6 +13,22 @@
   and half-t priors are on standard deviations. Separate IID effects retain
   Gibbs updates for IG variances and IW covariance matrices; other scalar
   priors use conditional Metropolis updates. An explicit prior is required.
+
+## Documentation and validation
+
+- Updated manual pages and the technical document for both IID strategies,
+  covariance transformations, tuning, and scalar variance prior choices.
+- Expanded the grouped-effects article with a three-way comparison of separate
+  IID sampling, collapsed IID sampling, and lme4. The example reports parameter
+  recovery, credible intervals, combined-coefficient diagnostics, elapsed time,
+  and effective samples per second.
+- Added numerical reference and synthetic-data checks for Gaussian, binomial,
+  probit, and negative-binomial models, including IID effects combined with
+  structured processes, missing responses, recovery, and prediction.
+
+# stLMM 0.0.6
+
+## New features
 
 - Added correlated grouped coefficients through `iid(group, ~ 1 + x)` with
   inverse-Wishart covariance priors. The `cov_model = "independent"` form
