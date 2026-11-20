@@ -29,8 +29,10 @@ code <- paste(readLines(init),collapse='\n')
 code <- sub('static const R_CallMethodDef CallEntries[] = {',paste0(
   'extern SEXP stLMM_latent_probe(SEXP, SEXP);\n',
   'extern SEXP stLMM_known_covariance_chain(SEXP, SEXP, SEXP);\n',
+  'extern SEXP stLMM_iid_mh_probe(SEXP);\n',
   'static const R_CallMethodDef CallEntries[] = {\n',
   '    {"stLMM_latent_probe", (DL_FUNC) &stLMM_latent_probe, 2},\n',
+  '    {"stLMM_iid_mh_probe", (DL_FUNC) &stLMM_iid_mh_probe, 1},\n',
   '    {"stLMM_known_covariance_chain", (DL_FUNC) &stLMM_known_covariance_chain, 3},'),
   code,fixed=TRUE)
 writeLines(code,init)
@@ -38,7 +40,7 @@ run(file.path(R.home('bin'),'R'),
     c('CMD','INSTALL','--preclean',shQuote(paste0('--library=',file.path(work,'lib'))),
       shQuote(file.path(work,'stLMM'))),file.path(work,'install.log'))
 setwd(package)
-for(test in c('latent-reference','latent-areal-reference')) {
+for(test in c('latent-reference','latent-areal-reference','iid-scalar-reference','iid-proposal-reference')) {
   log <- file.path(work,paste0(test,'.log'))
   run(file.path(R.home('bin'),'Rscript'),
       shQuote(c(file.path(package,'tests/native',paste0(test,'.R')),

@@ -24,4 +24,7 @@ joint Gaussian distribution of fixed and random coefficients using 3,000 joint
 schedule iterations and an independent dense posterior precision. The Gaussian
 chain probe can also compare both coefficient update schedules. These checks do
 not establish correctness, convergence, or speed of covariance-parameter
-Metropolis updates.
+Metropolis updates by themselves. The scalar covariance suite separately checks
+IG posterior moments against one-dimensional quadrature and checks accepted and
+rejected proposal state restoration under all blocking choices, with warmup on
+and off. It requires the suggested posterior package for Monte Carlo diagnostics.

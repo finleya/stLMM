@@ -492,6 +492,9 @@ double log_cov_params_target_collapsed(SamplerState *s, const double *resid)
              + theta_log_jacobian(term->theta[j], term->thetaLower[j], term->thetaUpper[j]);
   }
 
+  if(s->collapseIid)
+    out += log_iid_covariance_target(s);
+
   return out;
 }
 
@@ -543,6 +546,9 @@ int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, do
               + theta_log_jacobian(term->theta[j], term->thetaLower[j], term->thetaUpper[j]);
   }
 
+  if(s->collapseIid)
+    *out += log_iid_covariance_target(s);
+
   return R_FINITE(*out);
 }
 
@@ -557,6 +563,7 @@ typedef struct {
   double **F;
   double **Q;
   double *logDetQ;
+  double *sigmaSqRE;
 } CovBindingSave;
 
 CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
@@ -568,6 +575,7 @@ CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
   save.residualVariance = (double*)R_alloc(s->nResidualGroup > 0 ? s->nResidualGroup : 1, sizeof(double));
   for(t = 0; t < s->nResidualGroup; t++)
     save.residualVariance[t] = s->residualVariance[t];
+  save.sigmaSqRE = s->sigmaSqRE;
   save.M_lat = s->M_lat;
   save.M_lat_fac = s->M_lat_fac;
   save.sigmaSq = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
@@ -577,6 +585,8 @@ CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
   save.Q = (double**)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double*));
   save.logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
 
+  if(s->collapseIid)
+    s->sigmaSqRE = p->sigmaSqRE;
   s->tauSq = p->tauSq;
   for(t = 0; t < s->nResidualGroup; t++)
     s->residualVariance[t] = p->residualVariance[t];
@@ -609,6 +619,7 @@ void restore_cov_binding(SamplerState *s, CovBindingSave *save)
 {
   int t;
 
+  s->sigmaSqRE = save->sigmaSqRE;
   s->tauSq = save->tauSq;
   for(t = 0; t < s->nResidualGroup; t++)
     s->residualVariance[t] = save->residualVariance[t];
@@ -634,6 +645,12 @@ void accept_cov_proposal_state(SamplerState *s, CovProposalState *p)
   double *tmpPtr;
   cholmod_sparse *tmpSparse;
   cholmod_factor *tmpFactor;
+
+  if(s->collapseIid){
+    tmpPtr = s->sigmaSqRE;
+    s->sigmaSqRE = p->sigmaSqRE;
+    p->sigmaSqRE = tmpPtr;
+  }
 
   tmpDouble = s->tauSq;
   s->tauSq = p->tauSq;
@@ -714,6 +731,8 @@ void pack_cov_eta(SamplerState *s, double *eta)
       eta[k] = theta_forward(s->terms[t].theta[j],
                              s->terms[t].thetaLower[j],
                              s->terms[t].thetaUpper[j]);
+    } else if(p->paramType[k] == 4){
+      eta[k] = std::log(s->sigmaSqRE[p->paramTerm[k]]);
     } else {
       Rf_error("pack_cov_eta: unknown adaptive parameter type");
     }
@@ -737,6 +756,9 @@ void unpack_cov_eta_to_proposal(SamplerState *s, const double *eta)
   CovProposalState *p;
 
   p = &s->covProp;
+  if(s->collapseIid)
+    for(i = 0; i < s->nRE; i++)
+      p->sigmaSqRE[i] = s->sigmaSqRE[i];
   p->tauSq = s->tauSq;
   for(i = 0; i < s->nResidualGroup; i++)
     p->residualVariance[i] = s->residualVariance[i];
@@ -765,6 +787,8 @@ void unpack_cov_eta_to_proposal(SamplerState *s, const double *eta)
       if(!(s->terms[t].thetaLower[j] < p->theta[t][j] &&
            p->theta[t][j] < s->terms[t].thetaUpper[j]))
         p->theta[t][j] = s->terms[t].theta[j];
+    } else if(p->paramType[k] == 4){
+      p->sigmaSqRE[p->paramTerm[k]] = std::exp(eta[k]);
     } else {
       Rf_error("unpack_cov_eta_to_proposal: unknown adaptive parameter type");
     }
@@ -1000,6 +1024,11 @@ int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block,
   logPostOld = log_cov_params_target_collapsed(s, resid);
 
   draw_adaptive_cov_block_proposal(s, block);
+  if(s->collapseIid)
+    for(i = 0; i < s->nRE; i++)
+      if(!R_FINITE(p->sigmaSqRE[i]) || p->sigmaSqRE[i] <= 0.0 ||
+         !R_FINITE(1.0 / p->sigmaSqRE[i]))
+        return 0;
 
   for(i = 0; i < s->nTerms; i++){
     TermState *term = s->terms + i;
@@ -1109,6 +1138,30 @@ struct SamplerIterationResult {
   int wCurrentFresh;
 };
 
+static int update_covariance_iteration(SamplerState *s, const double *resid, int warmup)
+{
+  CovProposalState *p;
+  int block, accepted, acceptedTotal;
+
+  p = &s->covProp;
+  acceptedTotal = 0;
+  if(warmup){
+    for(block = 0; block < p->nBlocks; block++){
+      accepted = cov_params_block_mh_collapsed_step(s, p->blocks + block, resid);
+      acceptedTotal += accepted;
+      p->blocks[block].batchAccept += accepted;
+      p->blocks[block].warmupNAccepted += accepted;
+      p->blocks[block].warmupNAttempted++;
+    }
+    p->warmupNAccepted += acceptedTotal;
+    p->warmupNAttempted += p->nBlocks;
+  } else {
+    acceptedTotal = update_cov_params_mh_collapsed(s, resid);
+    s->covParamAccept += acceptedTotal;
+  }
+  return acceptedTotal;
+}
+
 static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
                                                            double *betaCurrent,
                                                            double *alphaCurrent,
@@ -1118,13 +1171,11 @@ static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
                                                            int warmup)
 {
   SamplerIterationResult result;
-  CovProposalState *p;
-  int i, block, accepted;
+  int i;
 
   result.covAccepted = 0;
   result.sizeAccepted = 0;
   result.wCurrentFresh = 0;
-  p = &s->covProp;
 
   /* The size step integrates out omega; redraw omega immediately before
      any Gaussian working-model update. */
@@ -1152,20 +1203,7 @@ static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
     update_sigmaSqRE_gibbs(s);
 
   update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
-  if(warmup){
-    for(block = 0; block < p->nBlocks; block++){
-      accepted = cov_params_block_mh_collapsed_step(s, p->blocks + block, resid);
-      result.covAccepted += accepted;
-      p->blocks[block].batchAccept += accepted;
-      p->blocks[block].warmupNAccepted += accepted;
-      p->blocks[block].warmupNAttempted++;
-    }
-    p->warmupNAccepted += result.covAccepted;
-    p->warmupNAttempted += p->nBlocks;
-  } else {
-    result.covAccepted = update_cov_params_mh_collapsed(s, resid);
-    s->covParamAccept += result.covAccepted;
-  }
+  result.covAccepted = update_covariance_iteration(s, resid, warmup);
 
   if(is_augmented_likelihood(s) && s->qLatTotal > 0){
     update_resid_for_current_fixed_random(s, betaCurrent, alphaCurrent, resid);
@@ -1173,6 +1211,32 @@ static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
     result.wCurrentFresh = 1;
   }
 
+  return result;
+}
+
+static SamplerIterationResult update_collapsed_iid_iteration(SamplerState *s,
+                                                            double *betaCurrent,
+                                                            double *alphaCurrent,
+                                                            double *resid,
+                                                            double *wCurrent,
+                                                            int warmup)
+{
+  SamplerIterationResult result;
+  double *latent;
+  int i;
+
+  result.sizeAccepted = 0;
+  result.wCurrentFresh = 1;
+  update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
+  update_mean_without_alpha(s, betaCurrent, resid);
+  result.covAccepted = update_covariance_iteration(s, resid, warmup);
+
+  latent = (double*)R_alloc(s->qLatSystem, sizeof(double));
+  recover_latent_draw_collapsed(s, resid, latent);
+  for(i = 0; i < s->q; i++)
+    s->alpha[i] = alphaCurrent[i] = latent[s->qLatTotal + i];
+  for(i = 0; i < s->qLatTotal; i++)
+    wCurrent[i] = latent[i];
   return result;
 }
 
@@ -1282,8 +1346,12 @@ void run_covariance_warmup(SamplerState *s,
       R_CheckUserInterrupt();
       vmax_iter = vmaxget();
 
-      iteration = update_separate_iid_iteration(s, betaCurrent, alphaCurrent,
-                                                resid, wCurrent, pg, 1);
+      if(s->collapseIid)
+        iteration = update_collapsed_iid_iteration(s, betaCurrent, alphaCurrent,
+                                                   resid, wCurrent, 1);
+      else
+        iteration = update_separate_iid_iteration(s, betaCurrent, alphaCurrent,
+                                                  resid, wCurrent, pg, 1);
       sizeAccepted += iteration.sizeAccepted;
       batchAccepted += iteration.covAccepted;
 
@@ -1547,6 +1615,8 @@ static void cov_param_label(SamplerState *s, CovProposalState *p, int idx, char 
     t = p->paramTerm[idx];
     j = p->paramTheta[idx];
     std::snprintf(label, labelSize, "%s_theta_%d", s->terms[t].name, j + 1);
+  } else if(p->paramType[idx] == 4){
+    std::snprintf(label, labelSize, "log(%s_sigma_sq)", s->reNames[p->paramTerm[idx]]);
   } else {
     std::snprintf(label, labelSize, "unknown_%d", idx + 1);
   }
@@ -1885,7 +1955,9 @@ extern "C" {
     const void *vmax_iter;
     BayesLogit_rpg_hybrid_t pg = BayesLogit_rpg_hybrid();
 
-    init_sampler_state(&s, backend_r);
+    SEXP collapse_r = getListElement(backend_r, "collapse_iid");
+    init_sampler_state(&s, backend_r, collapse_r == R_NilValue ? 0 :
+                        as_flag_scalar(collapse_r, "backend$collapse_iid"));
     
     for(i = 0; i < s.nTerms; i++){
       GraphState *g = s.graphs + s.terms[i].graphIndex;
@@ -1991,8 +2063,12 @@ extern "C" {
 	persistent objects allocated before the loop.
       */
       vmax_iter = vmaxget();
-      iteration = update_separate_iid_iteration(&s, betaCurrent, alphaCurrent,
-                                                resid, wCurrent, pg, 0);
+      if(s.collapseIid)
+        iteration = update_collapsed_iid_iteration(&s, betaCurrent, alphaCurrent,
+                                                   resid, wCurrent, 0);
+      else
+        iteration = update_separate_iid_iteration(&s, betaCurrent, alphaCurrent,
+                                                  resid, wCurrent, pg, 0);
       tauAcceptReport += iteration.covAccepted;
       
       reportLen++;
@@ -2660,8 +2736,8 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
   setListElementByName(global_r, "qLatTotal", Rf_ScalarInteger(s->qLatTotal));
   {
     SEXP dim_r = PROTECT(Rf_allocVector(INTSXP, 2));
-    INTEGER(dim_r)[0] = s->qLatTotal;
-    INTEGER(dim_r)[1] = s->qLatTotal;
+    INTEGER(dim_r)[0] = s->qLatSystem;
+    INTEGER(dim_r)[1] = s->qLatSystem;
     setListElementByName(global_r, "M_dim", dim_r);
     UNPROTECT(1);
   }

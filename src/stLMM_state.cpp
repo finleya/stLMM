@@ -624,7 +624,7 @@ void init_term_state_from_backend(TermState *term, GraphState *graphs, int nGrap
   }
 }
 
-void init_sampler_state(SamplerState *s, SEXP backend_r)
+void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
 {
   SEXP graphs_r;
   SEXP terms_r;
@@ -1393,6 +1393,36 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
     }
   }
 
+  if(collapseIid){
+    if(s->q == 0)
+      Rf_error("collapse_iid requires at least one IID term");
+    if(s->likelihoodFamily != LIKELIHOOD_GAUSSIAN)
+      Rf_error("collapsed IID sampling currently requires a Gaussian likelihood");
+    for(i = 0; i < s->nRE; i++)
+      if(s->reCovDim[i] > 0)
+        Rf_error("collapsed IID covariance sampling is not enabled for correlated terms");
+  }
+  s->sigmaSqRETune = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
+  s->reNames = (const char**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(char*));
+  {
+    SEXP tune = getListElement(backend_r, "sigma_sq_re_tuning");
+    SEXP names = Rf_getAttrib(getListElement(backend_r, "iid_covariance"), R_NamesSymbol);
+    if(tune != R_NilValue && (TYPEOF(tune) != REALSXP || LENGTH(tune) != s->nRE))
+      Rf_error("backend$sigma_sq_re_tuning malformed");
+    for(i = 0; i < s->nRE; i++){
+      s->sigmaSqRETune[i] = tune == R_NilValue ? 0.2 : REAL(tune)[i];
+      if(!R_FINITE(s->sigmaSqRETune[i]) || s->sigmaSqRETune[i] < 0.0)
+        Rf_error("IID tuning must be finite and nonnegative");
+      if(TYPEOF(names) == STRSXP && LENGTH(names) == s->nRE)
+        s->reNames[i] = CHAR(STRING_ELT(names, i));
+      else {
+        char *name = (char*)R_alloc(32, sizeof(char));
+        std::snprintf(name, 32, "iid_%d", i + 1);
+        s->reNames[i] = name;
+      }
+    }
+  }
+
   graphs_r = getListElement(backend_r, "graphs");
   terms_r = getListElement(backend_r, "process_terms_obs");
   if(terms_r == R_NilValue)
@@ -1429,6 +1459,8 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   }
 
   s->qLatSystem = s->qLatTotal;
+  if(collapseIid)
+    init_joint_iid_mapping(s);
 
   s->scratch_BF_m = 0;
   for(i = 0; i < s->nGraphs; i++){
@@ -1474,8 +1506,10 @@ void init_sampler_state(SamplerState *s, SEXP backend_r)
   s->alpha = (double*)R_alloc(s->q > 0 ? s->q : 1, sizeof(double));
   s->nWork1 = (double*)R_alloc(s->n, sizeof(double));
   s->nWork2 = (double*)R_alloc(s->n, sizeof(double));
-  s->latentSolveRhs = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
-  s->latentNoiseZ = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
+  if(!s->collapseIid){
+    s->latentSolveRhs = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
+    s->latentNoiseZ = (double*)R_alloc(s->qLatTotal > 0 ? s->qLatTotal : 1, sizeof(double));
+  }
 
   for(i = 0; i < s->n; i++){
     s->Za[i] = 0.0;
@@ -1637,6 +1671,8 @@ static int raw_metropolis_block_id(SamplerState *s, CovProposalState *p, int par
   if(s->metropolisBlocking == 1){
     if(type == 0 || type == 3)
       return 0;
+    if(type == 4)
+      return s->nTerms + term + 1;
     return term + 1;
   }
 
@@ -1655,7 +1691,7 @@ static int raw_metropolis_block_id(SamplerState *s, CovProposalState *p, int par
   if(s->metropolisBlocking == 4){
     if(type == 0 || type == 3)
       return 0;
-    if(type == 1)
+    if(type == 1 || type == 4)
       return 1;
     return 2;
   }
@@ -1674,7 +1710,7 @@ static void assign_cov_proposal_blocks(SamplerState *s, CovProposalState *p)
     return;
   }
 
-  nRaw = s->metropolisBlocking == 5 ? p->dim : s->nTerms + 3;
+  nRaw = s->metropolisBlocking == 5 ? p->dim : s->nTerms + (s->collapseIid ? s->nRE : 0) + 3;
   rawToBlock = (int*)R_alloc(nRaw, sizeof(int));
   blockDim = (int*)R_alloc(nRaw, sizeof(int));
   blockPos = (int*)R_alloc(nRaw, sizeof(int));
@@ -1753,6 +1789,8 @@ void init_cov_proposal_state(SamplerState *s)
   p->Q = (double**)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double*));
   p->logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
   p->residualVariance = (double*)R_alloc(s->nResidualGroup > 0 ? s->nResidualGroup : 1, sizeof(double));
+  if(s->collapseIid)
+    p->sigmaSqRE = (double*)R_alloc(s->nRE, sizeof(double));
 
   p->dim = 0;
   if(s->residualModel == 0 && s->tauTune > 0.0)
@@ -1770,6 +1808,10 @@ void init_cov_proposal_state(SamplerState *s)
       if(term->thetaTune[j] > 0.0)
         p->dim++;
   }
+  if(s->collapseIid)
+    for(t = 0; t < s->nRE; t++)
+      if(s->sigmaSqRETune[t] > 0.0)
+        p->dim++;
   p->paramType = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
   p->paramTerm = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
   p->paramTheta = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
@@ -1904,6 +1946,19 @@ void init_cov_proposal_state(SamplerState *s)
       } else {
         for(j = 0; j < term->nNode * term->nNode; j++)
           p->Q[t][j] = 0.0;
+      }
+    }
+  }
+
+  if(s->collapseIid){
+    for(t = 0; t < s->nRE; t++){
+      p->sigmaSqRE[t] = s->sigmaSqRE[t];
+      if(s->sigmaSqRETune[t] > 0.0){
+        p->Sigma0[k + p->dim * k] = s->sigmaSqRETune[t] * s->sigmaSqRETune[t];
+        p->paramType[k] = 4;
+        p->paramTerm[k] = t;
+        p->paramTheta[k] = -1;
+        k++;
       }
     }
   }

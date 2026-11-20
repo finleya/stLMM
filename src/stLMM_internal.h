@@ -280,6 +280,7 @@ typedef struct {
   double **F;
   double **Q;
   double *logDetQ;
+  double *sigmaSqRE;
   cholmod_sparse *M_lat;
   cholmod_factor *M_lat_fac;
 } CovProposalState;
@@ -411,6 +412,8 @@ typedef struct {
   double *sigmaSqRE;
   double *sigmaSqREShape;
   double *sigmaSqREScale;
+  double *sigmaSqRETune;
+  const char **reNames;
   double *alphaBlockBuf;
 
   double *r;
@@ -531,7 +534,7 @@ void update_probit_working_model(SamplerState *s,
 
 void init_graph_state_from_backend(GraphState *g, SEXP graph_r);
 void init_term_state_from_backend(TermState *term, GraphState *graphs, int nGraphs, SEXP term_r, int n);
-void init_sampler_state(SamplerState *s, SEXP backend_r);
+void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid = 0);
 void free_cov_proposal_state(SamplerState *s);
 void free_sampler_state(SamplerState *s);
 void init_cov_proposal_state(SamplerState *s);
@@ -543,6 +546,7 @@ double sparse_Z_col_dot_dense(SamplerState *s, int col, const double *v);
 void update_mean_without_alpha(SamplerState *s, const double *beta, double *out);
 void update_sigmaSqRE_gibbs(SamplerState *s);
 void refresh_iid_covariance_precision(SamplerState *s, int b);
+double log_iid_covariance_target(SamplerState *s);
 double log_ig_kernel_collapsed(double x, double shape, double scale);
 double log_cov_params_target_collapsed(SamplerState *s, const double *resid);
 int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, double *out);

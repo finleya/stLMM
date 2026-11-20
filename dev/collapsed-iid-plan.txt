@@ -4,9 +4,9 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 3 complete for known covariance -- joint sparse algebra and Gaussian
-coefficient updates are implemented and validated; stage 4 covariance sampling
-is next. The public fitting path and automatic default are unchanged. Early
+Current stage: 4 in progress -- scalar IG variance Metropolis updates are
+implemented and validated in the Gaussian backend; IW covariance blocks are
+next. The public fitting path and automatic default are unchanged. Early
 implementation stages may proceed in small, validated commits for review, as
 agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
 
@@ -270,6 +270,16 @@ Staged implementation and review
    their conditional and marginal targets distinct. Compare against quadrature
    where small and against the existing sampler under identical IG/IW priors.
    Broader priors are a separate increment after the IG/IW sampler is validated.
+   2026-11-20 scalar increment: backend collapse_iid selects the joint Gaussian
+   iteration; scalar IID variances use the existing adaptive proposal engine on
+   log variances, with IG density and Jacobian once per variance. Accepted and
+   rejected proposals preserve matching covariance values, numeric matrices, and
+   factors. Three independent quadrature cases (IID only, IID plus AR(1), and
+   zero design/prior-only likelihood) passed; posterior means differed from
+   references by less than one Monte Carlo standard error. All six blocking
+   choices passed 36 proposal-state cases, exercising 10,341 accepted and 6,259
+   rejected proposals, plus 72 warmup/sampling schedules. The 240 legacy seeded
+   comparisons remain identical. No public R control has been enabled yet.
 
 5. Integrate binomial, probit, and negative-binomial models, including estimated
    size. Derive the order before coding: in a fully IID-collapsed augmented path,

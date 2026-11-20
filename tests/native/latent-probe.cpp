@@ -1,6 +1,105 @@
 /* Validation-only entry point, compiled into an isolated test installation. */
 #include "stLMM_internal.h"
 
+int cov_params_block_mh_collapsed_step(SamplerState *, CovProposalBlock *, const double *);
+
+static int copy_covariance_parameters(SamplerState *s, double *out)
+{
+  int pos = 0, b, j, k;
+  out[pos++] = s->tauSq;
+  for(b = 0; b < s->nResidualGroup; b++) out[pos++] = s->residualVariance[b];
+  for(b = 0; b < s->nTerms; b++){
+    out[pos++] = s->terms[b].sigmaSq;
+    for(j = 0; j < s->terms[b].thetaDim; j++) out[pos++] = s->terms[b].theta[j];
+  }
+  for(b = 0; b < s->nRE; b++){
+    out[pos++] = s->sigmaSqRE[b];
+    k = s->reCovDim[b];
+    if(k > 0){
+      out[pos++] = s->reCovLogDet[b];
+      for(j = 0; j < k*k; j++){
+        out[pos++] = s->reCovariance[b][j];
+        out[pos++] = s->reCovPrecision[b][j];
+      }
+    }
+  }
+  return pos;
+}
+
+extern "C" SEXP stLMM_iid_mh_probe(SEXP backend)
+{
+  SamplerState s;
+  SEXP out;
+  int i, b, j, iteration, accepted, npar, ncopy, rejected, naccepted, iidOnly;
+  double *before, *after, *matrix, *proposal, target, quadratic;
+  const void *vmax;
+
+  init_sampler_state(&s, backend, 1);
+  for(i = 0; i < s.nTerms; i++){
+    GraphState *g = s.graphs + s.terms[i].graphIndex;
+    if(g->type == GRAPH_NNGP) update_nngp_BF(&s, g, s.terms+i);
+    else if(g->type == GRAPH_GP) update_gp_Q(&s, g, s.terms+i);
+  }
+  build_M_lat_pattern_sparse(&s);
+  s.M_lat_sym = M_cholmod_analyze(s.M_lat, &s.cm);
+  s.M_lat_fac = M_cholmod_copy_factor(s.M_lat_sym, &s.cm);
+  build_M_lat_index_caches(&s);
+  assemble_M_lat_numeric(&s);
+  if(!M_cholmod_factorize(s.M_lat, s.M_lat_fac, &s.cm)) Rf_error("probe initial factor failed");
+  init_cov_proposal_state(&s);
+  npar = 1+s.nResidualGroup+s.nTerms+s.nThetaTotal+s.nRE;
+  for(b = 0; b < s.nRE; b++) if(s.reCovDim[b]) npar += 1+2*s.reCovDim[b]*s.reCovDim[b];
+  before = (double*)R_alloc(npar,sizeof(double));
+  after = (double*)R_alloc(npar,sizeof(double));
+  matrix = (double*)R_alloc(s.M_lat->nzmax,sizeof(double));
+  proposal = (double*)R_alloc(s.covProp.dim*s.covProp.dim,sizeof(double));
+  naccepted = rejected = 0;
+  GetRNGstate();
+  vmax = vmaxget();
+  for(iteration = 0; iteration < 200; iteration++){
+    for(b = 0; b < s.covProp.nBlocks; b++){
+      CovProposalBlock *block = s.covProp.blocks+b;
+      ncopy = copy_covariance_parameters(&s,before);
+      if(ncopy != npar) Rf_error("probe snapshot dimension mismatch");
+      std::memcpy(matrix,s.M_lat->x,s.M_lat->nzmax*sizeof(double));
+      target = log_cov_params_target_collapsed(&s,s.y);
+      quadratic = quadform_Vinv(&s,s.y);
+      std::memcpy(proposal,block->proposalChol,block->dim*block->dim*sizeof(double));
+      iidOnly = 1;
+      for(j = 0; j < block->dim; j++)
+        if(s.covProp.paramType[block->paramIndex[j]] < 4) iidOnly = 0;
+      if(iteration % 3 == 0 && iidOnly)
+        for(j = 0; j < block->dim*block->dim; j++) block->proposalChol[j] *= 10000;
+      accepted = cov_params_block_mh_collapsed_step(&s,block,s.y);
+      std::memcpy(block->proposalChol,proposal,block->dim*block->dim*sizeof(double));
+      copy_covariance_parameters(&s,after);
+      if(!accepted){
+        rejected++;
+        if(std::memcmp(before,after,npar*sizeof(double)) ||
+           std::memcmp(matrix,s.M_lat->x,s.M_lat->nzmax*sizeof(double)) ||
+           target != log_cov_params_target_collapsed(&s,s.y) ||
+           quadratic != quadform_Vinv(&s,s.y))
+          Rf_error("rejected proposal changed the current state");
+      } else naccepted++;
+      std::memcpy(matrix,s.M_lat->x,s.M_lat->nzmax*sizeof(double));
+      quadratic = quadform_Vinv(&s,s.y);
+      assemble_M_lat_numeric(&s);
+      if(std::memcmp(matrix,s.M_lat->x,s.M_lat->nzmax*sizeof(double)))
+        Rf_error("accepted parameter state disagrees with assembled matrix");
+      if(!M_cholmod_factorize(s.M_lat,s.M_lat_fac,&s.cm)) Rf_error("probe refactor failed");
+      if(std::fabs(quadratic-quadform_Vinv(&s,s.y)) > 1e-10*(1+std::fabs(quadratic)))
+        Rf_error("cached factor disagrees with fresh factor");
+      vmaxset(vmax);
+    }
+  }
+  PutRNGstate();
+  PROTECT(out = Rf_allocVector(INTSXP,2));
+  INTEGER(out)[0] = naccepted;INTEGER(out)[1] = rejected;
+  free_sampler_state(&s);
+  UNPROTECT(1);
+  return out;
+}
+
 extern "C" SEXP stLMM_latent_probe(SEXP backend, SEXP ndraw_r)
 {
   SamplerState s;
