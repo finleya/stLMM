@@ -4,12 +4,14 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 6 public control, output integration, and documentation implemented
-and validated. collapse_iid = FALSE remains the default; explicit TRUE enables
-joint collapsing, and explicit NULL uses the agreed IID-only automatic rule.
+Current stage: 7 controlled performance comparisons completed, following validated
+public control, output integration, and documentation. collapse_iid = FALSE remains
+the default; explicit TRUE enables joint collapsing, and explicit NULL uses the
+agreed IID-only automatic rule.
 Both strategies support the four likelihoods, including estimated NB size.
-Stage 7 controlled performance benchmarks and any automatic-default change remain
-separate work. Broader priors follow validation of the IG/IW implementation.
+The benchmarks favor different strategies for covariance parameters and predictors;
+any automatic-default change needs further discussion. Broader IID priors remain
+unimplemented and follow validation of the IG/IW implementation.
 
 This plan and the requested algebra note are explicitly shared on the branch so
 work can continue from another checkout. These are exceptions to keeping internal
@@ -68,12 +70,13 @@ requested and resolved setting in the fit. Do not silently change modes because
 of a prior choice or a runtime performance heuristic. An explicit TRUE without
 IID terms raises an error; NULL or FALSE retains the applicable existing sampler.
 
-This changes the default MCMC path for existing IID-only calls. Their model and
-prior stay the same, but seeded draws will change. collapse_iid=FALSE must retain
+Making NULL the default would change the MCMC path for existing IID-only calls.
+Their model and prior stay the same, but seeded draws will change.
+collapse_iid=FALSE must retain
 the legacy sampling path and, for existing priors, its seeded draws/RNG behavior.
 Default mixed IID-plus-structured models should retain that legacy behavior too.
-The new automatic default should be enabled only when the intended supported
-model combinations have passed validation.
+The automatic rule is currently explicit opt-in. Any default change needs both
+validation and review of the performance trade-offs below.
 
 Broader priors should be independent of the collapsing choice. The proposed
 separate path retains conjugate IG/IW updates for those priors and uses a
@@ -393,13 +396,55 @@ Staged implementation and review
    are described as possibilities, not implemented capabilities.
 
 7. Benchmark representative group structures and structured graphs, including a
-   few hundred groups and groups spanning distant spatial nodes. Enable the
-   automatic default only after these tests and compatibility checks pass.
+   few hundred groups and groups spanning distant spatial nodes. Review any
+   automatic-default change after these tests and compatibility checks pass.
    Update manuals and the technical document with implemented behavior at each
    completed stage; update teaching articles after the interface stabilizes.
    Public commits contain package code, tests, documentation, and this explicitly
    shared plan and algebra note. Other internal plans, working notes, exploratory
    scripts, reports, conversations, and generated fits remain local.
+
+   2026-11-20 primary benchmark: 72 fresh-process fits across twelve synthetic
+   datasets, three chains per strategy, with matched priors and dispersed starts.
+   Cases cover scalar, independent, correlated, crossed, nested, parent-specific,
+   NNGP-plus-IID, probit and fixed-size NB models. The largest has 3,000 observations
+   and 900 IID coefficients; spatial cases have 500 nodes and 100 groups.
+   Runs are sequential on one CPU with one BLAS/OpenMP thread. Public fit and
+   post-burn recovery costs are included; covariance, raw-coefficient, combined-
+   coefficient and predictor diagnostics are reported separately. The optional
+   reproducible worker and protocol are in tests/native/iid-benchmark.R and README.txt.
+   Collapsing improved runtime by 9.96x for 300 correlated intercept/slope groups,
+   20.84x for three coefficients per group, and 6.78x for crossed groups. Predictor
+   ESS/sec improved similarly. IID covariance ESS/sec favored separate conjugate
+   updates in most cases; only the two largest single-grouping-factor cases showed
+   a modest collapsed advantage. NB runtime was essentially unchanged.
+   With the same NNGP graph, Cholesky counts were 26,874 separate, 28,966 jointly
+   collapsed with local groups, and 67,633 with dispersed groups. Fit plus recovery
+   speedups were 2.24x and 1.81x respectively. Whole-process peak memory did not
+   uniformly favor either strategy. These are single-dataset comparisons, not
+   universal performance or coverage claims. The numerical core is unchanged.
+   An isolated local kernel profile confirmed that dense separate IID coefficient
+   draws account for much of the large-model cost. The technical document explains
+   that a specialized conditional block solve could preserve conjugate updates
+   while reducing that cost; such an optimization remains separate work.
+   Twelve targeted follow-up fits used by_term blocking for parent-specific and
+   spatial cases, and 24,000 iterations per chain for probit. Their maximum R-hat
+   was 1.0065, minimum bulk ESS 882, and minimum tail ESS 1,149. With these runs,
+   posterior means agreed with the separate baselines within 2.90 combined Monte
+   Carlo standard errors. All main-run selected combined coefficients/predictors
+   had R-hat below 1.004 and bulk ESS above 1,082. Separate marginal intercepts can
+   still mix slowly; the nested case reached R-hat 1.065. One primary crossed-case
+   covariance R-hat was borderline at 1.0104, with bulk ESS above 500.
+   The follow-ups are reported separately from the original joint-blocking timing
+   comparison. Their improved mixing costs more per iteration: by_term collapsing
+   took 116 seconds for local spatial groups and 153 seconds for dispersed groups,
+   versus 123 seconds for each separate baseline, summed across three chains and
+   including recovery. IID covariance ESS/sec still favored conjugate updates.
+   No fitting errors occurred; the only warnings described expected repeated
+   NNGP coordinates. The benchmark, documentation and shared plan are updated;
+   generated reports and the isolated profiling probe remain local. Keep FALSE
+   as the default pending further discussion. Broader scalar IID priors are a
+   possible next focused extension, not an implemented part of this stage.
 
 Longer-term design requirements
 -------------------------------

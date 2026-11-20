@@ -71,3 +71,32 @@ formulations, with equal/unequal residual variances and no process, AR(1), NNGP,
 or GP effects. It includes offsets, missing responses, unused groups, collinear
 columns, and a nonzero normal fixed-effect prior. It compares the full retained
 (beta, w, alpha) posterior to independent dense calculations after recover().
+
+Controlled performance comparisons
+---------------------------------
+The optional iid-benchmark.R worker is separate from correctness checks and is
+not run by run-latent-checks.R or testthat. From the source root, prepare the
+synthetic datasets with an installed library and an output directory:
+  Rscript tests/native/iid-benchmark.R LIBRARY OUTPUT prepare
+Then run individual chains in fresh processes, sequentially, for example:
+  Rscript tests/native/iid-benchmark.R LIBRARY OUTPUT run correlated300 separate 1 6000
+  Rscript tests/native/iid-benchmark.R LIBRARY OUTPUT run correlated300 collapsed 1 6000
+Repeat for chain IDs 1, 2, and 3. A final optional argument selects Metropolis
+blocking (default joint). The cases.csv file lists the twelve scenarios.
+Use one BLAS/OpenMP thread, and on Linux use the same CPU affinity and wrap each
+worker with /usr/bin/time -v to record whole-process peak RSS. Alternate strategy
+order across chains/cases. Keep competing workloads out of timed runs.
+
+The worker records public fitting time, native initialization/warmup/sampling
+phases, post-fit recovery time, sparse counts, approximate R object sizes, and
+selected posterior draws. All covariance parameters are estimated. Starts are
+common between strategies and dispersed across chains. The first quarter of
+post-warmup samples is excluded from diagnostics; Gaussian spatial recovery uses
+every remaining draw under both strategies. Include that cost when comparing
+usable predictors. Summarize all three chains together with rank-normalized
+R-hat, bulk/tail ESS, and posterior means/intervals under matched priors.
+Covariance, raw coefficients, combined coefficients, and predictor ESS/sec should
+be reported separately. A single simulated dataset per case does not establish
+universal performance or interval coverage. Whole-process RSS includes libraries,
+retained samples and extraction; R object.size can count shared components more
+than once, and sparse counts alone are not a total-memory measure.

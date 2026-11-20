@@ -331,6 +331,13 @@ dependence slowly. The separate implementation also factors a dense conditional
 precision for the IID coefficients. Even with sparse $\bZ$, that precision can
 be dense after the structured effects are integrated out. Thus keeping the
 structured factor small does not make every other calculation small or sparse.
+With a single grouping factor and no structured effects, the conditional IID
+precision is block diagonal by group. The current separate implementation uses
+its general dense solve even in that case. Consequently, a timing advantage for
+joint collapsing can reflect both marginalization and the different linear
+algebra implementations. A specialized conditional block solve could retain
+conjugate covariance updates while reducing this cost; it is not used by the
+current separate sampler.
 
 The optional jointly collapsed strategy puts IID and structured coefficients in
 one latent vector. The fixed-effect and covariance updates integrate over that
@@ -374,6 +381,14 @@ per second, including warmup and recovery costs as appropriate, alongside memory
 factorization structure; they are not complete memory measurements. Neither a
 shorter runtime nor an apparently better-mixed intercept alone establishes that
 one strategy is preferable for the analysis.
+The optional \texttt{tests/native/iid-benchmark.R} worker generates matched
+synthetic comparisons for scalar, independent, correlated, crossed, nested, and
+parent-specific IID effects, including NNGP combinations with spatially local
+or dispersed groups. It records fitting and recovery times, sparse counts, and
+draws for covariance, coefficient, and predictor diagnostics. Run independent
+chains sequentially with the same thread settings, and compare all retained
+chains together. The accompanying instructions distinguish these performance
+experiments from correctness tests and explain their measurement limits.
 
 The common representation also provides a basis for further exploration: a fixed
 observation mapping can combine or select latent coefficients while covariance
