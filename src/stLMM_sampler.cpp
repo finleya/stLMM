@@ -385,10 +385,8 @@ void update_pg_working_model(SamplerState *s,
     obsPrecision slot. Thus omega_i replaces tau_sq^{-1}; it is not tau_sq_i and
     it is not a residual variance.
 
-    The latent process w is still collapsed out of the beta/alpha/theta
-    updates. We draw the auxiliary w only under PG likelihoods so that the
-    next PG update can use the full linear predictor eta = X beta + Z alpha +
-    A w.
+    After the marginal updates, the iteration schedule draws compatible latent
+    effects so that the next augmentation uses eta = X beta + Z alpha + A w.
   */
   update_linear_predictor(s, beta, alpha, w, s->nWork2);
 
@@ -1234,6 +1232,33 @@ static int update_covariance_iteration(SamplerState *s, const double *resid, int
   return acceptedTotal;
 }
 
+static int update_likelihood_iteration(SamplerState *s,
+                                       const double *betaCurrent,
+                                       const double *alphaCurrent,
+                                       const double *wCurrent,
+                                       BayesLogit_rpg_hybrid_t pg,
+                                       int warmup)
+{
+  int accepted;
+
+  accepted = 0;
+  /* The size step integrates out omega; redraw omega immediately before
+     any Gaussian working-model update. */
+  if(s->nbSizeEstimate){
+    accepted = update_nb_size(s, betaCurrent, alphaCurrent, wCurrent);
+    if(warmup){
+      s->nbSizeProposal.warmupNAttempted++;
+      s->nbSizeProposal.warmupNAccepted += accepted;
+    } else
+      update_adaptive_scalar_block_state(&s->nbSizeProposal, accepted);
+  }
+  if(is_pg_likelihood(s))
+    update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
+  else if(is_probit_likelihood(s))
+    update_probit_working_model(s, betaCurrent, alphaCurrent, wCurrent);
+  return accepted;
+}
+
 static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
                                                            double *betaCurrent,
                                                            double *alphaCurrent,
@@ -1246,23 +1271,9 @@ static SamplerIterationResult update_separate_iid_iteration(SamplerState *s,
   int i;
 
   result.covAccepted = 0;
-  result.sizeAccepted = 0;
   result.wCurrentFresh = 0;
-
-  /* The size step integrates out omega; redraw omega immediately before
-     any Gaussian working-model update. */
-  if(s->nbSizeEstimate){
-    result.sizeAccepted = update_nb_size(s, betaCurrent, alphaCurrent, wCurrent);
-    if(warmup){
-      s->nbSizeProposal.warmupNAttempted++;
-      s->nbSizeProposal.warmupNAccepted += result.sizeAccepted;
-    } else
-      update_adaptive_scalar_block_state(&s->nbSizeProposal, result.sizeAccepted);
-  }
-  if(is_pg_likelihood(s))
-    update_pg_working_model(s, pg, betaCurrent, alphaCurrent, wCurrent);
-  else if(is_probit_likelihood(s))
-    update_probit_working_model(s, betaCurrent, alphaCurrent, wCurrent);
+  result.sizeAccepted = update_likelihood_iteration(s, betaCurrent, alphaCurrent,
+                                                     wCurrent, pg, warmup);
 
   if(s->p > 0)
     update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
@@ -1291,13 +1302,15 @@ static SamplerIterationResult update_collapsed_iid_iteration(SamplerState *s,
                                                             double *alphaCurrent,
                                                             double *resid,
                                                             double *wCurrent,
+                                                            BayesLogit_rpg_hybrid_t pg,
                                                             int warmup)
 {
   SamplerIterationResult result;
   double *latent;
   int i;
 
-  result.sizeAccepted = 0;
+  result.sizeAccepted = update_likelihood_iteration(s, betaCurrent, alphaCurrent,
+                                                     wCurrent, pg, warmup);
   result.wCurrentFresh = 1;
   update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
   update_mean_without_alpha(s, betaCurrent, resid);
@@ -1420,7 +1433,7 @@ void run_covariance_warmup(SamplerState *s,
 
       if(s->collapseIid)
         iteration = update_collapsed_iid_iteration(s, betaCurrent, alphaCurrent,
-                                                   resid, wCurrent, 1);
+                                                   resid, wCurrent, pg, 1);
       else
         iteration = update_separate_iid_iteration(s, betaCurrent, alphaCurrent,
                                                   resid, wCurrent, pg, 1);
@@ -2146,7 +2159,7 @@ extern "C" {
       vmax_iter = vmaxget();
       if(s.collapseIid)
         iteration = update_collapsed_iid_iteration(&s, betaCurrent, alphaCurrent,
-                                                   resid, wCurrent, 0);
+                                                   resid, wCurrent, pg, 0);
       else
         iteration = update_separate_iid_iteration(&s, betaCurrent, alphaCurrent,
                                                   resid, wCurrent, pg, 0);

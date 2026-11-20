@@ -43,3 +43,24 @@ warmup and numeric refactorization. It compares means using their combined Monte
 Carlo standard errors, including fixed-plus-IID contributions and full predictors.
 These are small-system checks, not a guarantee of faster sampling for all models.
 The covariance suites require the suggested posterior package for diagnostics.
+
+Augmented-model checks cover binomial logit, probit, and negative-binomial
+likelihoods with fixed or estimated size. Ten ordinary-likelihood quadrature
+problems independently check posterior coefficient and covariance moments,
+including scalar IG, correlated IW, estimated size, and nonzero normal fixed-effect
+priors. The schedule
+checks exercise all six blocking choices with warmup on/off, offsets, missing
+responses, unused groups, AR(1), and NNGP effects. Saving and thinning structured
+draws must preserve both the parameter samples and RNG state. A size-only warmup
+case holds all IID variances fixed.
+
+The same posterior comparison harness covers 24 simulated augmented models,
+with 120 observations and 20 main grouping levels. Each uses three chains per
+mode, 6,000 iterations per chain, and discards the first 1,500. Parent-specific
+covariance cases use by_term blocking and 12,000 iterations, discarding 3,000;
+the joint-proposal short runs can mix slowly for these weakly identified models.
+These are test settings, not changes to the software defaults. To run one family
+separately, set STLMM_TEST_FAMILY to binomial, probit, negative_binomial, or
+estimated_size when running iid-augmented-posterior-reference.R with the library
+directory and output RDS path as arguments. STLMM_TEST_IID optionally selects an
+IID case (scalar, independent, covariance, crossed, nested, or by).

@@ -4,9 +4,9 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 4 implemented and validated -- scalar IG and correlated IW
-Metropolis updates are available in the Gaussian backend. Augmented likelihoods
-are next (stage 5). The public fitting path and automatic default are unchanged. Early
+Current stage: 5 implemented and validated. The
+backend now supports binomial, probit, and negative-binomial likelihoods, including
+estimated size. The public fitting path and automatic default are unchanged. Early
 implementation stages may proceed in small, validated commits for review, as
 agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
 
@@ -324,6 +324,36 @@ Staged implementation and review
    augmentation, perform marginal coefficient/covariance updates, then recover a
    compatible latent realization for the next iteration. Check initialization,
    warmup, multiple chains, and saved-draw alignment as part of the same design.
+   2026-11-20 implementation: one shared likelihood-update helper supplies the
+   existing ordinary-likelihood NB size update and subsequent PG/probit draw to
+   both iteration schedules. The jointly collapsed schedule then uses the same
+   marginal Gaussian coefficient/covariance updates and joint latent recovery as
+   stage 4. This adds nine net production C++ lines across two existing files,
+   with no new state or numerical kernels. No covariance jitter or ridging is used.
+   Ten independent ordinary-likelihood quadrature checks passed: scalar IG and
+   correlated IW effects, estimated NB size, and nonzero normal fixed-effect
+   priors. Posterior means were within 2.79 Monte Carlo standard errors of the
+   numerical references. Another 864 schedules passed all blocking/warmup cases,
+   including offsets, missing responses, unused levels, AR(1), and NNGP effects.
+   Saving/thinning latent draws preserved parameter draws and RNG state exactly;
+   size-only warmup worked with all IID variances held fixed.
+   The 240 iteration and 96 downstream legacy comparisons remain identical;
+   Gaussian posterior summaries/diagnostics are unchanged in all 18 comparisons.
+   All 5,537 package assertions passed without failures, warnings, or skips.
+   R CMD check has no errors, with the existing two missing-vignette warnings and
+   installed-size note. All 24 augmented posterior comparison cases passed,
+   spanning six IID formulations across binomial, probit, fixed-size NB, and
+   estimated-size NB fits, with AR(1) and NNGP combinations. Three chains per mode
+   used 120 observations and 20 main grouping levels. Posterior means agreed
+   within 3.77 combined Monte Carlo standard errors. Parent-specific covariance
+   comparisons used by_term blocking and longer chains; short joint proposals
+   can mix slowly for these models. Additional 60,000-iteration joint-proposal
+   probit follow-ups brought the maximum R-hat below 1.005 in the slow cases.
+   PG models had similar timings under both strategies, suggesting augmentation
+   dominates at these dimensions; collapsing gave no consistent runtime gain.
+   The report separates
+   covariance-parameter and combined-predictor ESS/sec. The public interface and
+   defaults remain unchanged; stage 6 covers their integration and output checks.
 
 6. Validate prediction, recovery, log_lik, fitted values, combined summaries,
    modern diagnostics, and new-level behavior for both modes. Use synthetic

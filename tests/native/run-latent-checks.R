@@ -43,7 +43,9 @@ run(file.path(R.home('bin'),'R'),
       shQuote(file.path(work,'stLMM'))),file.path(work,'install.log'))
 setwd(package)
 for(test in c('latent-reference','latent-areal-reference','iid-scalar-reference',
-             'iid-proposal-reference','iid-iw-reference','iid-posterior-reference')) {
+             'iid-proposal-reference','iid-iw-reference','iid-posterior-reference',
+             'iid-augmented-reference','iid-augmented-schedules',
+             'iid-augmented-posterior-reference')) {
   log <- file.path(work,paste0(test,'.log'))
   run(file.path(R.home('bin'),'Rscript'),
       shQuote(c(file.path(package,'tests/native',paste0(test,'.R')),

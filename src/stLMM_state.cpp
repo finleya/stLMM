@@ -1408,12 +1408,8 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
     }
   }
 
-  if(collapseIid){
-    if(s->q == 0)
-      Rf_error("collapse_iid requires at least one IID term");
-    if(s->likelihoodFamily != LIKELIHOOD_GAUSSIAN)
-      Rf_error("collapsed IID sampling currently requires a Gaussian likelihood");
-  }
+  if(collapseIid && s->q == 0)
+    Rf_error("collapse_iid requires at least one IID term");
   s->sigmaSqRETune = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
   s->reNames = (const char**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(char*));
   {
