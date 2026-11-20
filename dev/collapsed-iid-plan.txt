@@ -4,9 +4,9 @@ Collapsed IID development plan -- draft for discussion
 
 Baseline: stLMM 0.0.6, commit aee889817df1323777c2e44444d2e6242a276839.
 Branch: collapsed-iid, created from this baseline for staged development.
-Current stage: 4 in progress -- scalar IG variance Metropolis updates are
-implemented and validated in the Gaussian backend; IW covariance blocks are
-next. The public fitting path and automatic default are unchanged. Early
+Current stage: 4 implemented and validated -- scalar IG and correlated IW
+Metropolis updates are available in the Gaussian backend. Augmented likelihoods
+are next (stage 5). The public fitting path and automatic default are unchanged. Early
 implementation stages may proceed in small, validated commits for review, as
 agreed on 2026-11-19. Broader priors follow validation of the IG/IW implementation.
 
@@ -113,6 +113,10 @@ Avoid a broad source reorganization. Extract only what the extension needs, then
 prove that the separate path remains unchanged before adding the new algorithm.
 Warmup and retained sampling must call the same strategy-specific update logic;
 there should not be independent copies that can drift apart.
+Keep additions parsimonious: reuse the existing proposal/factorization machinery,
+add state and helpers only for a concrete need in this increment, and keep test
+probes outside the production build. Future multivariate capability should guide
+compatible algebra without introducing unused implementation scaffolding now.
 
 Agreed numerical representation
 -------------------------------
@@ -188,7 +192,10 @@ are not sufficient beyond dimension two. An IW density on Sigma and separate
 densities on variances/R require different change-of-variable accounting. The
 two-dimensional scale/correlation identity in the algebra note is an alternative
 coordinate example, not an extra correction to the agreed IW log-Cholesky target.
-No automatic covariance jitter should silently change the posterior target.
+Do not add jitter or ridging to model covariance matrices. Invalid starting or
+current states must raise an error. A numerically invalid Metropolis proposal is
+rejected without repairing its covariance or modifying the current state;
+unrelated CHOLMOD failures remain errors.
 
 LKJ is a candidate correlation prior, with density proportional to
 det(R)^(shape-1). A flat density on correlation matrices at shape=1 is not a flat
@@ -280,6 +287,36 @@ Staged implementation and review
    choices passed 36 proposal-state cases, exercising 10,341 accepted and 6,259
    rejected proposals, plus 72 warmup/sampling schedules. The 240 legacy seeded
    comparisons remain identical. No public R control has been enabled yet.
+   Scalar increment commit: 63d98dc.
+   2026-11-20 correlated increment: IW blocks use the agreed log-Cholesky
+   coordinates and Jacobian, cached small covariance/precision/factor matrices,
+   and all six existing blocking rules. The numerical operations use BLAS dsyrk,
+   LAPACK dpotrs/dpotrf, and the existing sparse CHOLMOD factorization. Invalid
+   starting/scale matrices and non-finite current targets error; invalid proposed
+   covariances are rejected without jitter or ridging. Zero tuning holds the
+   supplied covariance exactly. Native reporting identifies collapsed Metropolis
+   updates instead of Gibbs updates when this backend path is selected.
+   IW densities and precision calculations matched independent R calculations
+   within 8e-15; finite-difference log-Jacobians within 3e-10. Prior-only chains
+   matched analytical covariance, precision, and log-determinant moments for
+   dimensions 1--3. The expanded proposal suite passed 84 state-restoration cases
+   (28,436 accepted and 20,964 rejected proposals), plus 168 warmup/sampling
+   schedules, without warnings. Density checks also cover dimension 6.
+   Eighteen synthetic Gaussian datasets (360 observations, 30 main groups) compare
+   both schedules with all covariance parameters estimated: six IID formulations
+   crossed with no structured terms, AR(1), and NNGP. All posterior means agreed
+   within 2.73 combined Monte Carlo standard errors across three chains per mode.
+   The short parent-specific IID + NNGP case needed longer chains for its spatial
+   decay parameter: 60,000 iterations per chain, discarding 15,000, reduced the
+   collapsed maximum R-hat from 1.047 to 1.0023 (minimum bulk ESS above 1,299).
+   Collapsing does not consistently improve ESS per second for every covariance
+   parameter; joint proposals for parent-specific matrices can be less efficient
+   than the existing conjugate updates. Defaults have not been changed.
+   The 240 iteration and 96 downstream legacy comparisons remain identical. All
+   5,537 package assertions passed with no failures, warnings, or skips. R CMD
+   check had no errors; its two missing-vignette warnings and installed-size note
+   remain. The final non-finite-current-state guard additionally passed the IW
+   and proposal-state suites. Reproduce with tests/native/run-latent-checks.R.
 
 5. Integrate binomial, probit, and negative-binomial models, including estimated
    size. Derive the order before coding: in a fully IID-collapsed augmented path,

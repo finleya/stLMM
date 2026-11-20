@@ -281,6 +281,11 @@ typedef struct {
   double **Q;
   double *logDetQ;
   double *sigmaSqRE;
+  double **reCovariance;
+  double **reCovPrecision;
+  double **reCovChol;
+  double *reCovLogDet;
+  int iidValid;
   cholmod_sparse *M_lat;
   cholmod_factor *M_lat_fac;
 } CovProposalState;
@@ -404,6 +409,8 @@ typedef struct {
   double **reCovScale;
   double **reCovariance;
   double **reCovPrecision;
+  double **reCovChol;
+  double **reCovTune;
   double *reCovLogDet;
   int nRECovElements;
   int *reBlockID;
@@ -547,6 +554,9 @@ void update_mean_without_alpha(SamplerState *s, const double *beta, double *out)
 void update_sigmaSqRE_gibbs(SamplerState *s);
 void refresh_iid_covariance_precision(SamplerState *s, int b);
 double log_iid_covariance_target(SamplerState *s);
+void init_iid_covariance_proposal(SamplerState *s, CovProposalState *p);
+void copy_iid_covariance_proposal(SamplerState *s, CovProposalState *p);
+int refresh_iid_covariance_proposal(SamplerState *s, CovProposalState *p, int b);
 double log_ig_kernel_collapsed(double x, double shape, double scale);
 double log_cov_params_target_collapsed(SamplerState *s, const double *resid);
 int log_cov_params_target_collapsed_try(SamplerState *s, const double *resid, double *out);

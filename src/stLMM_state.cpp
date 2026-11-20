@@ -1322,10 +1322,12 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
   s->reCovScale = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
   s->reCovariance = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
   s->reCovPrecision = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->reCovChol = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
+  s->reCovTune = (double**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double*));
   s->reCovLogDet = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
   s->nRECovElements = 0;
   {
-    SEXP blocks, block, dim, df, scale, start, matrices[2], d;
+    SEXP blocks, block, dim, df, scale, start, matrices[2], d, tune;
     int offset, b, k, j, m, col, row, info;
     char lower;
     double v, *check;
@@ -1338,6 +1340,8 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
     lower = 'L';
     for(b = 0; b < s->nRE; b++){
       s->reCovDim[b] = 0;
+      s->reCovChol[b] = s->reCovTune[b] = NULL;
+      s->reCovLogDet[b] = 0.0;
       s->reOffset[b] = offset;
       block = blocks == R_NilValue ? R_NilValue : VECTOR_ELT(blocks, b);
       if(block != R_NilValue){
@@ -1384,6 +1388,17 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
         s->reCovScale[b] = REAL(scale);
         s->reCovariance[b] = (double*)R_alloc(k * k, sizeof(double));
         s->reCovPrecision[b] = (double*)R_alloc(k * k, sizeof(double));
+        s->reCovChol[b] = (double*)R_alloc(k * k, sizeof(double));
+        s->reCovTune[b] = (double*)R_alloc(k * (k + 1) / 2, sizeof(double));
+        tune = getListElement(block, "tuning");
+        if(tune != R_NilValue && (TYPEOF(tune) != REALSXP ||
+           (LENGTH(tune) != 1 && LENGTH(tune) != k * (k + 1) / 2)))
+          Rf_error("backend IID covariance tuning has wrong dimensions");
+        for(j = 0; j < k * (k + 1) / 2; j++){
+          s->reCovTune[b][j] = tune == R_NilValue ? 0.1 : REAL(tune)[LENGTH(tune) == 1 ? 0 : j];
+          if(!R_FINITE(s->reCovTune[b][j]) || s->reCovTune[b][j] < 0.0)
+            Rf_error("IID covariance tuning must be finite and nonnegative");
+        }
         for(j = 0; j < k * k; j++)
           s->reCovariance[b][j] = REAL(start)[j];
         refresh_iid_covariance_precision(s, b);
@@ -1398,9 +1413,6 @@ void init_sampler_state(SamplerState *s, SEXP backend_r, int collapseIid)
       Rf_error("collapse_iid requires at least one IID term");
     if(s->likelihoodFamily != LIKELIHOOD_GAUSSIAN)
       Rf_error("collapsed IID sampling currently requires a Gaussian likelihood");
-    for(i = 0; i < s->nRE; i++)
-      if(s->reCovDim[i] > 0)
-        Rf_error("collapsed IID covariance sampling is not enabled for correlated terms");
   }
   s->sigmaSqRETune = (double*)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(double));
   s->reNames = (const char**)R_alloc(s->nRE > 0 ? s->nRE : 1, sizeof(char*));
@@ -1671,7 +1683,7 @@ static int raw_metropolis_block_id(SamplerState *s, CovProposalState *p, int par
   if(s->metropolisBlocking == 1){
     if(type == 0 || type == 3)
       return 0;
-    if(type == 4)
+    if(type == 4 || type == 5)
       return s->nTerms + term + 1;
     return term + 1;
   }
@@ -1691,7 +1703,7 @@ static int raw_metropolis_block_id(SamplerState *s, CovProposalState *p, int par
   if(s->metropolisBlocking == 4){
     if(type == 0 || type == 3)
       return 0;
-    if(type == 1 || type == 4)
+    if(type == 1 || type == 4 || type == 5)
       return 1;
     return 2;
   }
@@ -1774,7 +1786,7 @@ static void assign_cov_proposal_blocks(SamplerState *s, CovProposalState *p)
 
 void init_cov_proposal_state(SamplerState *s)
 {
-  int t, j, k, info;
+  int t, j, k, info, dim, col, row, coord;
   double scale;
   char lower = 'L';
   CovProposalState *p;
@@ -1790,7 +1802,7 @@ void init_cov_proposal_state(SamplerState *s)
   p->logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
   p->residualVariance = (double*)R_alloc(s->nResidualGroup > 0 ? s->nResidualGroup : 1, sizeof(double));
   if(s->collapseIid)
-    p->sigmaSqRE = (double*)R_alloc(s->nRE, sizeof(double));
+    init_iid_covariance_proposal(s, p);
 
   p->dim = 0;
   if(s->residualModel == 0 && s->tauTune > 0.0)
@@ -1808,10 +1820,16 @@ void init_cov_proposal_state(SamplerState *s)
       if(term->thetaTune[j] > 0.0)
         p->dim++;
   }
-  if(s->collapseIid)
-    for(t = 0; t < s->nRE; t++)
-      if(s->sigmaSqRETune[t] > 0.0)
+  if(s->collapseIid){
+    for(t = 0; t < s->nRE; t++){
+      dim = s->reCovDim[t];
+      if(dim == 0 && s->sigmaSqRETune[t] > 0.0)
         p->dim++;
+      for(j = 0; j < dim * (dim + 1) / 2; j++)
+        if(s->reCovTune[t][j] > 0.0)
+          p->dim++;
+    }
+  }
   p->paramType = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
   p->paramTerm = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
   p->paramTheta = (int*)R_alloc(p->dim > 0 ? p->dim : 1, sizeof(int));
@@ -1952,13 +1970,26 @@ void init_cov_proposal_state(SamplerState *s)
 
   if(s->collapseIid){
     for(t = 0; t < s->nRE; t++){
-      p->sigmaSqRE[t] = s->sigmaSqRE[t];
-      if(s->sigmaSqRETune[t] > 0.0){
+      dim = s->reCovDim[t];
+      if(dim == 0 && s->sigmaSqRETune[t] > 0.0){
         p->Sigma0[k + p->dim * k] = s->sigmaSqRETune[t] * s->sigmaSqRETune[t];
         p->paramType[k] = 4;
         p->paramTerm[k] = t;
         p->paramTheta[k] = -1;
         k++;
+      }
+      coord = 0;
+      for(col = 0; col < dim; col++){
+        for(row = col; row < dim; row++){
+          if(s->reCovTune[t][coord] > 0.0){
+            p->Sigma0[k + p->dim * k] = s->reCovTune[t][coord] * s->reCovTune[t][coord];
+            p->paramType[k] = 5;
+            p->paramTerm[k] = t;
+            p->paramTheta[k] = row + dim * col;
+            k++;
+          }
+          coord++;
+        }
       }
     }
   }

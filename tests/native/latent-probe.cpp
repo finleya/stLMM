@@ -20,6 +20,7 @@ static int copy_covariance_parameters(SamplerState *s, double *out)
       for(j = 0; j < k*k; j++){
         out[pos++] = s->reCovariance[b][j];
         out[pos++] = s->reCovPrecision[b][j];
+        out[pos++] = s->reCovChol[b][j];
       }
     }
   }
@@ -48,7 +49,7 @@ extern "C" SEXP stLMM_iid_mh_probe(SEXP backend)
   if(!M_cholmod_factorize(s.M_lat, s.M_lat_fac, &s.cm)) Rf_error("probe initial factor failed");
   init_cov_proposal_state(&s);
   npar = 1+s.nResidualGroup+s.nTerms+s.nThetaTotal+s.nRE;
-  for(b = 0; b < s.nRE; b++) if(s.reCovDim[b]) npar += 1+2*s.reCovDim[b]*s.reCovDim[b];
+  for(b = 0; b < s.nRE; b++) if(s.reCovDim[b]) npar += 1+3*s.reCovDim[b]*s.reCovDim[b];
   before = (double*)R_alloc(npar,sizeof(double));
   after = (double*)R_alloc(npar,sizeof(double));
   matrix = (double*)R_alloc(s.M_lat->nzmax,sizeof(double));
@@ -97,6 +98,50 @@ extern "C" SEXP stLMM_iid_mh_probe(SEXP backend)
   INTEGER(out)[0] = naccepted;INTEGER(out)[1] = rejected;
   free_sampler_state(&s);
   UNPROTECT(1);
+  return out;
+}
+
+extern "C" SEXP stLMM_iid_density_probe(SEXP backend, SEXP eta_r)
+{
+  SamplerState s;
+  CovProposalState p;
+  SEXP out, names, value;
+  int k, row, col, j, valid;
+  const char *labels[] = {"valid", "target", "covariance", "precision", "cholesky", "logdet"};
+
+  init_sampler_state(&s, backend);
+  if(s.nRE != 1 || s.reCovDim[0] < 1) Rf_error("density probe requires one covariance block");
+  k = s.reCovDim[0];
+  if(TYPEOF(eta_r) != REALSXP || LENGTH(eta_r) != k*(k+1)/2) Rf_error("invalid probe coordinates");
+  std::memset(&p,0,sizeof(CovProposalState));
+  init_iid_covariance_proposal(&s,&p);
+  j = 0;
+  for(col = 0; col < k; col++)
+    for(row = col; row < k; row++){
+      p.reCovChol[0][row+k*col] = row == col ? std::exp(REAL(eta_r)[j]) : REAL(eta_r)[j];
+      j++;
+    }
+  valid = refresh_iid_covariance_proposal(&s,&p,0);
+  PROTECT(out = Rf_allocVector(VECSXP,6));
+  PROTECT(names = Rf_allocVector(STRSXP,6));
+  for(j = 0; j < 6; j++) SET_STRING_ELT(names,j,Rf_mkChar(labels[j]));
+  SET_VECTOR_ELT(out,0,Rf_ScalarLogical(valid));
+  if(valid){
+    s.reCovariance = p.reCovariance;s.reCovPrecision = p.reCovPrecision;
+    s.reCovChol = p.reCovChol;s.reCovLogDet = p.reCovLogDet;
+    SET_VECTOR_ELT(out,1,Rf_ScalarReal(log_iid_covariance_target(&s)));
+    double *matrices[] = {s.reCovariance[0],s.reCovPrecision[0],s.reCovChol[0]};
+    for(j = 0; j < 3; j++){
+      PROTECT(value = Rf_allocMatrix(REALSXP,k,k));
+      std::memcpy(REAL(value),matrices[j],k*k*sizeof(double));
+      SET_VECTOR_ELT(out,j+2,value);
+      UNPROTECT(1);
+    }
+    SET_VECTOR_ELT(out,5,Rf_ScalarReal(s.reCovLogDet[0]));
+  }
+  Rf_namesgets(out,names);
+  free_sampler_state(&s);
+  UNPROTECT(2);
   return out;
 }
 

@@ -97,13 +97,13 @@ void update_mean_without_alpha(SamplerState *s, const double *beta, double *out)
 /* Cache the small coefficient precision for repeated group blocks. */
 void refresh_iid_covariance_precision(SamplerState *s, int b)
 {
-  int k, j, info;
+  int k, j, col, info;
   char lower;
   double *L, *P;
 
   k = s->reCovDim[b];
   lower = 'L';
-  L = (double*)R_alloc(k * k, sizeof(double));
+  L = s->reCovChol[b];
   P = s->reCovPrecision[b];
 
   for(j = 0; j < k * k; j++){
@@ -122,6 +122,9 @@ void refresh_iid_covariance_precision(SamplerState *s, int b)
   F77_CALL(dpotrs)(&lower, &k, &k, L, &k, P, &k, &info FCONE);
   if(info != 0)
     Rf_error("iid covariance precision solve failed");
+  for(col = 0; col < k; col++)
+    for(j = 0; j < col; j++)
+      L[j + k * col] = 0.0;
 }
 
 static void update_iid_covariance_gibbs(SamplerState *s, int b)
@@ -564,6 +567,8 @@ typedef struct {
   double **Q;
   double *logDetQ;
   double *sigmaSqRE;
+  double **reCovariance, **reCovPrecision, **reCovChol;
+  double *reCovLogDet;
 } CovBindingSave;
 
 CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
@@ -576,6 +581,10 @@ CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
   for(t = 0; t < s->nResidualGroup; t++)
     save.residualVariance[t] = s->residualVariance[t];
   save.sigmaSqRE = s->sigmaSqRE;
+  save.reCovariance = s->reCovariance;
+  save.reCovPrecision = s->reCovPrecision;
+  save.reCovChol = s->reCovChol;
+  save.reCovLogDet = s->reCovLogDet;
   save.M_lat = s->M_lat;
   save.M_lat_fac = s->M_lat_fac;
   save.sigmaSq = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
@@ -585,8 +594,13 @@ CovBindingSave bind_cov_proposal_state(SamplerState *s, CovProposalState *p)
   save.Q = (double**)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double*));
   save.logDetQ = (double*)R_alloc(s->nTerms > 0 ? s->nTerms : 1, sizeof(double));
 
-  if(s->collapseIid)
+  if(s->collapseIid){
     s->sigmaSqRE = p->sigmaSqRE;
+    s->reCovariance = p->reCovariance;
+    s->reCovPrecision = p->reCovPrecision;
+    s->reCovChol = p->reCovChol;
+    s->reCovLogDet = p->reCovLogDet;
+  }
   s->tauSq = p->tauSq;
   for(t = 0; t < s->nResidualGroup; t++)
     s->residualVariance[t] = p->residualVariance[t];
@@ -620,6 +634,10 @@ void restore_cov_binding(SamplerState *s, CovBindingSave *save)
   int t;
 
   s->sigmaSqRE = save->sigmaSqRE;
+  s->reCovariance = save->reCovariance;
+  s->reCovPrecision = save->reCovPrecision;
+  s->reCovChol = save->reCovChol;
+  s->reCovLogDet = save->reCovLogDet;
   s->tauSq = save->tauSq;
   for(t = 0; t < s->nResidualGroup; t++)
     s->residualVariance[t] = save->residualVariance[t];
@@ -643,6 +661,7 @@ void accept_cov_proposal_state(SamplerState *s, CovProposalState *p)
   int t;
   double tmpDouble;
   double *tmpPtr;
+  double **tmpMatrices;
   cholmod_sparse *tmpSparse;
   cholmod_factor *tmpFactor;
 
@@ -650,6 +669,18 @@ void accept_cov_proposal_state(SamplerState *s, CovProposalState *p)
     tmpPtr = s->sigmaSqRE;
     s->sigmaSqRE = p->sigmaSqRE;
     p->sigmaSqRE = tmpPtr;
+    tmpMatrices = s->reCovariance;
+    s->reCovariance = p->reCovariance;
+    p->reCovariance = tmpMatrices;
+    tmpMatrices = s->reCovPrecision;
+    s->reCovPrecision = p->reCovPrecision;
+    p->reCovPrecision = tmpMatrices;
+    tmpMatrices = s->reCovChol;
+    s->reCovChol = p->reCovChol;
+    p->reCovChol = tmpMatrices;
+    tmpPtr = s->reCovLogDet;
+    s->reCovLogDet = p->reCovLogDet;
+    p->reCovLogDet = tmpPtr;
   }
 
   tmpDouble = s->tauSq;
@@ -733,6 +764,12 @@ void pack_cov_eta(SamplerState *s, double *eta)
                              s->terms[t].thetaUpper[j]);
     } else if(p->paramType[k] == 4){
       eta[k] = std::log(s->sigmaSqRE[p->paramTerm[k]]);
+    } else if(p->paramType[k] == 5){
+      t = p->paramTerm[k];
+      j = p->paramTheta[k];
+      eta[k] = s->reCovChol[t][j];
+      if(j % (s->reCovDim[t] + 1) == 0)
+        eta[k] = std::log(eta[k]);
     } else {
       Rf_error("pack_cov_eta: unknown adaptive parameter type");
     }
@@ -753,12 +790,16 @@ void pack_cov_block_eta(SamplerState *s, CovProposalBlock *b, double *eta)
 void unpack_cov_eta_to_proposal(SamplerState *s, const double *eta)
 {
   int i, j, k, t;
+  int *changed = NULL;
   CovProposalState *p;
 
   p = &s->covProp;
-  if(s->collapseIid)
+  if(s->collapseIid){
+    copy_iid_covariance_proposal(s, p);
+    changed = (int*)R_alloc(s->nRE, sizeof(int));
     for(i = 0; i < s->nRE; i++)
-      p->sigmaSqRE[i] = s->sigmaSqRE[i];
+      changed[i] = 0;
+  }
   p->tauSq = s->tauSq;
   for(i = 0; i < s->nResidualGroup; i++)
     p->residualVariance[i] = s->residualVariance[i];
@@ -789,9 +830,26 @@ void unpack_cov_eta_to_proposal(SamplerState *s, const double *eta)
         p->theta[t][j] = s->terms[t].theta[j];
     } else if(p->paramType[k] == 4){
       p->sigmaSqRE[p->paramTerm[k]] = std::exp(eta[k]);
+    } else if(p->paramType[k] == 5){
+      t = p->paramTerm[k];
+      j = p->paramTheta[k];
+      if(j % (s->reCovDim[t] + 1) == 0){
+        if(eta[k] != std::log(s->reCovChol[t][j])){
+          p->reCovChol[t][j] = std::exp(eta[k]);
+          changed[t] = 1;
+        }
+      } else if(eta[k] != s->reCovChol[t][j]){
+        p->reCovChol[t][j] = eta[k];
+        changed[t] = 1;
+      }
     } else {
       Rf_error("unpack_cov_eta_to_proposal: unknown adaptive parameter type");
     }
+  }
+  if(s->collapseIid){
+    for(t = 0; t < s->nRE; t++)
+      if(changed[t] && !refresh_iid_covariance_proposal(s, p, t))
+        p->iidValid = 0;
   }
 }
 
@@ -1007,7 +1065,7 @@ static int update_nb_size(SamplerState *s, const double *beta,
 
 int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block, const double *resid)
 {
-  int i;
+  int i, factorized, factorStatus, tryCatch;
   double logPostOld, logPostProp, logu;
   CovProposalState *p;
   CovBindingSave save;
@@ -1022,8 +1080,12 @@ int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block,
 
   accepted = 0;
   logPostOld = log_cov_params_target_collapsed(s, resid);
+  if(s->collapseIid && !R_FINITE(logPostOld))
+    Rf_error("non-finite collapsed IID covariance target at the current state");
 
   draw_adaptive_cov_block_proposal(s, block);
+  if(s->collapseIid && !p->iidValid)
+    return 0;
   if(s->collapseIid)
     for(i = 0; i < s->nRE; i++)
       if(!R_FINITE(p->sigmaSqRE[i]) || p->sigmaSqRE[i] <= 0.0 ||
@@ -1054,10 +1116,20 @@ int cov_params_block_mh_collapsed_step(SamplerState *s, CovProposalBlock *block,
   save = bind_cov_proposal_state(s, p);
   assemble_M_lat_numeric(s);
   s->cm.status = CHOLMOD_OK;
-  if(!M_cholmod_factorize(s->M_lat, s->M_lat_fac, &s->cm) || s->cm.status != CHOLMOD_OK){
+  /* Extreme IID proposals can lose positive definiteness in floating point.
+     Handle that status as a rejection; retain errors for other failures. */
+  tryCatch = s->cm.try_catch;
+  if(s->collapseIid)
+    s->cm.try_catch = 1;
+  factorized = M_cholmod_factorize(s->M_lat, s->M_lat_fac, &s->cm);
+  factorStatus = s->cm.status;
+  s->cm.try_catch = tryCatch;
+  if(!factorized || factorStatus != CHOLMOD_OK){
     s->cm.status = CHOLMOD_OK;
     restore_cov_binding(s, &save);
     reset_proposal_factor(s, p);
+    if(s->collapseIid && factorStatus != CHOLMOD_NOT_POSDEF && factorStatus != CHOLMOD_DSMALL)
+      Rf_error("collapsed IID proposal factorization failed (CHOLMOD status %d)", factorStatus);
     return 0;
   }
 
@@ -1617,6 +1689,15 @@ static void cov_param_label(SamplerState *s, CovProposalState *p, int idx, char 
     std::snprintf(label, labelSize, "%s_theta_%d", s->terms[t].name, j + 1);
   } else if(p->paramType[idx] == 4){
     std::snprintf(label, labelSize, "log(%s_sigma_sq)", s->reNames[p->paramTerm[idx]]);
+  } else if(p->paramType[idx] == 5){
+    t = p->paramTerm[idx];
+    j = p->paramTheta[idx];
+    if(j % (s->reCovDim[t] + 1) == 0)
+      std::snprintf(label, labelSize, "log(%s_chol[%d,%d])", s->reNames[t],
+                    j % s->reCovDim[t] + 1, j / s->reCovDim[t] + 1);
+    else
+      std::snprintf(label, labelSize, "%s_chol[%d,%d]", s->reNames[t],
+                    j % s->reCovDim[t] + 1, j / s->reCovDim[t] + 1);
   } else {
     std::snprintf(label, labelSize, "unknown_%d", idx + 1);
   }
@@ -2547,8 +2628,10 @@ void print_term_description(SEXP td_r)
       if(sigma_r == R_NilValue){
         SEXP cov = getListElement(re_i, "covariance");
         SEXP hp = getListElement(cov, "prior_hyperparameters");
-        Rprintf("    covariance: unstructured, inverse-Wishart(df=%.6g), Gibbs\n",
-                REAL(getListElement(hp, "df"))[0]);
+        const char *status = CHAR(STRING_ELT(getListElement(getListElement(re_i, "sampler"), "status"), 0));
+        Rprintf("    covariance: unstructured, inverse-Wishart(df=%.6g), %s\n",
+                REAL(getListElement(hp, "df"))[0],
+                std::strcmp(status, "gibbs") == 0 ? "Gibbs" : status);
         continue;
       }
       Rprintf("    sigma^2 current: %.6g\n", REAL(getListElement(sigma_r, "current"))[0]);
@@ -2765,6 +2848,18 @@ SEXP build_term_description_object(SamplerState *s, SEXP backend_r, int nSamples
         UNPROTECT(1);
       } else {
         setListElementByName(sigma_r, "current", Rf_ScalarReal(s->sigmaSqRE[i]));
+      }
+      if(s->collapseIid){
+        int j, active;
+
+        active = 0;
+        for(j = 0; j < s->covProp.dim; j++)
+          if(s->covProp.paramType[j] >= 4 && s->covProp.paramTerm[j] == i)
+            active = 1;
+        setListElementByName(sampler_r, "status",
+                            Rf_mkString(active ? "collapsed Metropolis" : "fixed"));
+        if(sigma_r != R_NilValue)
+          setListElementByName(sigma_r, "tuning", Rf_ScalarReal(s->sigmaSqRETune[i]));
       }
       if(nSamplesDone > 0)
         setListElementByName(sampler_r, "block_acceptance", Rf_ScalarReal(NA_REAL));
