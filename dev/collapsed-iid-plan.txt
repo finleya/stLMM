@@ -446,6 +446,17 @@ Staged implementation and review
    as the default pending further discussion. Broader scalar IID priors are a
    possible next focused extension, not an implemented part of this stage.
 
+Possible later optimization -- not scheduled
+-------------------------------------------
+Consider groupwise conditional coefficient draws for IID-only models with a
+single grouping factor. Conditional on fixed effects and covariance parameters,
+the group blocks are independent; small Cholesky factorizations and triangular
+solves could replace the general dense coefficient solve while retaining the
+existing IG/IW Gibbs updates. Draw correlated coefficients jointly within each
+group. Crossed terms need more general sparse handling, and integrating out
+structured effects generally couples groups. Revisit this separately; it does
+not change the current implementation sequence.
+
 Longer-term design requirements
 -------------------------------
 The agreed compatibility targets, in increasing scope, are:
