@@ -104,7 +104,10 @@ R-hat), \code{ess_bulk}, and \code{ess_tail}. This selection is available for
 both ordinary and combined coefficient summaries.}
 \item{digits}{Number of digits used when printing a combined summary.}
 \item{burnin}{Number of initial plotted draws to discard. This affects only
-the plotting call; it does not modify the stored posterior samples.}
+the plotting call; it does not modify the stored posterior samples. For
+single-chain recovery plots this counts recovered rows, rather than original
+iteration numbers. Multi-chain fit and recovery plots use an original
+posterior iteration cutoff, as in \code{\link{as_mcmc}}.}
 \item{thin}{Keep every \code{thin}-th plotted draw after \code{burnin}. This
 affects only the plotting call.}
 \item{include_w}{Logical; include summaries of saved or recovered latent process
@@ -132,6 +135,12 @@ prediction scatter plots. Recovery plots use the fitted response by default.}
 }
 \description{
 S3 methods for compact inspection of fitted, recovered, and prediction objects.
+For IID-only Gaussian recovery objects, trace and density plots show parameter
+and recovered IID draws on the selected recovery grid; \code{parameters} can
+select columns as for an ordinary fit. The \code{max_parameters} argument can
+be passed through \code{...}, defaulting to \code{max_nodes} for these plots.
+Fitted-value plots use the recovered
+IID coefficients.
 Summaries report posterior means, standard deviations, and quantiles for active
 sample blocks only. Plot methods use base graphics and choose conservative
 defaults to avoid drawing very large posterior or prediction objects by
@@ -157,8 +166,13 @@ For a coefficient absent from some selected terms, only the matching terms
 contribute; the contributing identifiers are recorded per row. Group labels
 are retained separately, including parent labels for \code{by} terms.
 
-Iid sums use the original fixed and iid draws after \code{burn}, including on
-recovery objects whose structured draws were saved at fewer iterations. No
+For collapsed Gaussian fits, call \code{recover()} before requesting IID sums.
+These sums pair recovered IID draws with fixed-effect draws at the original
+\code{recover_iter} indices after \code{burn}. Parameter summaries and diagnostics
+on these recovery objects also use that selected grid; summarize the original
+fit to use every retained parameter draw. With separate IID sampling or augmented
+likelihoods, IID sums use all original fixed and IID draws after \code{burn}, even
+when structured draws were saved at fewer iterations. No
 draws are simulated and no latent recovery is performed by a summary. Group
 membership is read from the original sparse design, including explicit zero
 entries for zero-valued slope covariates; do not remove those entries from the

@@ -133,10 +133,12 @@ if(chain==1L) saveRDS(fit$backend,file.path(out,paste(case,mode,blocking,'backen
 meta <- fit$term_description$global
 fit_mib <- as.numeric(object.size(fit))/1024^2
 recovery_seconds <- 0
-if(spatial) recovery_seconds <- system.time(fit <- recover(fit,sub_sample=list(start=burn+1L)))['elapsed']
+if(spatial || isTRUE(fit$backend$defer_iid_recovery))
+  recovery_seconds <- system.time(fit <- recover(fit,sub_sample=list(start=burn+1L)))['elapsed']
+alpha_keep <- if(isTRUE(fit$backend$defer_iid_recovery)) match(keep,fit$recover_iter) else keep
 rows <- unique(as.integer(seq(1,nrow(x$data),length.out=6)))
 Z <- as.matrix(fit$backend$Z[rows,,drop=FALSE]);X <- fit$backend$X[rows,,drop=FALSE]
-fixed_iid <- fit$beta_samples[keep,,drop=FALSE]%*%t(X)+fit$alpha_samples[keep,,drop=FALSE]%*%t(Z)
+fixed_iid <- fit$beta_samples[keep,,drop=FALSE]%*%t(X)+fit$alpha_samples[alpha_keep,,drop=FALSE]%*%t(Z)
 predictor <- fixed_iid
 if(spatial) predictor <- predictor+fit$w_samples_ordered$nngp_1[,fit$backend$process_terms[[1]]$map[rows],drop=FALSE]
 coefs <- unlist(lapply(fit$term_description$random_effects$terms,function(b) rep(b$coefficients,b$n_levels)))
@@ -144,7 +146,7 @@ combined <- list()
 for(cf in colnames(X)) {
   zz <- Z; zz[,coefs!=cf] <- 0
   if(cf!='(Intercept)') zz <- zz/x$data[[cf]][rows]
-  combined[[cf]] <- fit$beta_samples[keep,cf]+fit$alpha_samples[keep,,drop=FALSE]%*%t(zz)
+  combined[[cf]] <- fit$beta_samples[keep,cf]+fit$alpha_samples[alpha_keep,,drop=FALSE]%*%t(zz)
   colnames(combined[[cf]]) <- paste0('combined_',cf,'[',rows,']')
 }
 parameters <- cbind(fit$beta_samples[keep,,drop=FALSE],
@@ -168,7 +170,7 @@ stopifnot(length(truth)==ncol(parameters))
 names(truth) <- colnames(parameters)
 colnames(fixed_iid) <- paste0('fixed_iid[',rows,']');colnames(predictor) <- paste0('predictor[',rows,']')
 selected <- which(colSums(abs(Z))>0)
-alpha <- fit$alpha_samples[keep,selected,drop=FALSE]
+alpha <- fit$alpha_samples[alpha_keep,selected,drop=FALSE]
 colnames(alpha) <- paste0('raw_alpha[',selected,']')
 draws <- cbind(parameters,alpha,do.call(cbind,combined),fixed_iid,predictor)
 truth <- c(truth,setNames(rep(NA_real_,ncol(alpha)),colnames(alpha)),

@@ -79,7 +79,7 @@ for(cc in case_ids) {
   be$n_samples <- ns
   be$warmup <- list(enabled=TRUE,batch_length=50L,min_batches=3L,max_batches=20L,
     target=c(.15,.4),near_zero=.01)
-  be$recover_process <- structure!='none';be$recover_start <- as.integer(keep[1]);be$recover_thin <- 1L
+  be$recover_process <- !gaussian && structure!='none';be$recover_start <- as.integer(keep[1]);be$recover_thin <- 1L
   scalar <- which(vapply(be$iid_covariance,is.null,logical(1)))
   covariance_truth <- unlist(lapply(be$iid_covariance,function(b) {
     if(is.null(b)) return(numeric())
@@ -107,13 +107,25 @@ for(cc in case_ids) {
   for(joint in c(FALSE,TRUE)) {
     draws <- NULL;elapsed <- numeric(3);fill <- numeric(3)
     be$collapse_iid <- joint
+    be$defer_iid_recovery <- gaussian && joint
     for(chain in 1:3) {
       set.seed(76801+cc*10+chain+1000*joint)
       elapsed[chain] <- system.time(out <- .Call('stLMM_collapsed_sampler',be,PACKAGE='stLMM'))['elapsed']
+      if(gaussian && (joint || nw > 0)) {
+        elapsed[chain] <- elapsed[chain] + system.time(rec <- .Call('stLMM_recover_w', be,
+          out$beta_samples, out$alpha_samples, out$sigma_sq_re_samples[,scalar,drop=FALSE],
+          out$iid_covariance_samples, out$tau_sq_samples, out$residual_variance_samples,
+          out$sigma_sq_samples, out$theta_samples, as.integer(keep), 1L, PACKAGE='stLMM'))['elapsed']
+        alpha <- if(joint) rec$alpha_samples else out$alpha_samples[keep,,drop=FALSE]
+        w <- rec$w_samples
+      } else {
+        alpha <- out$alpha_samples[keep,,drop=FALSE]
+        w <- out$w_samples
+      }
       base <- out$beta_samples[keep,,drop=FALSE]%*%t(be$X_obs[c(1,n),,drop=FALSE])+
-        out$alpha_samples[keep,,drop=FALSE]%*%t(as.matrix(be$Z_obs[c(1,n),,drop=FALSE]))
+        alpha%*%t(as.matrix(be$Z_obs[c(1,n),,drop=FALSE]))
       predictor <- base
-      if(nw) predictor <- predictor+out$w_samples%*%t(ref$H[c(1,n),seq_len(nw),drop=FALSE])
+      if(nw) predictor <- predictor+w%*%t(ref$H[c(1,n),seq_len(nw),drop=FALSE])
       dr <- cbind(out$beta_samples[keep,,drop=FALSE],if(gaussian) out$tau_sq_samples[keep],
         out$sigma_sq_re_samples[keep,scalar,drop=FALSE],out$iid_covariance_samples[keep,,drop=FALSE],
         out$sigma_sq_samples[keep,,drop=FALSE],out$theta_samples[keep,,drop=FALSE],

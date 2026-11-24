@@ -2,7 +2,8 @@
 \alias{recover}
 \alias{recover.stLMM}
 \alias{recover.stLMM_chains}
-\title{Recover latent process draws}
+\alias{recover.stLMM_recovery_chains}
+\title{Recover latent effect draws}
 \usage{
 recover(object, ...)
 
@@ -11,9 +12,12 @@ recover(object, ...)
 
 \method{recover}{stLMM_chains}(object, n_omp_threads = NULL, verbose = FALSE,
   sub_sample = list(start = 1L, thin = 1L), ...)
+
+\method{recover}{stLMM_recovery_chains}(object, n_omp_threads = NULL, verbose = FALSE,
+  sub_sample = list(start = 1L, thin = 1L), ...)
 }
 \arguments{
-\item{object}{An object returned by \code{stLMM()}. Multi-chain fits are
+\item{object}{An object returned by \code{stLMM()} or \code{recover()}. Multi-chain objects are
 handled chain by chain.}
 \item{n_omp_threads}{Optional positive integer number of OpenMP threads for
 threaded recovery setup kernels. The default \code{NULL} uses the thread count
@@ -30,7 +34,7 @@ draws.}
 \item{...}{Currently unused.}
 }
 \description{
-Recover posterior draws of latent process terms from a fitted collapsed
+Recover posterior draws of latent effects from a fitted collapsed
 \code{stLMM} model.
 }
 \details{
@@ -55,15 +59,24 @@ in-chain process draws. If an augmented non-Gaussian process model was fit with
 refit with \code{save_process = TRUE} or
 \code{save_process = list(start = ..., thin = ...)}.
 
-Recovery is only needed for models with structured process terms such as
-\code{ar1()}, \code{gp()}, \code{nngp()}, \code{car()}, \code{dagar()}, or
-\code{car_time()}, or \code{dagar_time()}.
-Explicit iid grouped random effects are sampled during fitting and do not need
-this recovery step under either IID sampling strategy. Even with
-\code{collapse_iid = TRUE}, Gaussian recovery conditions on the retained
-\code{alpha_samples}; it draws only the structured effects and preserves
-coefficient/parameter alignment. For augmented models, recovery selects the
-paired in-chain draws and does not resample IID coefficients. When the fitted
+For Gaussian models with \code{collapse_iid = TRUE}, recovery draws IID and
+structured coefficients jointly, including IID-only models. Fitting integrates
+out both coefficient blocks and retains their covariance parameters. Recovery
+uses the combined design and sparse precision to preserve posterior dependence
+between IID and structured effects. Recovered \code{alpha_samples} and structured
+samples have one row per selected iteration, identified by \code{recover_iter}.
+The parameter matrices retain all original iterations. Prediction, fitted values,
+and combined coefficient summaries require recovery first.
+Calling \code{recover()} again on a Gaussian recovery object, including a
+multi-chain object, draws fresh latent effects for the requested original
+iterations. For augmented models, repeated recovery selects from the process
+draws still present in the object.
+
+With separate IID sampling, coefficients are sampled during fitting and recovery
+draws structured effects conditional on the stored \code{alpha_samples}.
+Previously saved fits containing full in-chain IID draws retain this behavior.
+For augmented models, recovery selects the paired in-chain draws and does not
+resample IID coefficients. When the fitted
 data include rows with missing numeric
 responses, recovered process samples are on the full latent support, including
 latent nodes associated only with those missing-response rows.
@@ -74,7 +87,8 @@ same in-chain process draws are the process samples used by \code{recover()}.
 Post-fit augmented non-Gaussian process reconstruction is intentionally not supported.
 }
 \value{
-The fitted object with recovered latent process draws added. User-facing
+The fitted object with recovered latent effect draws added. Joint Gaussian
+recovery adds \code{alpha_samples} for the selected iterations. User-facing
 \code{w_samples} are returned by process term; NNGP and DAGAR terms are in
 original support order. The internal ordered copy used by fitted values and
 prediction is stored in \code{w_samples_ordered}. The object also includes

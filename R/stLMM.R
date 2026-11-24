@@ -1921,6 +1921,7 @@ stLMM <- function(formula, data = parent.frame(),
         sigma_sq_re_tuning = as.double(sigma_sq_re_tuning),
         collapse_iid_requested = collapse_iid_requested,
         collapse_iid = collapse_iid,
+        defer_iid_recovery = collapse_iid && !is_augmented_likelihood,
         iid_covariance = iid_covariance,
         re = list(
             q = as.integer(re.q),
@@ -2129,6 +2130,9 @@ stLMM <- function(formula, data = parent.frame(),
 
         if(!is.null(out$beta_samples) && is.matrix(out$beta_samples))
             colnames(out$beta_samples) <- x_names
+
+        if(isTRUE(backend_i$defer_iid_recovery))
+            out$alpha_samples <- NULL
 
         if(!is.null(out$alpha_samples) && is.matrix(out$alpha_samples) && ncol(out$alpha_samples) > 0L){
             z_names <- colnames(Z)

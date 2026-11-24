@@ -1,6 +1,21 @@
 recover <- function(object, ...)
   UseMethod("recover")
 
+# Joint Gaussian recovery stores alpha on the same selected grid as w.
+# Objects saved before deferred recovery keep their original full alpha grid.
+iid_sample_rows <- function(object, draw_index){
+  if(!isTRUE(object$backend$defer_iid_recovery))
+    return(draw_index)
+  if(is.null(object$alpha_samples) || !length(object$recover_iter))
+    stop("error: collapsed Gaussian IID effects require recover() on the fitted object first")
+  if(nrow(object$alpha_samples) != length(object$recover_iter))
+    stop("error: IID coefficient draws do not align with recover_iter")
+  rows <- match(draw_index, object$recover_iter)
+  if(anyNA(rows))
+    stop("error: requested iterations have no recovered IID coefficients")
+  rows
+}
+
 recover.stLMM <- function(object,
                          n_omp_threads = NULL,
                          verbose = FALSE,
@@ -11,8 +26,9 @@ recover.stLMM <- function(object,
     stop("error: object must be an stLMM fit")
   n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
 
-  if(length(object$backend$process_terms) == 0L)
-    stop("error: recover() requires at least one structured process term")
+  joint_iid <- isTRUE(object$backend$defer_iid_recovery)
+  if(length(object$backend$process_terms) == 0L && !joint_iid)
+    stop("error: recover() requires at least one structured process term or collapsed Gaussian IID effects")
 
   if(!is.list(sub_sample))
     stop("error: sub_sample must be a list with optional entries 'start' and 'thin'")
@@ -33,6 +49,8 @@ recover.stLMM <- function(object,
   thin <- as.integer(thin)
 
   n_samples <- as.integer(object$backend$n_samples)
+  if(start > n_samples)
+    stop("error: sub_sample selects no posterior draws")
   draw_index <- seq.int(start, n_samples, by = thin)
   if(length(draw_index) == 0L)
     stop("error: sub_sample selects no posterior draws")
@@ -98,16 +116,20 @@ recover.stLMM <- function(object,
   if(is.null(residual_variance_samples))
     residual_variance_samples <- matrix(0.0, nrow = n_samples, ncol = 0L)
 
-  stlmm_progress(verbose, "recover: sampling latent process draws")
+  empty <- matrix(0.0, nrow = n_samples, ncol = 0L)
+  stlmm_progress(verbose, if(joint_iid) "recover: sampling IID and structured effect draws" else
+                 "recover: sampling latent process draws")
   out <- .Call(
     "stLMM_recover_w",
     object$backend,
     object$beta_samples,
     alpha_samples,
+    object$iid_sigma_sq_samples %||% empty,
+    object$iid_covariance_samples %||% empty,
     tau_sq_samples,
     residual_variance_samples,
-    object$sigma_sq_samples,
-    object$theta_samples,
+    object$sigma_sq_samples %||% empty,
+    object$theta_samples %||% empty,
     as.integer(draw_index),
     1L,
     PACKAGE = "stLMM"
@@ -129,6 +151,11 @@ recover.stLMM <- function(object,
     user_order = TRUE
   )
   object$recover_iter <- out$recover_iter
+  if(joint_iid){
+    object$alpha_samples <- out$alpha_samples
+    colnames(object$alpha_samples) <- colnames(object$backend$Z)
+    object$samples$alpha <- object$alpha_samples
+  }
   object$samples$w <- object$w_samples
 
   class(object) <- unique(c("stLMM_recovery", class(object)))
@@ -164,6 +191,8 @@ recover.stLMM_chains <- function(object,
   class(out) <- "stLMM_recovery_chains"
   out
 }
+
+recover.stLMM_recovery_chains <- recover.stLMM_chains
 
 unstack_w_samples <- function(w_samples_stacked,
                               process_terms,

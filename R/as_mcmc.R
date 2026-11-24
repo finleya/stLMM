@@ -81,13 +81,13 @@ as_mcmc.stLMM_recovery <- function(object,
                                   burn = 0L,
                                   thin = 1L,
                                   ...){
-  if(isTRUE(include_w)){
+  if(isTRUE(include_w) || isTRUE(object$backend$defer_iid_recovery)){
     return(coda::mcmc(as.matrix(as_samples(
       object,
       burn = burn,
       thin = thin,
       metadata = FALSE,
-      include_w = TRUE,
+      include_w = include_w,
       ...
     ))))
   }
@@ -116,6 +116,13 @@ as_mcmc.stLMM_recovery_chains <- function(object,
                                          burn = 0L,
                                          thin = 1L,
                                          ...){
+
+  if(any(vapply(object$chains, function(ch) isTRUE(ch$backend$defer_iid_recovery), logical(1)))){
+    iterations <- lapply(object$chains, function(ch)
+      ch$recover_iter[sample_available_index(ch$recover_iter, burn, thin, "recovered draws")])
+    if(!all(vapply(iterations, identical, logical(1), iterations[[1L]])))
+      stop("error: diagnostics require matching recovered iterations across chains")
+  }
 
   do.call(coda::mcmc.list, lapply(
     object$chains,

@@ -174,6 +174,8 @@ print.stLMM <- function(x, ...){
 
   if(isTRUE(x$backend$collapse_iid))
     cat("  IID sampler: collapsed\n")
+  if(isTRUE(x$backend$defer_iid_recovery) && is.null(x$alpha_samples))
+    cat("  IID coefficient samples: not retained; call recover()\n")
 
   active <- names(Filter(Negate(is.null), x$samples))
   if(length(active))
@@ -255,7 +257,15 @@ summary.stLMM <- function(object,
                                 diagnostics, diagnostic_method, parameters))
   validate_combined_only_args(coefficients, terms)
   burn <- validate_burn(burn, object$backend$n_samples)
-  samples <- drop_burn_samples(object$samples, burn = burn)
+  n_used <- object$backend$n_samples - burn
+  if(isTRUE(object$backend$defer_iid_recovery) && !is.null(object$alpha_samples)){
+    keep <- sample_available_index(object$recover_iter, burn = burn, what = "recovered draws")
+    iteration <- object$recover_iter[keep]
+    samples <- stLMM_parameter_blocks(object, index = iteration)
+    n_used <- length(iteration)
+  } else {
+    samples <- drop_burn_samples(object$samples, burn = burn)
+  }
   samples <- filter_sample_blocks(samples, parameters = parameters)
 
   out <- list(
@@ -270,7 +280,7 @@ summary.stLMM <- function(object,
     n_process = length(object$backend$process_terms),
     residual_model = object$backend$residual_model$type %||% "global_tau",
     burn = burn,
-    n_used = object$backend$n_samples - burn,
+    n_used = n_used,
     parameters = collect_parameter_summaries(samples, probs = probs),
     term_description = object$term_description
   )
@@ -297,6 +307,9 @@ print.summary_stLMM <- function(x, digits = max(3L, getOption("digits") - 3L), .
   if(!is.null(x$burn) && x$burn > 0L)
     cat("  posterior draws: ", x$n_samples, " (", x$n_used,
         " used after burn = ", x$burn, ")\n", sep = "")
+  else if(!is.null(x$n_used) && x$n_used != x$n_samples)
+    cat("  posterior draws: ", x$n_samples, " (", x$n_used,
+        " used on recovery grid)\n", sep = "")
   else
     cat("  posterior draws: ", x$n_samples, "\n", sep = "")
   cat("  family: ", x$family, "\n", sep = "")
@@ -384,7 +397,7 @@ summary.stLMM_chains <- function(object,
     n_process = length(object$chains[[1L]]$backend$process_terms),
     residual_model = object$chains[[1L]]$backend$residual_model$type %||% "global_tau",
     burn = burn,
-    n_used = object$chains[[1L]]$backend$n_samples - burn,
+    n_used = nrow(chains[[1L]]),
     parameters = posterior_summary_table(m, probs = probs),
     diagnostics = diagnostics_out,
     term_description = object$term_description
@@ -411,6 +424,9 @@ print.summary_stLMM_chains <- function(x, digits = max(3L, getOption("digits") -
   if(!is.null(x$burn) && x$burn > 0L)
     cat("  posterior draws per chain: ", x$n_samples, " (", x$n_used,
         " used after burn = ", x$burn, ")\n", sep = "")
+  else if(!is.null(x$n_used) && x$n_used != x$n_samples)
+    cat("  posterior draws per chain: ", x$n_samples, " (", x$n_used,
+        " used on recovery grid)\n", sep = "")
   else
     cat("  posterior draws per chain: ", x$n_samples, "\n", sep = "")
   cat("  process terms: ", x$n_process, "\n", sep = "")
@@ -765,7 +781,17 @@ plot.stLMM_recovery <- function(x,
 
   type <- match.arg(type)
 
-  if(is.null(x$w_samples) || !length(x$w_samples))
+  if(!length(x$w_samples) && isTRUE(x$backend$defer_iid_recovery) && type != "fitted"){
+    if(!is.null(term) || !is.null(nodes))
+      stop("error: IID-only recovery plots select coefficients with parameters, not term or nodes")
+    selected <- x
+    selected$samples <- list(parameters = as.matrix(as_samples(x, metadata = FALSE)))
+    args <- list(...)
+    args$max_parameters <- args$max_parameters %||% max_nodes
+    do.call(plot.stLMM, c(list(x = selected, type = type, burnin = burnin, thin = thin), args))
+    return(invisible(x))
+  }
+  if(!length(x$w_samples) && !isTRUE(x$backend$defer_iid_recovery))
     stop("error: no saved or recovered latent process samples available")
 
   if(type == "fitted"){

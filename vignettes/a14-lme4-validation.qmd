@@ -7,7 +7,7 @@ format:
   html:
     toc: true
     toc-location: right
-    toc-depth: 3
+    toc-depth: 2
     number-sections: true
     code-fold: true
     code-tools: true
@@ -41,55 +41,39 @@ vignette_dir <- dirname(knitr::current_input(dir = TRUE))
 source(file.path(vignette_dir, "utils.R"))
 
 set.seed(1)
+gaussian_burn <- 4000L
 theme_set(theme_bw(base_size = 12))
 ```
 
 ## Introduction
 
-This article shows how to specify, fit, and interpret mixed-effects models in
-`stLMM` and compare their estimates with `lme4`. Simulated examples cover
-random intercepts and slopes, crossed grouping factors such as sites and
-observers, and nested grouping factors such as plots, each belonging to one
-stand.
+This article introduces grouped random effects in `stLMM` through simulated
+Gaussian models and matched `lme4` fits. We progress from random intercepts to
+independent and correlated slopes, crossed groups, and nested groups with shared
+or parent-specific variances. Each example compares known generating values
+with estimated parameters or group coefficients.
 
-For nested effects, we compare a common plot-effect variance across stands
-with separate plot-effect variances for each stand using `by = stand`. Both
-specifications model plots nested within stands. The examples compare known
-simulating values with estimated coefficients and variance components. Later
-sections illustrate binomial and count mixed models and sampler diagnostics.
-The correlated-coefficient example also compares separate and jointly collapsed
-IID sampling in `stLMM`, alongside the same `lme4` fit.
+The main examples use the default separate IID sampler. After the model
+examples, we examine combined fixed-plus-group coefficients and compare separate
+and collapsed IID sampling. [An optional appendix](#additional-comparisons)
+contains detailed diagnostics, timings, and binomial and count comparisons.
 
-### Three choices that describe a grouped model
+### Model choices and formula alignment
 
-The terminology separates three aspects of model specification
-[@BatesMaechlerBolkerWalker2015lme4]:
+Three choices describe a grouped model [@BatesMaechlerBolkerWalker2015lme4]:
 
-1. **Random-effect terms:** which coefficients vary among groups—an intercept,
-   one or more slopes, or both.
-2. **Grouping structure:** whether there is one grouping factor or several
-   crossed or nested factors. A child factor is **nested** within a parent
-   when each child belongs to exactly one parent. Two factors are **crossed**
-   when neither is nested within the other; for example, observers visit
-   multiple sites and sites are visited by multiple observers. Crossing can
-   be complete or partial.
-3. **Covariance structure:** whether random intercepts and slopes within a
-   group are independent or correlated, and whether groups share a common
-   variance or covariance matrix. Nesting itself does not require a common
-   child-effect variance across parents.
+- **Coefficients:** which intercepts or slopes vary among groups.
+- **Grouping:** one factor, crossed factors, or nested factors. A child is
+  nested when it belongs to exactly one parent. Crossed factors are not nested
+  within one another, as when observers visit several sites and sites have
+  several observers.
+- **Covariance:** whether coefficients within a group are independent or
+  correlated, and whether groups share the same covariance matrix.
 
-In `iid(subgroup, by = group)`, subgroups are nested within `group`. Each level
-of `group` has its own set of subgroup effects and its own variance—or
-covariance matrix for multiple random coefficients. Thus subgroup `"1"` in
-group A and subgroup `"1"` in group B have distinct effects. Add `iid(group)`
-if the model should also include parent-group random intercepts.
-
-The distinction between nesting and parent-specific covariance assumptions
-also appears in the [brms grouping documentation](https://paulbuerkner.com/brms/reference/gr.html).
-Throughout this article, *nested* and *crossed* describe group membership;
-*independent* and *correlated* describe the random-effect distribution.
-
-### Formula alignment with lme4
+Groups remain independent of one another in a correlated `iid()` term;
+correlation refers to its intercept and slope departures within each group.
+Nesting describes membership, while `by` allows a separate child-effect
+variance or covariance for each parent.
 
 Every row below includes the same fixed part, `y ~ x`. Here `x` is numeric.
 The entries show the random-effect terms to add.
@@ -123,92 +107,100 @@ enter on the supplied scale; the user chooses their centering and scaling.
 The [getting-started article](v01-getting-started.html#grouped-random-effects)
 describes prior syntax and prediction to new groups.
 
-### Reading the comparisons
+### Reading the results
 
-`lme4` estimates parameters by ML or REML. `stLMM` uses Bayesian posterior
-simulation with specified priors. Their estimates can differ, especially when
-the data provide limited information about variance components.
+`stLMM` reports posterior means and central 95% credible intervals under the
+specified priors. `lme4` supplies REML point estimates for the Gaussian models.
+The methods therefore need not give identical estimates. A single simulated
+dataset also need not yield intervals containing every generating value.
 
-Simulated values are known in these examples. Posterior means and central
-95% credible intervals describe `stLMM` inference; REML or likelihood point
-estimates describe the `lme4` fits. A single simulated dataset need not give an
-interval containing every generating value. These worked recoveries illustrate
-the models and software; interval coverage is a repeated-simulation property.
-
-The non-Gaussian comparisons need extra caution:
-
-- `stLMM` uses Pólya-Gamma data augmentation for binomial and
-  negative-binomial likelihoods;
-- `lme4::glmer()` fits GLMMs by likelihood approximation;
-- `stLMM` represents Poisson models through a large-size negative-binomial
-  approximation, not a native Poisson likelihood;
-- both packages can estimate negative-binomial size: `stLMM` requires an explicit
-  Gamma prior, while `lme4::glmer.nb()` uses likelihood-based estimation.
-
-The diagnostic tables use `diagnostic_method = "rank"`, which requires the
-optional `posterior` package and reports rank-normalized split/folded R-hat,
-bulk ESS, and tail ESS [@Vehtari2021Rhat].
+Gaussian tables report **variances**, not standard deviations. The recovery
+plots show known group coefficients against their estimates, with `stLMM`
+credible intervals and `lme4` point estimates. Diagnostics use three chains and
+rank-normalized R-hat, bulk ESS, and tail ESS from the optional `posterior`
+package [@Vehtari2021Rhat]. Full diagnostic tables are in the appendix.
 
 ```{r helpers}
-#| code-fold: true
-#| code-summary: "Show helper functions"
-posterior_means <- function(fit, burn = 500L){
-  draws <- as_samples(fit, burn = burn, metadata = FALSE)
-  draws$.chain <- NULL
-  draws$.iteration <- NULL
-  vapply(draws, mean, numeric(1))
+#| include: false
+format_interval <- function(mean, lower, upper){
+  sprintf("%.3f [%.3f, %.3f]", mean, lower, upper)
 }
-
-posterior_sds <- function(fit, burn = 500L){
-  draws <- as_samples(fit, burn = burn, metadata = FALSE)
-  draws$.chain <- NULL
-  draws$.iteration <- NULL
-  vapply(draws, sd, numeric(1))
-}
-
 round_numeric_columns <- function(x, digits = 3){
   is_num <- vapply(x, is.numeric, logical(1))
   x[is_num] <- lapply(x[is_num], round, digits = digits)
   x
 }
-
-format_estimate_with_uncertainty <- function(estimate, uncertainty, digits = 3){
-  paste0(
-    format(round(estimate, digits), nsmall = digits),
-    " (",
-    format(round(uncertainty, digits), nsmall = digits),
-    ")"
-  )
+posterior_means <- function(fit, burn = 500L){
+  draws <- as_samples(fit, burn = burn, metadata = FALSE)
+  vapply(draws, mean, numeric(1))
 }
-
-fixed_effect_table <- function(st_fit, lme4_fit, truth, burn = 500L){
-  st_mean <- posterior_means(st_fit, burn = burn)
-  st_sd <- posterior_sds(st_fit, burn = burn)
-  lme4_beta <- fixef(lme4_fit)
-  lme4_se <- sqrt(diag(vcov(lme4_fit)))
-
-  data.frame(
-    parameter = names(lme4_beta),
-    truth = unname(truth[names(lme4_beta)]),
-    stLMM = format_estimate_with_uncertainty(
-      unname(st_mean[names(lme4_beta)]),
-      unname(st_sd[names(lme4_beta)])
-    ),
-    lme4 = format_estimate_with_uncertainty(
-      unname(lme4_beta),
-      unname(lme4_se[names(lme4_beta)])
-    ),
-    difference = unname(st_mean[names(lme4_beta)] - lme4_beta),
-    row.names = NULL
-  )
+diagnostic_table <- function(fit, parameters, burn = 500L){
+  out <- summary(fit, burn = burn, diagnostic_method = "rank")
+  out$diagnostics[parameters, c("parameter", "rhat", "ess_bulk", "ess_tail"),
+                  drop = FALSE]
 }
-
-diagnostic_table <- function(st_fit, parameters, burn = 500L){
-  s <- summary(st_fit, burn = burn, diagnostic_method = "rank")
-  s$diagnostics[parameters, c("parameter", "rhat", "ess_bulk", "ess_tail"),
-                drop = FALSE]
+parameter_recovery_table <- function(fit, truth, reml, burn = gaussian_burn){
+  out <- summary(fit, parameters = names(truth), burn = burn,
+                 diagnostic_method = "rank")
+  data.frame(parameter = names(truth), truth = unname(truth),
+    out$parameters[, c("mean", "q2.5", "q97.5")],
+    lme4 = unname(reml[names(truth)]),
+    out$diagnostics[, c("rhat", "ess_bulk", "ess_tail")], row.names = NULL)
 }
-
+show_estimates <- function(tab, labels = tab$parameter){
+  knitr::kable(data.frame(Quantity = labels, Simulated = round(tab$truth, 3),
+    stLMM = format_interval(tab$mean, tab$q2.5, tab$q97.5),
+    lme4 = round(tab$lme4, 3)), row.names = FALSE,
+    caption = "stLMM posterior mean [95% credible interval] and lme4 estimate")
+}
+coefficient_recovery_table <- function(combined, truth, reml){
+  data.frame(truth = unname(truth),
+    combined$parameters[, c("mean", "q2.5", "q97.5")], lme4 = unname(reml),
+    combined$diagnostics[, c("rhat", "ess_bulk", "ess_tail")], row.names = NULL)
+}
+group_coefficient_recovery <- function(combined, dat, fit){
+  info <- combined$quantities
+  truth <- attr(dat, "true_coefficients")
+  reml <- as.matrix(coef(fit)$group)
+  tab <- coefficient_recovery_table(combined,
+    truth[cbind(match(info$group_group, rownames(truth)),
+                match(info$coefficient, colnames(truth)))],
+    reml[cbind(match(info$group_group, rownames(reml)),
+               match(info$coefficient, colnames(reml)))])
+  tab$coefficient <- info$coefficient
+  tab
+}
+plot_coefficient_recovery <- function(tab){
+  p <- ggplot(tab, aes(x = truth)) +
+    geom_abline(slope = 1, intercept = 0, color = "grey45", linewidth = 0.4) +
+    geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0,
+                  color = stlmm_color("primary"), alpha = 0.3) +
+    geom_point(aes(y = mean, color = "stLMM"), size = 1.5) +
+    geom_point(aes(y = lme4, color = "lme4"), shape = 4, size = 1.5) +
+    scale_color_manual(values = c(stLMM = stlmm_color("primary"),
+                                  lme4 = stlmm_color("secondary"))) +
+    labs(x = "Simulated combined coefficient", y = "Estimated combined coefficient",
+         color = "Estimate") + theme(legend.position = "bottom")
+  if("coefficient" %in% names(tab))
+    p <- p + facet_wrap(~ coefficient, scales = "free", labeller = as_labeller(
+      c("(Intercept)" = "Intercept", x = "Slope for x")))
+  p
+}
+fixed_effect_table <- function(fit, lme4_fit, truth, burn = 500L){
+  draws <- as_samples(fit, burn = burn, metadata = FALSE)[names(truth)]
+  data.frame(Quantity = names(truth), Simulated = unname(truth),
+    stLMM = format_interval(vapply(draws, mean, numeric(1)),
+      vapply(draws, quantile, numeric(1), 0.025),
+      vapply(draws, quantile, numeric(1), 0.975)),
+    lme4 = round(unname(fixef(lme4_fit)[names(truth)]), 3))
+}
+sd_comparison <- function(fit, lme4_fit, truth, burn){
+  sd_draws <- sqrt(as_samples(fit, burn = burn)[["iid_1_sigma_sq"]])
+  data.frame(Quantity = "Group standard deviation", Simulated = truth,
+    stLMM = format_interval(mean(sd_draws), quantile(sd_draws, 0.025),
+                            quantile(sd_draws, 0.975)),
+    lme4 = round(attr(VarCorr(lme4_fit)$group, "stddev")[[1]], 3))
+}
 iid_random_effect_compare <- function(st_fit, lme4_fit, st_term = 1L,
                                       lme4_column = "(Intercept)",
                                       burn = 500L){
@@ -229,48 +221,13 @@ iid_random_effect_compare <- function(st_fit, lme4_fit, st_term = 1L,
 }
 ```
 
-```{r recovery-helpers}
-#| code-fold: true
-#| code-summary: "Show simulation-recovery table and plot helpers"
-parameter_recovery_table <- function(fit, truth, reml, burn = 2000){
-  s <- summary(fit, parameters = names(truth), burn = burn,
-               diagnostic_method = "rank")
-  data.frame(parameter = names(truth), truth = unname(truth),
-             s$parameters[, c("mean", "q2.5", "q97.5")],
-             lme4 = unname(reml[names(truth)]),
-             s$diagnostics[, c("rhat", "ess_bulk", "ess_tail")],
-             row.names = NULL)
-}
+## Gaussian grouped models {#gaussian-models}
 
-coefficient_recovery_table <- function(combined, truth, reml){
-  data.frame(truth = unname(truth),
-             combined$parameters[, c("mean", "q2.5", "q97.5")],
-             lme4 = unname(reml),
-             combined$diagnostics[, c("rhat", "ess_bulk", "ess_tail")],
-             row.names = NULL)
-}
-
-plot_coefficient_recovery <- function(tab){
-  ggplot(tab, aes(x = truth)) +
-    geom_abline(slope = 1, intercept = 0, color = "grey45", linewidth = 0.4) +
-    geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0,
-                  color = stlmm_color("primary"), alpha = 0.3) +
-    geom_point(aes(y = mean, color = "stLMM"), size = 1.5) +
-    geom_point(aes(y = lme4, color = "lme4"), shape = 4, size = 1.5) +
-    scale_color_manual(values = c(stLMM = stlmm_color("primary"),
-                                  lme4 = stlmm_color("secondary"))) +
-    labs(x = "Simulated combined intercept", y = "Estimated combined intercept",
-         color = "Estimate") +
-    theme(legend.position = "bottom")
-}
-```
-
-## Gaussian Models
-
-Gaussian mixed models are the cleanest comparison because both packages target
-the same linear mixed-model likelihood for the matched grouped structures.
-The recovery plots compare known combined intercepts with both estimates;
-vertical intervals are the `stLMM` 95% credible intervals.
+All examples include a fixed intercept and slope for `x`. We use explicit IG
+priors for scalar variances and an IW prior for a correlated coefficient vector.
+The prior scales belong to the supplied data units; the package does not rescale
+covariates automatically. Chain lengths vary because the models mix at different
+rates; the appendix reports the retained draws and diagnostics.
 
 ### One grouping factor: random intercepts
 
@@ -297,7 +254,7 @@ intercept_st_time <- system.time({
     y ~ x + iid(group), intercept_dat,
     priors = list(resid = list(tau_sq = ig(2, 0.5)),
                   iid_1 = list(sigma_sq = ig(2, 0.5))),
-    n_samples = 8000, chains = 3, chain_control = list(seed = 101),
+    n_samples = 16000, chains = 3, chain_control = list(seed = 101),
     verbose = FALSE
   )
 })
@@ -313,10 +270,10 @@ intercept_reml <- c(fixef(intercept_lme4), tau_sq = sigma(intercept_lme4)^2,
                     iid_1_sigma_sq = VarCorr(intercept_lme4)$group[1, 1])
 intercept_parameters <- parameter_recovery_table(
   intercept_st, intercept_truth, intercept_reml)
-knitr::kable(round_numeric_columns(intercept_parameters), row.names = FALSE)
+show_estimates(intercept_parameters, c("Fixed intercept", "Fixed slope", "Residual variance", "Group variance"))
 
 intercept_combined <- summary(intercept_st, type = "combined",
-  coefficients = "(Intercept)", terms = "iid_1", burn = 2000,
+  coefficients = "(Intercept)", terms = "iid_1", burn = gaussian_burn,
   diagnostic_method = "rank")
 intercept_groups <- intercept_combined$quantities$group_group
 intercept_recovery <- coefficient_recovery_table(intercept_combined,
@@ -329,14 +286,16 @@ plot_coefficient_recovery(intercept_recovery)
 ```
 
 The plotted quantity is $\beta_0+u_g$, the group baseline at `x = 0`.
-The fixed intercept, the individual departures, and their sums describe
-different quantities. The [diagnostic lesson below](#interpreting-the-intercept-and-group-effects-together)
-shows how to examine their chains separately.
+The [combined-coefficient lesson](#combined-coefficients) explains how its
+interpretation and diagnostics differ from those of its two components.
 
 ### One grouping factor: independent intercepts and slopes
 
-Each group has its own intercept and its own slope for `x`, and those two
-group-level effects are independent in the data-generating model.
+Now each group has an intercept departure and a slope departure, with zero
+covariance between them. The two equivalent formula forms are listed above;
+the fit below uses separate terms. We simulate 30 groups with 15 observations
+per group, fixed coefficients 1 and 2, and residual and group standard deviations
+all equal to 0.5.
 
 ```{r simulate-gaussian-small}
 #| code-fold: true
@@ -382,35 +341,7 @@ simulate_gaussian_slope_data <- function(seed = 1,
 
 gauss_dat <- simulate_gaussian_slope_data(seed = 1)
 gauss_true_beta <- c("(Intercept)" = 1, x = 2)
-gauss_true_sd <- c(
-  residual = 0.5,
-  `random intercept` = 0.5,
-  `random slope x` = 0.5
-)
 ```
-
-The simulated dataset has 30 groups with 15 observations in each group.
-
-```{r gaussian-data-plot, fig.width=7, fig.height=4}
-#| code-fold: true
-#| code-summary: "Show plotting code"
-ggplot(gauss_dat, aes(x, y, group = group)) +
-  geom_line(aes(color = group), alpha = 0.3, linewidth = 0.35) +
-  geom_point(aes(color = group), alpha = 0.75, size = 1.2) +
-  scale_color_manual(
-    values = rep(stlmm_discrete_colors(8),
-                 length.out = nlevels(gauss_dat$group))
-  ) +
-  guides(color = "none") +
-  labs(x = "x", y = "response")
-```
-
-#### Fits
-
-The `stLMM` fit uses proper inverse-gamma priors for the Gaussian residual
-variance and the two independent iid random-effect variances. Posterior
-inference is based on three chains, with $\hat R$ diagnostics reported below.
-The `lme4` fit uses REML.
 
 ```{r fit-gaussian-small}
 gauss_st_time <- system.time({
@@ -422,7 +353,7 @@ gauss_st_time <- system.time({
       iid_1 = list(sigma_sq = ig(2, 0.5)),
       iid_2 = list(sigma_sq = ig(2, 0.5))
     ),
-    n_samples = 1500,
+    n_samples = 16000,
     chains = 3,
     verbose = FALSE
   )
@@ -437,140 +368,46 @@ gauss_lme4_time <- system.time({
 })
 ```
 
-#### Parameter estimates
-
-Fixed-effect values are shown as estimate followed by uncertainty in
-parentheses. For `stLMM`, the parenthetical value is posterior SD; for `lme4`,
-it is the fixed-effect SE reported by `summary()`.
-
-The random-effect standard-deviation table reports point estimates only. Those
-variance-component summaries are useful for comparing scale across packages.
-Some fixed coefficients in these short runs have R-hat above 1.01. Inspect
-their traces and use longer chains for precise marginal summaries. The
-correlated-coefficient example below also examines fixed-plus-group coefficients,
-whose mixing can differ substantially from that of their separate components.
-
-```{r gaussian-small-tables}
-#| code-fold: true
-#| code-summary: "Show table code"
-gauss_st_mean <- posterior_means(gauss_st, burn = 500)
-gauss_lme4_vc <- as.data.frame(VarCorr(gauss_lme4))
-gauss_lme4_vc <- gauss_lme4_vc[gauss_lme4_vc$grp != "Residual", ,
-                               drop = FALSE]
-
-gauss_beta_tab <- fixed_effect_table(
-  gauss_st, gauss_lme4, truth = gauss_true_beta, burn = 500
-)
-gauss_sd_tab <- data.frame(
-  component = names(gauss_true_sd),
-  truth = unname(gauss_true_sd),
-  stLMM = c(
-    sqrt(gauss_st_mean[["tau_sq"]]),
-    sqrt(gauss_st_mean[["iid_1_sigma_sq"]]),
-    sqrt(gauss_st_mean[["iid_2_sigma_sq"]])
-  ),
-  lme4 = c(sigma(gauss_lme4), gauss_lme4_vc$sdcor),
-  row.names = NULL
-)
-gauss_sd_tab$difference <- gauss_sd_tab$stLMM - gauss_sd_tab$lme4
-gauss_diag <- diagnostic_table(
-  gauss_st,
-  parameters = c("(Intercept)", "x", "tau_sq",
-                 "iid_1_sigma_sq", "iid_2_sigma_sq"),
-  burn = 500
-)
-
-knitr::kable(round_numeric_columns(gauss_beta_tab, 3))
-knitr::kable(round_numeric_columns(gauss_sd_tab, 3))
-knitr::kable(round_numeric_columns(gauss_diag, 3))
+```{r gaussian-independent-results}
+gauss_truth <- c(gauss_true_beta, tau_sq = 0.25,
+  iid_1_sigma_sq = 0.25, iid_2_sigma_sq = 0.25)
+gauss_vc <- VarCorr(gauss_lme4)
+gauss_variances <- setNames(vapply(gauss_vc, function(v) v[1, 1], numeric(1)),
+  vapply(gauss_vc, function(v) colnames(v)[1], character(1)))
+gauss_reml <- c(fixef(gauss_lme4), tau_sq = sigma(gauss_lme4)^2,
+  iid_1_sigma_sq = unname(gauss_variances["(Intercept)"]),
+  iid_2_sigma_sq = unname(gauss_variances["x"]))
+gauss_parameters <- parameter_recovery_table(gauss_st, gauss_truth, gauss_reml)
+show_estimates(gauss_parameters, c("Fixed intercept", "Fixed slope",
+  "Residual variance", "Intercept variance", "Slope variance"))
+gauss_combined <- summary(gauss_st, type = "combined",
+  coefficients = c("(Intercept)", "x"), terms = c("iid_1", "iid_2"),
+  burn = gaussian_burn, diagnostic_method = "rank")
+gauss_recovery <- group_coefficient_recovery(gauss_combined, gauss_dat, gauss_lme4)
 ```
 
-```{r gaussian-random-effect-plot, fig.width=7, fig.height=4}
-#| code-fold: true
-#| code-summary: "Show plotting code"
-gauss_re <- rbind(
-  cbind(term = "intercept",
-        iid_random_effect_compare(gauss_st, gauss_lme4, st_term = 1,
-                                  lme4_column = "(Intercept)", burn = 500)),
-  cbind(term = "slope x",
-        iid_random_effect_compare(gauss_st, gauss_lme4, st_term = 2,
-                                  lme4_column = "x", burn = 500))
-)
-
-ggplot(gauss_re, aes(lme4, stLMM)) +
-  geom_abline(slope = 1, intercept = 0, color = "grey45", linewidth = 0.4) +
-  geom_point(size = 1.8, alpha = 0.85, color = stlmm_color("primary")) +
-  facet_wrap(~ term, scales = "free") +
-  labs(
-    x = "lme4 conditional mode",
-    y = "stLMM posterior mean"
-  )
+```{r gaussian-independent-recovery-plot, fig.width=7, fig.height=4}
+plot_coefficient_recovery(gauss_recovery)
 ```
 
 ### One grouping factor: correlated intercepts and slopes
 
-Start with independent group intercepts and slopes. `stLMM` accepts either
-separate IID terms or one compact coefficient formula. The third row below
-extends these models by estimating their covariance:
-
-| Group coefficients | stLMM | lme4 |
-|:--|:--|:--|
-| Independent, separate terms | `y ~ x + iid(group) + iid(group):x` | <code>y ~ x + (1 &#124; group) + (0 + x &#124; group)</code> |
-| Independent, compact form | `y ~ x + iid(group, ~ 1 + x, cov_model = "independent")` | <code>y ~ x + (1 + x &#124;&#124; group)</code> |
-| Correlated intercept and slope | `y ~ x + iid(group, ~ 1 + x)` | <code>y ~ x + (1 + x &#124; group)</code> |
-
-Here `x` is numeric. The two independent `stLMM` forms specify the same model
-and use the same scalar sampler when given matching variance priors.
-`iid(group):x` and `x:iid(group)` denote the same random slope. Both independent
-forms estimate two variances and set their covariance to zero.
-
-Removing `cov_model = "independent"` from the compact form selects the default
-correlated covariance model. Supply an IW prior for the covariance matrix in
-place of the separate IG variance priors, as in the fit below. This changes
-the model: the intercept and slope covariance is now estimated.
-In both models, groups are independent of one another. Correlation refers to
-the intercept and slope departures **within a group**. The models have the
-same fixed intercept and slope.
-
-For the correlated model,
+The compact formula `iid(group, ~ 1 + x)` estimates the covariance between a
+group's intercept and slope departures:
 
 $$
-y_{ig} = (\beta_0 + u_{0g}) + (\beta_x + u_{xg})x_{ig} + \epsilon_{ig},
-\qquad
-\begin{pmatrix}u_{0g}\\u_{xg}\end{pmatrix} \sim N_2(\mathbf{0},\Sigma),
+y_{ig}=(\beta_0+u_{0g})+(\beta_x+u_{xg})x_{ig}+\epsilon_{ig},\qquad
+\begin{pmatrix}u_{0g}\\u_{xg}\end{pmatrix}\sim N_2(\mathbf{0},\Sigma),
 \qquad \epsilon_{ig}\sim N(0,\tau^2).
 $$
 
-We simulate 60 groups with 12 observations each, both group standard deviations
-equal to 0.5, and correlation 0.6. Thus the two variances are 0.25 and their
-covariance is 0.15. The residual standard deviation is also 0.5.
+We simulate 60 groups with 12 observations each, group standard deviations 0.5,
+and correlation 0.6. The variances are therefore 0.25 and the covariance is 0.15.
+The residual standard deviation is also 0.5.
 
-With separate IID sampling, `stLMM` samples the covariance matrix using a
-conjugate IW update. Here the
-IW prior has dimension two, degrees of freedom 4, and scale `diag(c(0.25,
-0.25))`; its mean is that scale matrix. This is an explicit regularizing prior,
-not a noninformative choice. The scale must suit the units of the intercept
-and slope; `stLMM` uses covariates as supplied. The `lme4` fit estimates the
-covariance and residual variance by REML, without these priors.
-
-#### Separate and jointly collapsed IID sampling
-
-The `collapse_iid` argument changes the sampling strategy for all IID terms:
-
-| Setting | Coefficient and covariance updates |
-|:--|:--|
-| `FALSE` (default) | Update fixed and IID coefficients separately; the IID covariance has an IW Gibbs update. |
-| `TRUE` (experimental) | Integrate out the IID coefficients for fixed-effect and covariance updates, then draw the IID coefficients jointly. The IID covariance uses Metropolis updates. |
-
-Both settings fit the same Bayesian model when the formula, data, and priors
-match. Their posterior summaries should agree within Monte Carlo error. The
-`lme4` REML fit provides a third comparison; it targets a different inferential
-summary and does not use the Bayesian priors.
-
-Here both `stLMM` fits use three chains of 8,000 saved iterations, discarded
-proposal-calibration warmup, and the default joint Metropolis blocking. We
-discard the first 2,000 saved draws in each chain for the summaries. The fits
-run sequentially with one BLAS/OpenMP thread and different random seeds.
+The IW prior below has dimension two, degrees of freedom 4, and mean
+`diag(c(0.25, 0.25))`. It is a regularizing prior, not a noninformative choice.
+The default separate sampler uses a conjugate IW covariance update.
 
 ```{r fit-gaussian-correlated}
 gauss_cor_dat <- simulate_gaussian_slope_data(
@@ -589,196 +426,27 @@ gauss_cor_st_time <- system.time({
     chain_control = list(seed = 17), verbose = FALSE
   )
 })
-gauss_cor_collapsed_time <- system.time({
-  gauss_cor_collapsed <- stLMM(
-    y ~ x + iid(group, ~ 1 + x), data = gauss_cor_dat,
-    priors = cor_priors, collapse_iid = TRUE,
-    n_samples = 8000, chains = 3,
-    chain_control = list(seed = 117), verbose = FALSE
-  )
-})
 gauss_cor_lme4_time <- system.time({
   gauss_cor_lme4 <- lmer(y ~ x + (1 + x | group), gauss_cor_dat, REML = TRUE)
 })
-cor_fits <- list(Separate = gauss_cor_st, Collapsed = gauss_cor_collapsed)
 ```
 
-```{r gaussian-correlated-tables}
-#| code-fold: true
-#| code-summary: "Show three-way parameter comparisons"
-format_interval <- function(mean, lower, upper){
-  sprintf("%.3f [%.3f, %.3f]", mean, lower, upper)
-}
-cor_components <- lapply(cor_fits, function(fit){
-  draws <- as_samples(fit, burn = cor_burn)
-  vi <- draws[["iid_1_cov[(Intercept),(Intercept)]"]]
-  vs <- draws[["iid_1_cov[x,x]"]]
-  cv <- draws[["iid_1_cov[x,(Intercept)]"]]
-  cbind(residual_variance = draws[["tau_sq"]], intercept_variance = vi,
-        slope_variance = vs, intercept_slope_covariance = cv,
-        correlation = cv / sqrt(vi * vs))
-})
+```{r gaussian-correlated-results}
+cor_truth <- c(gauss_true_beta, tau_sq = 0.25,
+  "iid_1_cov[(Intercept),(Intercept)]" = 0.25,
+  "iid_1_cov[x,(Intercept)]" = 0.15, "iid_1_cov[x,x]" = 0.25)
 lme4_cov <- as.matrix(VarCorr(gauss_cor_lme4)$group)
-cor_table <- data.frame(
-  component = c("Residual variance", "Intercept variance", "Slope variance",
-                "Intercept-slope covariance", "Correlation"),
-  truth = c(0.25, 0.25, 0.25, 0.15, 0.6)
-)
-for(method in names(cor_components)){
-  draws <- cor_components[[method]]
-  cor_table[[method]] <- format_interval(colMeans(draws),
-    apply(draws, 2, quantile, 0.025), apply(draws, 2, quantile, 0.975))
-}
-cor_table$lme4 <- c(sigma(gauss_cor_lme4)^2, diag(lme4_cov),
-                    lme4_cov[1, 2], cov2cor(lme4_cov)[1, 2])
-cor_fixed <- lapply(cor_fits, function(fit)
-  fixed_effect_table(fit, gauss_cor_lme4, gauss_true_beta, burn = cor_burn))
-knitr::kable(data.frame(parameter = cor_fixed$Separate$parameter,
-  truth = cor_fixed$Separate$truth, Separate = cor_fixed$Separate$stLMM,
-  Collapsed = cor_fixed$Collapsed$stLMM, lme4 = cor_fixed$Separate$lme4),
-  caption = "Fixed effects: stLMM posterior mean (SD), and lme4 estimate (SE)")
-knitr::kable(round_numeric_columns(cor_table),
-  caption = "Covariance components: posterior mean [95% credible interval], and lme4 REML estimate")
-cor_parameter_names <- c("(Intercept)", "x", "tau_sq",
-  "iid_1_cov[(Intercept),(Intercept)]", "iid_1_cov[x,(Intercept)]", "iid_1_cov[x,x]")
-cor_diagnostics <- lapply(cor_fits, function(fit)
-  diagnostic_table(fit, cor_parameter_names, burn = cor_burn))
-knitr::kable(round_numeric_columns(do.call(rbind,
-  lapply(names(cor_diagnostics), function(method)
-    data.frame(method = method, cor_diagnostics[[method]])))), row.names = FALSE,
-  caption = "Individual parameter diagnostics for the two stLMM samplers")
+cor_reml <- c(fixef(gauss_cor_lme4), tau_sq = sigma(gauss_cor_lme4)^2,
+  "iid_1_cov[(Intercept),(Intercept)]" = lme4_cov[1, 1],
+  "iid_1_cov[x,(Intercept)]" = lme4_cov[2, 1], "iid_1_cov[x,x]" = lme4_cov[2, 2])
+cor_parameters <- parameter_recovery_table(gauss_cor_st, cor_truth, cor_reml,
+                                          burn = cor_burn)
+show_estimates(cor_parameters, c("Fixed intercept", "Fixed slope", "Residual variance",
+  "Intercept variance", "Intercept–slope covariance", "Slope variance"))
 ```
 
-The bracketed limits are Bayesian credible intervals for `stLMM`; the `lme4`
-covariance column contains point estimates. Correlation is calculated within
-each covariance draw before its posterior summary is computed. Differences
-between the two `stLMM` summaries should be assessed using Monte Carlo uncertainty
-and chain diagnostics. Differences from REML also reflect the prior information
-and the different inferential summaries.
-Overlapping credible intervals alone do not establish MCMC convergence; inspect
-the chain diagnostics as well.
-
-#### Combined coefficients and simulation recovery
-
-Fixed coefficients and their group departures can trade off. A combined
-summary reports each group's intercept and slope after adding the matching
-fixed coefficient. These are coefficients, before multiplication by `x`, and
-the diagnostics apply to those sums within each chain. They complement the
-individual parameter diagnostics above.
-
-The corresponding `lme4` quantities are returned by `coef(fit)$group`:
-fixed coefficients plus the conditional group-effect estimates. In contrast,
-`ranef(fit)$group` returns only the group departures. The `stLMM` intervals
-integrate posterior uncertainty in fixed effects and variance components;
-the `lme4` values use fitted variance components and are point estimates.
-
-```{r gaussian-combined-diagnostics}
-cor_combined <- lapply(cor_fits, function(fit)
-  summary(fit, type = "combined", coefficients = c("(Intercept)", "x"),
-          terms = "iid_1", burn = cor_burn, diagnostic_method = "rank"))
-info <- cor_combined$Separate$quantities
-cor_group_table <- data.frame(group = info$group_group, coefficient = info$coefficient)
-index <- cbind(match(cor_group_table$group, levels(gauss_cor_dat$group)),
-               match(cor_group_table$coefficient, c("(Intercept)", "x")))
-cor_group_table$truth <- attr(gauss_cor_dat, "true_coefficients")[index]
-cor_group_table$lme4 <- as.matrix(coef(gauss_cor_lme4)$group)[index]
-cor_group_plot <- do.call(rbind, lapply(names(cor_combined), function(method){
-  p <- cor_combined[[method]]$parameters
-  data.frame(cor_group_table, method = method, p[, c("mean", "q2.5", "q97.5")])
-}))
-for(method in names(cor_combined)){
-  p <- cor_combined[[method]]$parameters
-  cor_group_table[[method]] <- format_interval(p[, "mean"], p[, "q2.5"], p[, "q97.5"])
-}
-first_groups <- cor_group_table$group %in% levels(gauss_cor_dat$group)[1:3]
-knitr::kable(round_numeric_columns(cor_group_table[first_groups,
-  c("group", "coefficient", "truth", "Separate", "Collapsed", "lme4")]),
-  row.names = FALSE,
-  caption = "Combined intercepts and slopes: posterior mean [95% credible interval] and lme4 estimate")
-```
-
-This plot compares the known combined intercepts and slopes with all three
-estimates for all 60 groups. Vertical bars are the two `stLMM` 95% credible
-intervals; crosses show the `lme4` point estimates. The diagonal marks exact
-recovery of the simulated coefficients.
-The [Poisson example below](#interpreting-the-intercept-and-group-effects-together)
-examines the separate and combined diagnostics and their chain traces in more detail.
-
-```{r gaussian-correlated-group-comparison, fig.width=7, fig.height=4.5}
-#| code-fold: true
-#| code-summary: "Show three-way simulation-recovery plot"
-ggplot(cor_group_plot, aes(truth, mean, color = method)) +
-  geom_abline(slope = 1, intercept = 0, color = "grey45", linewidth = 0.4) +
-  geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0,
-                linewidth = 0.3, alpha = 0.35) +
-  geom_point(size = 1.3, alpha = 0.8) +
-  geom_point(data = cor_group_table, aes(truth, lme4, color = "lme4"),
-             inherit.aes = FALSE, shape = 4, size = 1.5) +
-  scale_color_manual(values = c(Separate = stlmm_color("primary"),
-    Collapsed = stlmm_color("accent"), lme4 = stlmm_color("secondary"))) +
-  facet_wrap(~ coefficient, scales = "free", labeller = as_labeller(
-    c("(Intercept)" = "Intercept", x = "Slope for x"))) +
-  labs(x = "Simulated combined coefficient", y = "Estimated combined coefficient",
-       color = "Method") +
-  theme(legend.position = "bottom")
-```
-
-#### Runtime and effective samples per second
-
-The elapsed times include model preparation, all three chains, and discarded
-warmup. No post-fit recovery is needed for this IID-only model. Summaries and
-plotting are outside the timers. The two `stLMM` fits retain the same number
-of draws for analysis. The `lme4` timer measures a REML fit, so its time does
-not represent the cost of posterior simulation.
-
-```{r gaussian-correlated-efficiency}
-cor_seconds <- c(Separate = gauss_cor_st_time[["elapsed"]],
-                  Collapsed = gauss_cor_collapsed_time[["elapsed"]])
-knitr::kable(data.frame(method = c(names(cor_seconds), "lme4"),
-  task = c(rep("3 chains x 8000 saved iterations", 2), "REML fit"),
-  seconds = round(c(unname(cor_seconds), gauss_cor_lme4_time[["elapsed"]]), 3)),
-  caption = "Complete fit times for the correlated-coefficient example")
-cor_efficiency <- do.call(rbind, lapply(names(cor_fits), function(method){
-  diagnostics <- list(
-    "Covariance parameters" = cor_diagnostics[[method]][-(1:2), ],
-    "Combined coefficients" = cor_combined[[method]]$diagnostics
-  )
-  do.call(rbind, lapply(names(diagnostics), function(quantity){
-    d <- diagnostics[[quantity]]
-    data.frame(method = method, quantity = quantity,
-      maximum_rhat = max(d$rhat), minimum_bulk_ess = min(d$ess_bulk),
-      minimum_tail_ess = min(d$ess_tail),
-      minimum_bulk_ess_per_second = min(d$ess_bulk) / cor_seconds[[method]])
-  }))
-}))
-knitr::kable(round_numeric_columns(cor_efficiency), row.names = FALSE,
-  col.names = c("Sampler", "Quantity", "Max R-hat", "Min bulk ESS",
-                "Min tail ESS", "Min bulk ESS/s"),
-  caption = "Conservative diagnostic and efficiency summaries within each set of quantities")
-```
-
-The covariance rows cover the residual variance and the three distinct entries
-of the IID covariance matrix. The combined rows cover all 120 group-specific
-intercepts and slopes. Each row reports the largest R-hat and smallest ESS
-within its set; these extremes can belong to different parameters. Bulk ESS
-per second uses the total elapsed fit time, including warmup and the draws
-subsequently excluded by `burn`. There is no corresponding MCMC ESS for a
-REML point estimate. The [posterior documentation](https://mc-stan.org/posterior/reference/ess_bulk.html)
-explains the rank-based bulk ESS used here.
-
-Collapsing can reduce dependence between fixed and IID coefficient updates,
-but replaces conjugate IID covariance draws with Metropolis steps. Consequently,
-coefficient and covariance efficiency can favor different strategies. These
-are measurements for one simulated dataset and machine, not a general speed
-ranking. Check posterior agreement and diagnostics for the quantities you
-intend to report before comparing their ESS per second.
-
-With structured terms as well as IID effects, joint collapsing also enlarges
-the sparse system. Groups spanning many process locations, especially crossed
-groups, can increase Cholesky fill and factorization cost. The
-[technical document](a12-modeling-software-details.html) describes those trade-offs.
-`collapse_iid = FALSE` remains the default; `NULL` explicitly selects collapsing
-for IID-only models and separate updates when structured processes are present.
+The [sampler comparison](#iid-sampling-strategies) revisits this dataset and
+plots recovered group intercepts and slopes under both sampling strategies.
 
 ### Crossed grouping factors
 
@@ -817,7 +485,7 @@ crossed_st_time <- system.time({
     priors = list(resid = list(tau_sq = ig(2, 0.5)),
                   iid_1 = list(sigma_sq = ig(2, 0.5)),
                   iid_2 = list(sigma_sq = ig(2, 0.5))),
-    n_samples = 8000, chains = 3, chain_control = list(seed = 103),
+    n_samples = 40000, chains = 3, chain_control = list(seed = 103),
     verbose = FALSE
   )
 })
@@ -835,11 +503,11 @@ crossed_reml <- c(fixef(crossed_lme4), tau_sq = sigma(crossed_lme4)^2,
                   iid_2_sigma_sq = VarCorr(crossed_lme4)$observer[1, 1])
 crossed_parameters <- parameter_recovery_table(
   crossed_st, crossed_truth, crossed_reml)
-knitr::kable(round_numeric_columns(crossed_parameters), row.names = FALSE)
+show_estimates(crossed_parameters, c("Fixed intercept", "Fixed slope", "Residual variance", "Site variance", "Observer variance"))
 
 crossed_combined <- summary(crossed_st, type = "combined",
   coefficients = "(Intercept)", terms = c("iid_1", "iid_2"),
-  burn = 2000, diagnostic_method = "rank")
+  burn = gaussian_burn, diagnostic_method = "rank")
 crossed_pairs <- data.frame(
   site = crossed_combined$quantities$group_site,
   observer = crossed_combined$quantities$group_observer, x = 0)
@@ -901,7 +569,7 @@ nested_st_time <- system.time({
     priors = list(resid = list(tau_sq = ig(2, 0.5)),
                   iid_1 = list(sigma_sq = ig(2, 0.5)),
                   iid_2 = list(sigma_sq = ig(2, 0.5))),
-    n_samples = 8000, chains = 3, chain_control = list(seed = 104),
+    n_samples = 60000, chains = 3, chain_control = list(seed = 104),
     verbose = FALSE
   )
 })
@@ -919,11 +587,11 @@ nested_reml <- c(fixef(nested_lme4), tau_sq = sigma(nested_lme4)^2,
                  iid_2_sigma_sq = VarCorr(nested_lme4)$stand_plot[1, 1])
 nested_parameters <- parameter_recovery_table(
   nested_st, nested_truth, nested_reml)
-knitr::kable(round_numeric_columns(nested_parameters), row.names = FALSE)
+show_estimates(nested_parameters, c("Fixed intercept", "Fixed slope", "Residual variance", "Stand variance", "Plot variance"))
 
 nested_combined <- summary(nested_st, type = "combined",
   coefficients = "(Intercept)", terms = c("iid_1", "iid_2"),
-  burn = 2000, diagnostic_method = "rank")
+  burn = gaussian_burn, diagnostic_method = "rank")
 nested_pairs <- data.frame(stand = nested_combined$quantities$group_stand,
   stand_plot = nested_combined$quantities$group_stand_plot, x = 0)
 nested_recovery <- coefficient_recovery_table(nested_combined,
@@ -965,7 +633,7 @@ by_st_time <- system.time({
     priors = list(resid = list(tau_sq = ig(2, 0.5)),
                   iid_1 = list(sigma_sq = ig(2, 0.5)),
                   iid_2 = list(sigma_sq = ig(2, 0.5))),
-    n_samples = 8000, chains = 3, chain_control = list(seed = 105),
+    n_samples = 160000, chains = 3, chain_control = list(seed = 105),
     verbose = FALSE
   )
 })
@@ -1011,7 +679,8 @@ for(i in seq_along(by_indicators)){
   by_reml[by_variance_names[i]] <- by_vc[[index]][1, 1]
 }
 by_parameters <- parameter_recovery_table(by_st, by_truth, by_reml)
-knitr::kable(round_numeric_columns(by_parameters), row.names = FALSE)
+show_estimates(by_parameters[1:4, ], c("Fixed intercept", "Fixed slope",
+  "Residual variance", "Stand variance"))
 ```
 
 ```{r by-variance-recovery-plot, fig.width=7, fig.height=4}
@@ -1032,7 +701,7 @@ ggplot(by_variances, aes(stand)) +
 ```{r by-combined-recovery}
 by_combined <- summary(by_st, type = "combined",
   coefficients = "(Intercept)", terms = c("iid_1", "iid_2"),
-  burn = 2000, diagnostic_method = "rank")
+  burn = gaussian_burn, diagnostic_method = "rank")
 by_rows <- match(
   paste(by_combined$quantities$group_stand, by_combined$quantities$group_plot),
   paste(by_dat$stand, by_dat$plot))
@@ -1044,16 +713,13 @@ by_recovery <- coefficient_recovery_table(by_combined,
   predict(by_lme4, newdata = by_pairs))
 ```
 
-```{r by-combined-recovery-plot, fig.width=6, fig.height=4}
-plot_coefficient_recovery(by_recovery)
-```
 
 Each stand's variance is informed by its 24 plot effects. Adding measurements
 within those plots improves estimation of their effects, but does not create
 more independent plots for estimating that variance. Compare uncertainty and
 prior sensitivity accordingly.
 
-The same `by` syntax also permits correlated intercepts and slopes:
+For correlated child intercepts and slopes, use:
 
 ```r
 y ~ x + iid(stand) + iid(plot, ~ 1 + x, by = stand)
@@ -1070,39 +736,276 @@ A new stand is rejected even with that flag: the fitted model has no estimated
 child distribution for it. These rules are described in the
 [prediction reference](../reference/predict.stLMM_recovery.html).
 
-### Diagnostics for the combined baselines
+## Combined coefficients and diagnostics {#combined-coefficients}
 
-The recovery plots above concern group-specific baselines. This table compares
-the fixed-intercept diagnostic with diagnostics across all combined baselines
-in each example. The sums are calculated within each retained draw and chain.
-Their diagnostics describe those sums; retain the separate parameter tables
-when inference concerns a population intercept or a variance component.
-The [later diagnostic lesson](#choosing-diagnostics-for-the-scientific-question)
-explains the rank diagnostics and trace plots in more detail.
+In the first example, $\beta_0$ is the center of the group-intercept distribution,
+$u_g$ is a group departure, and $\beta_0+u_g$ is that group's baseline at `x = 0`.
+The observations inform the sum directly. Fixed and group effects can compensate
+for one another, so the sum can mix differently from its components.
 
-```{r grouping-diagnostic-overview}
-grouping_parameters <- list(intercept_parameters, crossed_parameters,
-                            nested_parameters, by_parameters)
-grouping_recoveries <- list(intercept_recovery, crossed_recovery,
-                            nested_recovery, by_recovery)
-grouping_diagnostics <- data.frame(
-  model = c("Random intercept", "Crossed", "Nested, shared variance", "Nested, by stand"),
-  fixed_intercept_rhat = vapply(grouping_parameters, function(x)
-    x$rhat[x$parameter == "(Intercept)"], numeric(1)),
-  maximum_combined_rhat = vapply(grouping_recoveries, function(x) max(x$rhat), numeric(1)),
-  minimum_combined_bulk_ess = vapply(grouping_recoveries, function(x) min(x$ess_bulk), numeric(1)),
-  minimum_combined_tail_ess = vapply(grouping_recoveries, function(x) min(x$ess_tail), numeric(1))
-)
-knitr::kable(round_numeric_columns(grouping_diagnostics), row.names = FALSE)
+`summary(type = "combined")` adds the coefficients within each iteration and
+chain before computing intervals and diagnostics. It does not add separate
+interval endpoints or combine separate R-hat values. The matching lme4 quantity
+is `coef(fit)$group`; `ranef(fit)$group` returns only the group departures.
+
+```{r gaussian-combined-summary}
+intercept_combined <- summary(intercept_st, type = "combined",
+  coefficients = "(Intercept)", terms = "iid_1", burn = gaussian_burn,
+  diagnostic_method = "rank")
 ```
 
-## Other likelihoods with grouped effects
+```{r gaussian-component-diagnostics}
+#| code-summary: "Show separate and combined coefficient diagnostics"
+trace_group <- levels(intercept_dat$group)[1]
+component_summary <- summary(intercept_st,
+  parameters = c("(Intercept)", paste0("iid_1_", trace_group)),
+  burn = gaussian_burn, diagnostic_method = "rank")
+group_row <- match(trace_group, intercept_combined$quantities$group_group)
+component_parameters <- rbind(component_summary$parameters,
+  intercept_combined$parameters[group_row, , drop = FALSE])
+component_diagnostics <- rbind(component_summary$diagnostics,
+  intercept_combined$diagnostics[group_row, , drop = FALSE])
+knitr::kable(data.frame(Quantity = c("Fixed intercept", "Group departure",
+  "Combined intercept"), stLMM = format_interval(component_parameters[, "mean"],
+  component_parameters[, "q2.5"], component_parameters[, "q97.5"]),
+  Rhat = round(component_diagnostics$rhat, 3),
+  bulk_ESS = round(component_diagnostics$ess_bulk),
+  tail_ESS = round(component_diagnostics$ess_tail)), row.names = FALSE)
+```
 
-The grouping choices above also apply to the package's supported non-Gaussian
-families. The next examples use random intercepts to keep the likelihood and
-diagnostic comparisons focused.
+```{r gaussian-combined-traces, fig.width=7, fig.height=5}
+#| code-summary: "Show aligned-draw trace code"
+trace_draws <- as_samples(intercept_st, burn = gaussian_burn)
+trace_draws <- trace_draws[trace_draws$.iteration > max(trace_draws$.iteration) - 1500, ]
+fixed_draws <- trace_draws[["(Intercept)"]]
+group_draws <- trace_draws[[paste0("iid_1_", trace_group)]]
+trace_labels <- c("Fixed intercept", "Group departure", "Combined intercept")
+trace_data <- data.frame(iteration = rep(trace_draws$.iteration, 3),
+  chain = factor(rep(trace_draws$.chain, 3)),
+  quantity = factor(rep(trace_labels, each = nrow(trace_draws)), levels = trace_labels),
+  value = c(fixed_draws, group_draws, fixed_draws + group_draws))
+ggplot(trace_data, aes(iteration, value, color = chain)) +
+  geom_line(linewidth = 0.25, alpha = 0.65) +
+  facet_wrap(~ quantity, ncol = 1, scales = "free_y") +
+  scale_color_manual(values = stlmm_discrete_colors(3)) +
+  labs(x = "Saved iteration", y = "Coefficient", color = "Chain") +
+  theme(legend.position = "bottom")
+```
 
-### Logistic mixed model
+The panels show the last 1,500 iterations of each chain on their own vertical
+scales; the table uses all post-burn draws. Inspect the quantities you intend
+to report, including the variance components. Good diagnostics for a sum do
+not establish convergence of its components. R-hat near 1 (commonly below 1.01)
+and adequate ESS are useful checks, alongside traces and Monte Carlo precision.
+Increasing `burn` alone does not improve exploration.
+
+The same approach applies to slopes and sums involving multiple IID terms.
+Combined summaries concern coefficients before multiplication by covariates;
+use `fitted()` or `predict()` for the complete predictor or response mean.
+
+## Separate and collapsed IID sampling {#iid-sampling-strategies}
+
+The correlated Gaussian model above can also be fit with `collapse_iid = TRUE`.
+The default keeps IID coefficients separate and uses IW covariance draws;
+collapsing integrates the coefficients out and uses Metropolis covariance updates.
+For Gaussian models, `recover()` then draws the IID coefficients, jointly with
+any structured effects. Call it before fitted values, prediction, or combined
+coefficient summaries, including for IID-only fits.
+
+Both strategies target the same posterior under the same priors. We use three
+chains of 8,000 saved draws for each, discard the first 2,000, and use different
+seeds. The lme4 comparison remains the same REML fit.
+
+```{r fit-gaussian-collapsed}
+gauss_cor_collapsed_time <- system.time({
+  gauss_cor_collapsed <- stLMM(
+    y ~ x + iid(group, ~ 1 + x), data = gauss_cor_dat,
+    priors = cor_priors, collapse_iid = TRUE,
+    n_samples = 8000, chains = 3,
+    chain_control = list(seed = 117), verbose = FALSE
+  )
+})
+set.seed(217)
+gauss_cor_recovery_time <- system.time({
+  gauss_cor_recovered <- recover(gauss_cor_collapsed,
+    sub_sample = list(start = cor_burn + 1L))
+})
+
+cor_fits <- list(Separate = gauss_cor_st, Collapsed = gauss_cor_collapsed)
+```
+
+```{r gaussian-sampler-comparison}
+cor_components <- lapply(cor_fits, function(fit){
+  draws <- as_samples(fit, burn = cor_burn)
+  vi <- draws[["iid_1_cov[(Intercept),(Intercept)]"]]
+  vs <- draws[["iid_1_cov[x,x]"]]
+  cv <- draws[["iid_1_cov[x,(Intercept)]"]]
+  cbind(residual_variance = draws[["tau_sq"]], intercept_variance = vi,
+        slope_variance = vs, intercept_slope_covariance = cv,
+        correlation = cv / sqrt(vi * vs))
+})
+lme4_cov <- as.matrix(VarCorr(gauss_cor_lme4)$group)
+cor_table <- data.frame(
+  component = c("Residual variance", "Intercept variance", "Slope variance",
+                "Intercept-slope covariance", "Correlation"),
+  truth = c(0.25, 0.25, 0.25, 0.15, 0.6)
+)
+for(method in names(cor_components)){
+  draws <- cor_components[[method]]
+  cor_table[[method]] <- format_interval(colMeans(draws),
+    apply(draws, 2, quantile, 0.025), apply(draws, 2, quantile, 0.975))
+}
+cor_table$lme4 <- c(sigma(gauss_cor_lme4)^2, diag(lme4_cov),
+                    lme4_cov[1, 2], cov2cor(lme4_cov)[1, 2])
+
+knitr::kable(round_numeric_columns(cor_table), row.names = FALSE,
+  caption = "Posterior mean [95% credible interval] and lme4 REML estimate")
+cor_parameter_names <- names(cor_truth)
+cor_diagnostics <- lapply(cor_fits, function(fit)
+  diagnostic_table(fit, cor_parameter_names, burn = cor_burn))
+```
+
+```{r gaussian-combined-diagnostics}
+cor_coefficient_fits <- list(Separate = gauss_cor_st, Collapsed = gauss_cor_recovered)
+cor_combined <- lapply(cor_coefficient_fits, function(fit)
+  summary(fit, type = "combined", coefficients = c("(Intercept)", "x"),
+          terms = "iid_1", burn = cor_burn, diagnostic_method = "rank"))
+info <- cor_combined$Separate$quantities
+cor_group_table <- data.frame(group = info$group_group, coefficient = info$coefficient)
+index <- cbind(match(cor_group_table$group, levels(gauss_cor_dat$group)),
+               match(cor_group_table$coefficient, c("(Intercept)", "x")))
+cor_group_table$truth <- attr(gauss_cor_dat, "true_coefficients")[index]
+cor_group_table$lme4 <- as.matrix(coef(gauss_cor_lme4)$group)[index]
+cor_group_plot <- do.call(rbind, lapply(names(cor_combined), function(method){
+  p <- cor_combined[[method]]$parameters
+  data.frame(cor_group_table, method = method, p[, c("mean", "q2.5", "q97.5")])
+}))
+```
+
+The plot compares true group intercepts and slopes with the three estimates.
+The two Bayesian intervals overlap closely; the separate and collapsed samples
+come from independent MCMC runs. Agreement is assessed alongside the parameter
+diagnostics, not from interval overlap alone.
+
+```{r gaussian-correlated-group-comparison, fig.width=7, fig.height=4.5}
+#| code-fold: true
+#| code-summary: "Show three-way simulation-recovery plot"
+ggplot(cor_group_plot, aes(truth, mean, color = method)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey45", linewidth = 0.4) +
+  geom_errorbar(aes(ymin = q2.5, ymax = q97.5), width = 0,
+                linewidth = 0.3, alpha = 0.35) +
+  geom_point(size = 1.3, alpha = 0.8) +
+  geom_point(data = cor_group_table, aes(truth, lme4, color = "lme4"),
+             inherit.aes = FALSE, shape = 4, size = 1.5) +
+  scale_color_manual(values = c(Separate = stlmm_color("primary"),
+    Collapsed = stlmm_color("accent"), lme4 = stlmm_color("secondary"))) +
+  facet_wrap(~ coefficient, scales = "free", labeller = as_labeller(
+    c("(Intercept)" = "Intercept", x = "Slope for x"))) +
+  labs(x = "Simulated combined coefficient", y = "Estimated combined coefficient",
+       color = "Method") +
+  theme(legend.position = "bottom")
+```
+
+```{r gaussian-sampler-efficiency}
+cor_fit_seconds <- c(Separate = gauss_cor_st_time[["elapsed"]],
+                    Collapsed = gauss_cor_collapsed_time[["elapsed"]])
+cor_recovery_seconds <- c(Separate = 0, Collapsed = gauss_cor_recovery_time[["elapsed"]])
+cor_seconds <- cor_fit_seconds + cor_recovery_seconds
+cor_efficiency <- do.call(rbind, lapply(names(cor_fits), function(method){
+  d <- cor_diagnostics[[method]]
+  combined <- cor_combined[[method]]$diagnostics
+  data.frame(Method = method, fit_seconds = cor_fit_seconds[[method]],
+    recovery_seconds = cor_recovery_seconds[[method]],
+    covariance_bulk_ESS_per_second = min(d$ess_bulk[-(1:2)]) / cor_seconds[[method]],
+    combined_bulk_ESS_per_second = min(combined$ess_bulk) / cor_seconds[[method]])
+}))
+knitr::kable(round_numeric_columns(cor_efficiency), row.names = FALSE,
+  col.names = c("Sampler", "Fit (s)", "Recovery (s)",
+    "Covariance min ESS/s", "Combined min ESS/s"))
+```
+
+The ESS rates use total fitting and recovery time, including discarded warmup
+and burn-in. Each rate is the minimum bulk ESS within its set: residual/IID
+covariance parameters, or all group intercepts and slopes. The REML fit takes
+`r round(gauss_cor_lme4_time[["elapsed"]], 3)` seconds here; it does not produce
+posterior samples or an MCMC ESS.
+
+Coefficient and covariance efficiency can favor different strategies. These are
+results for one dataset and machine. Joint collapsing is experimental, and IID
+groups can increase factorization costs when combined with structured processes;
+the [technical document](a12-modeling-software-details.html) explains the trade-offs.
+The default remains `collapse_iid = FALSE`.
+
+## Additional capabilities in lme4
+
+The examples above cover shared capabilities. The following distinctions
+help identify analyses that require a different interface or inferential
+workflow from the one currently provided by `stLMM`.
+
+| Capability | lme4 | Current stLMM interface |
+|:--|:--|:--|
+| General random-effect design formulas | Factor contrasts, interactions, and transformed predictors can enter random-effect design matrices through the formula. | IID coefficient formulas accept additive numeric variable names. Precompute additional numeric columns and grouping identifiers when needed. |
+| More likelihood/link combinations | Native Poisson and Gamma GLMMs, and GLM links such as binomial complementary log-log, through `glmer()`. | Gaussian, binomial-logit, binomial-probit, and negative-binomial-log models. Poisson examples use an NB approximation. |
+| Nonlinear mixed mean functions | `nlmer()` fits specified nonlinear mean functions with mixed effects. | The predictor is linear in its fixed and random coefficients. |
+| Likelihood-based estimation and inference | ML/REML estimation, likelihood profiles, profile or bootstrap confidence intervals, and likelihood-based model comparisons. | Posterior simulation, prior specification, posterior intervals, and MCMC diagnostics. |
+| Optimization and boundary diagnostics | Tools such as `isSingular()` inspect fitted covariance boundaries; optimizer controls address likelihood fitting. | Rank R-hat and ESS assess posterior simulation. They answer different questions from likelihood-boundary diagnostics. |
+
+The [lmer](https://lme4.github.io/lme4/reference/lmer.html),
+[glmer](https://lme4.github.io/lme4/reference/glmer.html), and
+[nlmer](https://lme4.github.io/lme4/reference/nlmer.html) references describe
+these interfaces. These distinctions concern supported specifications and
+inferential methods, rather than a general ranking of the packages.
+
+## Additional comparisons and diagnostics {#additional-comparisons}
+
+These optional sections retain the full numerical diagnostics and the
+non-Gaussian comparisons. The grouping syntax is unchanged across likelihoods;
+see the [binomial](a08-binomial-models.html) and
+[negative-binomial](a09-negative-binomial-counts.html) articles for fuller workflows.
+For these GLMMs, `stLMM` uses posterior simulation, while the `lme4` calls below
+use the Laplace likelihood approximation.
+
+<details>
+<summary>Gaussian parameter diagnostics and run lengths</summary>
+
+The tables below retain diagnostics for individual parameters and combined
+coefficients. Covariance and coefficient diagnostics answer different questions.
+Tail ESS assesses the 5th and 95th percentiles; it is not an ESS specific to the
+2.5th and 97.5th interval endpoints shown above.
+
+```{r gaussian-full-diagnostics}
+gaussian_parameters <- list("Random intercept" = intercept_parameters,
+  "Independent slopes" = gauss_parameters, "Correlated slopes" = cor_parameters,
+  Crossed = crossed_parameters, Nested = nested_parameters, By = by_parameters)
+full_diagnostics <- do.call(rbind, lapply(names(gaussian_parameters), function(model){
+  tab <- gaussian_parameters[[model]]
+  data.frame(model = model, tab[, c("parameter", "rhat", "ess_bulk", "ess_tail")])
+}))
+full_diagnostics <- rbind(full_diagnostics, data.frame(model = "Correlated, collapsed",
+  cor_diagnostics$Collapsed))
+knitr::kable(round_numeric_columns(full_diagnostics), row.names = FALSE)
+gaussian_combined <- list("Random intercept" = intercept_combined,
+  "Independent slopes" = gauss_combined, "Correlated slopes" = cor_combined$Separate,
+  Crossed = crossed_combined, Nested = nested_combined, By = by_combined,
+  "Correlated, collapsed" = cor_combined$Collapsed)
+combined_diagnostics <- do.call(rbind, lapply(names(gaussian_combined), function(model){
+  d <- gaussian_combined[[model]]$diagnostics
+  data.frame(model = model, maximum_rhat = max(d$rhat),
+    minimum_bulk_ess = min(d$ess_bulk), minimum_tail_ess = min(d$ess_tail))
+}))
+knitr::kable(round_numeric_columns(combined_diagnostics), row.names = FALSE)
+```
+
+The largest individual-parameter R-hat is
+`r round(max(full_diagnostics$rhat), 3)`; the smallest bulk ESS is
+`r round(min(full_diagnostics$ess_bulk))`. These checks describe this run and
+should be repeated for a new dataset or different priors. The runtime appendix
+lists chain lengths and burn-in.
+
+</details>
+
+<details id="logistic-mixed-model">
+<summary>Logistic mixed-model comparison</summary>
 
 The logistic comparison uses Bernoulli responses with a logit link and an
 independent group random intercept.
@@ -1160,36 +1063,18 @@ logit_lme4_time <- system.time({
 ```
 
 ```{r logistic-tables}
-#| code-fold: true
-#| code-summary: "Show logistic table code"
-logit_st_mean <- posterior_means(logit_st, burn = 500)
-logit_vc <- as.data.frame(VarCorr(logit_lme4))
-logit_vc <- logit_vc[logit_vc$grp != "Residual", , drop = FALSE]
-logit_beta_tab <- fixed_effect_table(
-  logit_st, logit_lme4, truth = logit_truth, burn = 500
-)
-logit_sd_tab <- data.frame(
-  component = "random intercept",
-  truth = logit_sigma,
-  stLMM = sqrt(logit_st_mean[["iid_1_sigma_sq"]]),
-  lme4 = logit_vc$sdcor[1],
-  difference = sqrt(logit_st_mean[["iid_1_sigma_sq"]]) - logit_vc$sdcor[1]
-)
-logit_diag <- diagnostic_table(
-  logit_st,
-  parameters = c("(Intercept)", "x", "iid_1_sigma_sq"),
-  burn = 500
-)
-
-knitr::kable(round_numeric_columns(logit_beta_tab, 3))
-knitr::kable(round_numeric_columns(logit_sd_tab, 3))
-knitr::kable(round_numeric_columns(logit_diag, 3))
+logit_beta_tab <- fixed_effect_table(logit_st, logit_lme4, logit_truth, burn = 500)
+logit_sd_tab <- sd_comparison(logit_st, logit_lme4, logit_sigma, burn = 500)
+knitr::kable(rbind(logit_beta_tab, logit_sd_tab), row.names = FALSE,
+  caption = "Posterior mean [95% credible interval] and lme4 estimate")
+logit_diag <- diagnostic_table(logit_st,
+  c("(Intercept)", "x", "iid_1_sigma_sq"), burn = 500)
+knitr::kable(round_numeric_columns(logit_diag), row.names = FALSE)
 ```
-
 In this simulation, the fixed-effect estimates are close across packages. The
 random-intercept standard deviation is closer to the simulated truth under
 `stLMM` than under `lme4`. The scatter plot below shows the same pattern in the
-group-level conditional modes: they are strongly associated, but the points are
+group departures: they are strongly associated, but the points are
 not centered exactly on the 1:1 line because the estimated random-intercept
 scale differs between the two fits.
 
@@ -1207,7 +1092,10 @@ ggplot(logit_re, aes(lme4, stLMM)) +
   )
 ```
 
-### Poisson data and the NB approximation
+</details>
+
+<details id="poisson-data-and-the-nb-approximation">
+<summary>Poisson data with a negative-binomial approximation</summary>
 
 `stLMM` does not currently fit a native Poisson likelihood. The package can fit
 a negative-binomial model with large fixed size, where
@@ -1295,50 +1183,18 @@ bound over all posterior draws. For a different dataset, assess its mean range
 and the sensitivity of the quantities of interest to the approximation.
 
 ```{r poisson-tables}
-#| code-fold: true
-#| code-summary: "Show Poisson-approximation table code"
-poisson_st_mean <- posterior_means(poisson_st, burn = 2500)
-poisson_vc <- as.data.frame(VarCorr(poisson_lme4))
-poisson_vc <- poisson_vc[poisson_vc$grp != "Residual", , drop = FALSE]
-poisson_beta_tab <- fixed_effect_table(
-  poisson_st, poisson_lme4, truth = poisson_truth, burn = 2500
-)
-poisson_sd_tab <- data.frame(
-  component = "random intercept",
-  truth = poisson_sigma,
-  stLMM = sqrt(poisson_st_mean[["iid_1_sigma_sq"]]),
-  lme4 = poisson_vc$sdcor[1],
-  difference = sqrt(poisson_st_mean[["iid_1_sigma_sq"]]) - poisson_vc$sdcor[1]
-)
-poisson_diag <- diagnostic_table(
-  poisson_st,
-  parameters = c("(Intercept)", "x", "iid_1_sigma_sq"),
-  burn = 2500
-)
-
-knitr::kable(round_numeric_columns(poisson_beta_tab, 3))
-knitr::kable(round_numeric_columns(poisson_sd_tab, 3))
-knitr::kable(round_numeric_columns(poisson_diag, 3))
+poisson_beta_tab <- fixed_effect_table(poisson_st, poisson_lme4, poisson_truth,
+                                       burn = 2500)
+poisson_sd_tab <- sd_comparison(poisson_st, poisson_lme4, poisson_sigma, burn = 2500)
+knitr::kable(rbind(poisson_beta_tab, poisson_sd_tab), row.names = FALSE,
+  caption = "Posterior mean [95% credible interval] and lme4 estimate")
+poisson_diag <- diagnostic_table(poisson_st,
+  c("(Intercept)", "x", "iid_1_sigma_sq"), burn = 2500)
+knitr::kable(round_numeric_columns(poisson_diag), row.names = FALSE)
 ```
 
-#### Interpreting the Intercept and Group Effects Together
-
-For this model, the conditional log mean is
-
-$$
-\log(\mu_{ig}) = \underbrace{\beta_0 + \alpha_g}_{\text{group intercept}}
-  + \beta_x x_{ig}, \qquad \alpha_g \sim N(0, \sigma_\alpha^2).
-$$
-
-The fixed intercept $\beta_0$ describes the center of the group distribution,
-and $\alpha_g$ is group $g$'s departure from it. The observations inform their
-sum directly. An increase in $\beta_0$ can be partly offset by decreases in the
-group departures, so their posterior draws can move together in opposite
-directions. The zero-centered group distribution also informs this
-decomposition. Consequently, the individual coefficients and their sums can
-have different autocorrelation and effective sample sizes.
-
-Use `summary(type = "combined")` to summarize each group's intercept:
+The combined-coefficient interpretation and diagnostic checks are the same as
+in the Gaussian lesson, now on the log-mean scale. For example:
 
 ```{r poisson-combined-summary}
 poisson_combined <- summary(
@@ -1346,98 +1202,6 @@ poisson_combined <- summary(
   terms = "iid_1", burn = 2500, diagnostic_method = "rank"
 )
 ```
-
-The sum is formed **within each iteration and chain**, before computing its
-interval or diagnostics. Adding separate interval endpoints or averaging
-separate R-hat values would not summarize the sum. The returned `quantities`
-table identifies each group and its exact expression; `parameters` and
-`diagnostics` have matching rows. These are log-scale coefficients: the
-combined intercept describes the log mean at `x = 0`, not a response draw.
-For full fitted means or predictive counts, use `fitted()` or `predict()`.
-
-The following table compares the fixed intercept, group departures, and
-combined intercepts for the first three groups in factor order. All rows use
-the same retained iterations and central 95% credible intervals.
-
-```{r poisson-combined-comparison}
-#| code-fold: true
-#| code-summary: "Show coefficient comparison table code"
-poisson_groups <- levels(poisson_dat$group)[1:3]
-poisson_components <- summary(
-  poisson_st, parameters = c("(Intercept)", paste0("iid_1_", poisson_groups)),
-  burn = 2500, diagnostic_method = "rank"
-)
-summary_columns <- c("mean", "q2.5", "q97.5")
-diagnostic_columns <- c("rhat", "ess_bulk", "ess_tail")
-component_table <- cbind(
-  data.frame(quantity = c("Fixed intercept",
-                          paste("Group departure:", poisson_groups))),
-  poisson_components$parameters[, summary_columns],
-  poisson_components$diagnostics[, diagnostic_columns]
-)
-group_rows <- match(poisson_groups, poisson_combined$quantities$group_group)
-combined_table <- cbind(
-  data.frame(quantity = paste("Combined intercept:", poisson_groups)),
-  poisson_combined$parameters[group_rows, summary_columns],
-  poisson_combined$diagnostics[group_rows, diagnostic_columns]
-)
-knitr::kable(round_numeric_columns(rbind(component_table, combined_table)),
-             row.names = FALSE,
-             caption = "Separate and combined log-scale intercept summaries")
-```
-
-#### Following the Same Draws Through the Chains
-
-For the first group, plot the fixed intercept, its group departure, and their
-sum. `as_samples()` preserves `.chain` and `.iteration` by default. Keeping
-these columns makes it possible to add aligned draws and trace each chain
-separately. The panels have their own vertical scales; compare persistence
-and overlap among chains within a panel, rather than the apparent height of
-fluctuations across panels.
-
-```{r poisson-combined-traces, fig.width=7, fig.height=6}
-#| code-fold: true
-#| code-summary: "Show aligned-draw trace code"
-poisson_draws <- as_samples(poisson_st, burn = 2500)
-trace_group <- poisson_groups[1]
-fixed_draws <- poisson_draws[["(Intercept)"]]
-group_draws <- poisson_draws[[paste0("iid_1_", trace_group)]]
-trace_labels <- c("Fixed intercept", paste("Group departure:", trace_group),
-                  paste("Combined intercept:", trace_group))
-trace_data <- data.frame(
-  iteration = rep(poisson_draws$.iteration, 3),
-  chain = factor(rep(poisson_draws$.chain, 3)),
-  quantity = factor(rep(trace_labels, each = nrow(poisson_draws)),
-                    levels = trace_labels),
-  value = c(fixed_draws, group_draws, fixed_draws + group_draws)
-)
-ggplot(trace_data, aes(iteration, value, color = chain)) +
-  geom_line(linewidth = 0.25, alpha = 0.65) +
-  facet_wrap(~ quantity, ncol = 1, scales = "free_y") +
-  scale_color_manual(values = stlmm_discrete_colors(3)) +
-  labs(x = "Saved iteration", y = "Log-scale coefficient", color = "Chain") +
-  theme(legend.position = "bottom")
-```
-
-#### Choosing Diagnostics for the Scientific Question
-
-The combined intercepts describe group-specific baselines; the fixed
-intercept describes the center of the group distribution. Their diagnostics
-answer different questions. A well-explored sum does not establish that its
-components, the slope, or the group variance have been explored equally well.
-The ordinary parameter summary above remains relevant alongside the combined
-summary.
-
-The rank method reports rank-normalized split/folded R-hat, bulk ESS, and tail
-ESS [@Vehtari2021Rhat]. R-hat compares chains and their halves; values close to
-1, commonly below 1.01, are a useful target. Bulk ESS describes information
-for central posterior summaries, while tail ESS assesses the 5th and 95th
-percentiles. Tail ESS is not an ESS specific to the 2.5th and 97.5th endpoints
-shown in these tables. Neither R-hat nor ESS alone establishes convergence.
-
-Inspect every relevant group, rather than drawing conclusions from the three
-displayed above. This compact table reports the maximum R-hat and minimum ESS
-across **all** combined group intercepts; extrema may come from different groups.
 
 ```{r poisson-all-group-diagnostics}
 group_diagnostics <- poisson_combined$diagnostics
@@ -1449,15 +1213,11 @@ knitr::kable(round_numeric_columns(data.frame(
 )), caption = "Diagnostic overview for all combined group intercepts")
 ```
 
-For an analysis, start with several chains, inspect traces for the quantities
-you will report, and check both their diagnostics and those of the variance
-parameters. If the chains still show persistent differences or the ESS is
-insufficient for the desired Monte Carlo precision, increase `n_samples` and
-reassess. Here `burn = 2500` discards initial saved draws separately from each
-chain; it is distinct from the sampler's proposal-calibration warmup.
-Increasing `burn` alone does not improve exploration. The IID coefficients
-and variance use Gibbs updates, so Metropolis tuning is not a control for this
-intercept/group trade-off.
+The short Poisson comparison has some R-hat values above 1.01 and is
+illustrative; longer chains are needed for precise marginal summaries. The
+fixed-intercept and combined diagnostics refer to different quantities, so
+check both when they matter for the analysis. The NB approximation and the
+native Poisson likelihood are also different models.
 
 ```{r poisson-random-effect-plot, fig.width=5.5, fig.height=4}
 #| code-fold: true
@@ -1473,7 +1233,10 @@ ggplot(poisson_re, aes(lme4, stLMM)) +
   )
 ```
 
-### Negative-binomial mixed model
+</details>
+
+<details id="negative-binomial-mixed-model">
+<summary>Negative-binomial model with estimated size</summary>
 
 This example simulates negative-binomial counts with size 3 and estimates size
 in both packages. The `stLMM` fit omits `size` and supplies
@@ -1548,45 +1311,21 @@ nb_lme4_size <- getME(nb_lme4, "glmer.nb.theta")
 ```
 
 ```{r nb-tables}
-#| code-fold: true
-#| code-summary: "Show negative-binomial table code"
-nb_st_mean <- posterior_means(nb_st, burn = 500)
-nb_vc <- as.data.frame(VarCorr(nb_lme4))
-nb_vc <- nb_vc[nb_vc$grp != "Residual", , drop = FALSE]
-nb_beta_tab <- fixed_effect_table(
-  nb_st, nb_lme4, truth = nb_truth, burn = 500
-)
-nb_sd_tab <- data.frame(
-  component = "random intercept",
-  truth = nb_sigma,
-  stLMM = sqrt(nb_st_mean[["iid_1_sigma_sq"]]),
-  lme4 = nb_vc$sdcor[1],
-  difference = sqrt(nb_st_mean[["iid_1_sigma_sq"]]) - nb_vc$sdcor[1]
-)
-nb_size_tab <- data.frame(
-  parameter = "negative-binomial size",
-  truth = nb_size,
-  stLMM = nb_st_mean[["size"]],
-  lower = quantile(as_samples(nb_st, burn = 500)$size, 0.025),
-  upper = quantile(as_samples(nb_st, burn = 500)$size, 0.975),
-  lme4 = nb_lme4_size,
-  row.names = NULL
-)
-nb_diag <- diagnostic_table(
-  nb_st,
-  parameters = c("(Intercept)", "x", "iid_1_sigma_sq", "size"),
-  burn = 500
-)
-
-knitr::kable(round_numeric_columns(nb_beta_tab, 3))
-knitr::kable(round_numeric_columns(nb_sd_tab, 3))
-knitr::kable(round_numeric_columns(nb_size_tab, 3))
-knitr::kable(round_numeric_columns(nb_diag, 3))
+nb_beta_tab <- fixed_effect_table(nb_st, nb_lme4, nb_truth, burn = 500)
+nb_sd_tab <- sd_comparison(nb_st, nb_lme4, nb_sigma, burn = 500)
+nb_size_draws <- as_samples(nb_st, burn = 500)$size
+nb_size_tab <- data.frame(Quantity = "Negative-binomial size", Simulated = nb_size,
+  stLMM = format_interval(mean(nb_size_draws), quantile(nb_size_draws, 0.025),
+                          quantile(nb_size_draws, 0.975)),
+  lme4 = round(nb_lme4_size, 3))
+knitr::kable(rbind(nb_beta_tab, nb_sd_tab, nb_size_tab), row.names = FALSE,
+  caption = "Posterior mean [95% credible interval] and lme4 estimate")
+nb_diag <- diagnostic_table(nb_st,
+  c("(Intercept)", "x", "iid_1_sigma_sq", "size"), burn = 500)
+knitr::kable(round_numeric_columns(nb_diag), row.names = FALSE)
 ```
-
-The size table reports its posterior mean and central 95% credible interval
-alongside the likelihood estimate. Inspect this together with the group-variance
-table and diagnostics. Both packages fit the same NB mean/variance family;
+Size and the group standard deviation are summarized on their own scales.
+Inspect their intervals together with the parameter diagnostics. Both packages fit the same NB mean/variance family;
 priors, posterior averaging, and likelihood approximation can produce differences.
 The comparison is not evidence that size is identifiable in every grouped model.
 
@@ -1604,7 +1343,10 @@ ggplot(nb_re, aes(lme4, stLMM)) +
   )
 ```
 
-## Runtime Summary
+</details>
+
+<details>
+<summary>Complete runtime and run-length table</summary>
 
 The runtime table records elapsed time for the paired `stLMM` and `lme4` fits,
 including preparation and warmup in `stLMM`. The `stLMM` entries here use separate
@@ -1626,78 +1368,23 @@ runtime_st <- list(intercept_st_time, gauss_st_time, gauss_cor_st_time,
 runtime_lme4 <- list(intercept_lme4_time, gauss_lme4_time, gauss_cor_lme4_time,
   crossed_lme4_time, nested_lme4_time, by_lme4_time, logit_lme4_time,
   poisson_lme4_time, nb_lme4_time)
-runtime_draws <- c(8000, 1500, 8000, 8000, 8000, 8000, 1000, 5000, 3000)
+runtime_draws <- c(16000, 16000, 8000, 40000, 60000, 160000, 1000, 5000, 3000)
+runtime_burn <- c(gaussian_burn, gaussian_burn, cor_burn, rep(gaussian_burn, 3),
+                  500, 2500, 500)
 runtime_tab <- do.call(rbind, lapply(seq_along(runtime_labels), function(i)
   data.frame(example = runtime_labels[i], package = c("stLMM", "lme4"),
     task = c(paste("3 chains x", runtime_draws[i], "saved iterations"),
              if(i <= 6) "REML fit" else "GLMM likelihood fit"),
+    burn_per_chain = c(runtime_burn[i], NA_integer_),
     elapsed_seconds = c(runtime_st[[i]][["elapsed"]],
                         runtime_lme4[[i]][["elapsed"]]))))
 
 knitr::kable(round_numeric_columns(runtime_tab, 3))
 ```
 
-## Takeaways
+Run times describe these particular tasks and include the different chain
+lengths needed for the examples. They are not a ranking across models or an
+ESS comparison with REML. The separate-versus-collapsed example
+above uses equal chain lengths and includes recovery in its total time.
 
-Choose the coefficients that vary, the grouping structure, and which groups
-share a covariance distribution as separate decisions. Independent coefficient
-syntax has both separate-term and compact forms. Crossed and nested designs
-can use either independent or correlated coefficient vectors. Nested child
-effects can share a common variance across parents or use parent-specific
-variances through `by`.
-
-The matched Gaussian fits compare known generating values with Bayesian
-posterior summaries and REML estimates. Differences are interpreted alongside
-uncertainty and prior information. The variance of a group distribution is
-informed by the number of independent groups, as well as how precisely their
-effects are observed.
-
-The correlated-coefficient example compares separate and jointly collapsed IID
-sampling under the same priors. Both target the same posterior; compare their
-diagnostics and effective samples per second separately for covariance parameters
-and the combined coefficients. The default retains separate IID updates.
-
-The logistic comparison is the cleanest GLMM comparison. The Poisson example
-compares a fixed-size negative-binomial approximation with a native Poisson
-`glmer()` fit, and illustrates why diagnostics should follow both individual
-parameters and the combined group coefficients used for interpretation.
-The negative-binomial example estimates size in both packages, with prior information entering the `stLMM`
-fit. Correlated coefficients are supported by an IW covariance prior, while
-independent coefficients use separate IG variance priors in these examples.
-Scalar IID variances also accept `log_normal()`, `gamma_dist()`, `half_normal()`,
-and `half_t()`; the last two describe standard deviations. These choices apply
-to both independent formula forms and parent-specific variances. Use the posterior
-intervals and chain diagnostics to assess uncertainty and mixing; close point
-estimates alone are insufficient.
-
-## Additional capabilities in lme4
-
-The examples above cover shared capabilities. The following distinctions
-help identify analyses that require a different interface or inferential
-workflow from the one currently provided by `stLMM`.
-
-| Capability | lme4 | Current stLMM interface |
-|:--|:--|:--|
-| General random-effect design formulas | Factor contrasts, interactions, and transformed predictors can enter random-effect design matrices through the formula. | IID coefficient formulas accept additive numeric variable names. Precompute additional numeric columns and grouping identifiers when needed. |
-| More likelihood/link combinations | Native Poisson and Gamma GLMMs, and GLM links such as binomial complementary log-log, through `glmer()`. | Gaussian, binomial-logit, binomial-probit, and negative-binomial-log models. Poisson examples use an NB approximation. |
-| Nonlinear mixed mean functions | `nlmer()` fits specified nonlinear mean functions with mixed effects. | The predictor is linear in its fixed and random coefficients. |
-| Likelihood-based estimation and inference | ML/REML estimation, likelihood profiles, profile or bootstrap confidence intervals, and likelihood-based model comparisons. | Posterior simulation, prior specification, posterior intervals, and MCMC diagnostics. |
-| Optimization and boundary diagnostics | Tools such as `isSingular()` inspect fitted covariance boundaries; optimizer controls address likelihood fitting. | Rank R-hat and ESS assess posterior simulation. They answer different questions from likelihood-boundary diagnostics. |
-
-The [lmer reference](https://lme4.github.io/lme4/reference/lmer.html) describes
-formula construction and ML/REML fitting; the
-[glmer reference](https://lme4.github.io/lme4/reference/glmer.html) documents GLM
-families and likelihood integration. `glmer()` defaults to a Laplace
-approximation and supports higher-order adaptive quadrature for models with
-a single scalar random-effect term. This is a likelihood approximation, not
-posterior sampling. The [nlmer reference](https://lme4.github.io/lme4/reference/nlmer.html)
-describes nonlinear mixed models.
-
-For likelihood-based uncertainty and comparison, see
-[confint()](https://lme4.github.io/lme4/reference/confint.merMod.html),
-[bootMer()](https://lme4.github.io/lme4/reference/bootMer.html), and the
-[merMod methods](https://lme4.github.io/lme4/reference/merMod-class.html).
-[isSingular()](https://lme4.github.io/lme4/reference/isSingular.html) concerns
-near-zero variance in one or more linear combinations of random effects;
-it is not a convergence diagnostic for MCMC. Neither package's point estimates
-or diagnostics substitute directly for the other's inferential summaries.
+</details>

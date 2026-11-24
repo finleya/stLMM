@@ -140,7 +140,7 @@ test_that('new IID priors preserve paired prediction with structured effects and
       eta <- fitted(f, summary = FALSE, scale = 'link', sub_sample = ss)
       idx <- attr(eta, 'draw_index')
       expected <- f$beta_samples[idx, , drop = FALSE] %*% t(f$backend$X) +
-        f$alpha_samples[idx, , drop = FALSE] %*% t(as.matrix(f$backend$Z)) + f$w_samples$nngp_1
+        f$alpha_samples[if(collapse && family == 'gaussian') match(idx, f$recover_iter) else idx, , drop = FALSE] %*% t(as.matrix(f$backend$Z)) + f$w_samples$nngp_1
       expected <- sweep(expected, 2, d$off, '+')
       expect_equal(eta, expected, ignore_attr = TRUE)
       p <- predict(f, d[, setdiff(names(d), 'y')], scale = 'link', sub_sample = ss)

@@ -39,6 +39,8 @@ theme_set(theme_bw(base_size = 12))
 
 This vignette introduces the basic `stLMM` workflow using small simulated Gaussian response examples. The first model has fixed effects only. The second adds independent and identically distributed (iid) grouped random effects.
 
+The short runs illustrate the API. The [grouped-model comparison](a14-lme4-validation.html) shows longer runs with multiple-chain diagnostics.
+
 The package ships with only a small set of fast vignettes so package checks remain lightweight. Additional model examples, applied workflows, computing notes, and the modeling and software details reference are available on the package website at <https://finleya.github.io/stLMM/>. The development repository is <https://github.com/finleya/stLMM>.
 
 ## Fixed-effect model
@@ -178,6 +180,8 @@ group_fit <- stLMM(
 summary(group_fit)
 ```
 
+These examples use the default `collapse_iid = FALSE`, which samples IID coefficients during fitting. For Gaussian fits with `collapse_iid = TRUE`, call `recover()` before fitted values, prediction, or combined coefficient summaries, including for IID-only models. The [lme4 comparison](a14-lme4-validation.html#iid-sampling-strategies) illustrates both strategies.
+
 Prediction reuses fitted draws for known groups. Unseen groups produce an error unless you explicitly set `allow_new_levels = TRUE`; this samples their effects from each posterior population distribution and includes that uncertainty in the predicted means.
 
 ```{r grouped-predict}
@@ -203,7 +207,7 @@ correlated_fit <- stLMM(
 )
 ```
 
-This uses a joint normal coefficient vector for each group and a conjugate inverse-Wishart covariance update. The scale matrix and degrees of freedom should reflect the units of your covariates; `stLMM` does not center or scale them. The example prior has mean `diag(2)`, since its degrees of freedom are 4 and its dimension is 2.
+This uses a joint normal coefficient vector for each group and, under the default separate IID strategy, a conjugate inverse-Wishart covariance update. Collapsed IID sampling uses Metropolis covariance updates. The scale matrix and degrees of freedom should reflect the units of your covariates; `stLMM` does not center or scale them. The example prior has mean `diag(2)`, since its degrees of freedom are 4 and its dimension is 2.
 
 For independent intercepts and slopes with separate variance parameters, use:
 
@@ -272,7 +276,7 @@ The classical BHF model uses independent area effects. Spatial or space-time SAE
 
 ## Structured process terms
 
-Structured process terms such as `ar1()`, `gp()`, `nngp()`, `car()`, and `car_time()` are handled differently than the `iid()` term. During fitting, those latent process values are integrated out. After fitting, use `recover()` to recover the latent random effects for summary or subsequent prediction. That progression looks as follows.
+For the Gaussian models in this vignette, structured process terms such as `ar1()`, `gp()`, `nngp()`, `car()`, and `car_time()` are integrated out during fitting. Use `recover()` afterward to draw their coefficients for summary or prediction. With `collapse_iid = TRUE`, the same call recovers IID and structured coefficients jointly. That progression looks as follows.
 
 ```r
 fit <- stLMM(y ~ x + nngp(lon, lat), data = dat, ...)
@@ -283,7 +287,7 @@ predict(rec, newdata = new_dat)
 
 Recovered objects can be converted to `coda` objects just like fitted objects.
 Use `include_w = TRUE` when diagnostics or summaries should include recovered
-latent process draws. For recovered objects, `as_mcmc()` aligns fixed-effect,
+latent process draws. With `include_w = TRUE`, `as_mcmc()` aligns fixed-effect,
 variance, covariance, and recovered process columns to the same posterior
 iterations selected by `recover()`.
 

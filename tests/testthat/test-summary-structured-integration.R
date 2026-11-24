@@ -87,8 +87,12 @@ test_that("iid summaries, recovery, and prediction compose with structured proce
         expect_equal(unname(s$parameters[i, ]), expected, tolerance = 1e-11, info = label)
       }
       thin <- recover(fit, sub_sample = list(start = 4, thin = 3))
-      expect_identical(s, summary(thin, type = "combined", terms = c("iid_1", "iid_2"),
-                                   burn = 5, diagnostics = FALSE), info = label)
+      thin_summary <- summary(thin, type = "combined", terms = c("iid_1", "iid_2"),
+                              burn = 5, diagnostics = FALSE)
+      if(collapse_iid && family == "gaussian"){
+        expect_identical(thin_summary$iteration, seq.int(7L, 60L, 3L), info = label)
+        expect_equal(thin_summary$n_used, 18L, info = label)
+      } else expect_identical(s, thin_summary, info = label)
       pred <- predict(thin, scale = "link")
       full <- fitted(thin, summary = FALSE, scale = "link")
       for(ch in 1:2){

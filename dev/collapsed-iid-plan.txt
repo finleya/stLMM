@@ -15,6 +15,12 @@ The benchmarks favor different strategies for covariance parameters and predicto
 any automatic-default change needs further discussion. Scalar IID variances now
 accept the same five prior families under both sampling strategies.
 
+2026-11-24 follow-up: Gaussian joint IID recovery and its API/documentation audit
+are validated. The clean package check passes 8,178 assertions with only the
+existing size NOTE. All 24 augmented posterior comparisons and three extended
+probit checks pass on the updated build and reproduce their earlier statistical
+summaries exactly. No implementation changes were needed after the audit fixes.
+
 This plan and the requested algebra note are explicitly shared on the branch so
 work can continue from another checkout. These are exceptions to keeping internal
 development material local; other working notes, conversations, validation
@@ -154,11 +160,14 @@ IID conditional system, so neither method is guaranteed faster for every design.
 Measure nnz(M), nnz(Cholesky factor), memory, factorization/solve time, and effective
 samples per second. Include conditional recovery costs in the comparison.
 
-Joint collapsing does not imply storing every structured effect at every Gaussian
-iteration. Preserve the alpha samples expected by the existing API and decide
-how to generate them efficiently. A joint conditional draw may be used internally
-without retaining all of w; benchmark that cost rather than assuming it is free.
-Non-Gaussian augmentation requires a current compatible latent realization.
+For Gaussian joint collapsing, defer both alpha and w draws to recover().
+Use the existing joint sparse system on the selected posterior parameter grid;
+store alpha and w against the same recover_iter map. IID-only fits also use
+fit -> recover -> predict. This replaces the initial compatibility choice of
+retaining alpha during fitting. Parameter-only summaries remain available on
+the original fit; coefficient summaries and prediction require recovery first.
+Non-Gaussian augmentation requires a current compatible latent realization and
+keeps its existing in-chain schedule. Separate IID sampling is unchanged.
 
 Priors and covariance proposal coordinates
 ------------------------------------------

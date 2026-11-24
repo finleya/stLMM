@@ -576,6 +576,11 @@ neither the marginal likelihood nor the conditional distribution. The
 structured-effect output dimension remains distinct from the joint system
 dimension. Conditional structured-effect recovery given stored IID draws uses
 the separate system, whereas joint recovery draws both coefficient blocks.
+For Gaussian joint collapsing, fitting does not draw or store either latent
+block. Post-fit recovery restores the covariance parameters for each selected
+iteration and draws both blocks jointly. Recovered coefficients share an
+iteration map to the unthinned parameter samples. Augmented likelihoods still
+require a current joint latent draw within every iteration.
 
 The same-group covariance in \eqref{eq:iid-crosscov} does not require additional
 design entries. Nevertheless, including group nodes in the joint precision

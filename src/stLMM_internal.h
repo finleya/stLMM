@@ -584,6 +584,8 @@ extern "C" SEXP stLMM_collapsed_sampler(SEXP backend_r);
 extern "C" SEXP stLMM_recover_w(SEXP backend_r,
                                 SEXP beta_samples_r,
                                 SEXP alpha_samples_r,
+                                SEXP iid_sigma_samples_r,
+                                SEXP iid_cov_samples_r,
                                 SEXP tau_samples_r,
                                 SEXP residual_variance_samples_r,
                                 SEXP process_sigma_samples_r,

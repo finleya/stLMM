@@ -43,7 +43,9 @@ waic(object, ...)
 \arguments{
 \item{object}{An \code{stLMM} fit, recovered \code{stLMM_recovery} object,
 or corresponding multi-chain object. Models with structured process terms
-require saved or recovered latent process samples.}
+require saved or recovered latent process samples. Gaussian fits with
+\code{collapse_iid = TRUE} also require
+\code{recover()} first, including IID-only models.}
 \item{sub_sample}{A list with optional integer entries \code{start} and
 \code{thin}. For ordinary fits these select posterior draw indices. For
 recovered objects and augmented non-Gaussian process fits with saved process draws, these

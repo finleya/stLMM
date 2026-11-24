@@ -11,6 +11,8 @@ fitted.stLMM <- function(object,
   n <- as.integer(object$backend$n)
   process_terms <- object$backend$process_terms
   has_process <- length(process_terms) > 0L
+  if(isTRUE(object$backend$defer_iid_recovery))
+    iid_sample_rows(object, integer(0))
 
   if(!is.list(sub_sample))
     stop("error: sub_sample must be a list with optional entries 'start' and 'thin'")
@@ -28,7 +30,7 @@ fitted.stLMM <- function(object,
   start <- as.integer(start)
   thin <- as.integer(thin)
 
-  if(has_process){
+  if(has_process || isTRUE(object$backend$defer_iid_recovery)){
     w_samples_ordered <- object$w_samples_ordered
     if(is.null(w_samples_ordered))
       w_samples_ordered <- object$w_samples
@@ -65,7 +67,7 @@ fitted.stLMM <- function(object,
   }
 
   if(!is.null(object$alpha_samples) && ncol(object$alpha_samples) > 0L){
-    alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
+    alpha_draws <- object$alpha_samples[iid_sample_rows(object, draw_index), , drop = FALSE]
     mu <- mu + as.matrix(alpha_draws %*% Matrix::t(object$backend$Z))
   }
 

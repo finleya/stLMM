@@ -87,20 +87,21 @@ test_that("collapsed public fits retain paired predictors, likelihoods, and size
         family = if(family == "estimated_size") "negative_binomial" else family,
         size = if(family == "negative_binomial") 2 else NULL,
         starting = list(ar1_1 = list(sigma_sq = fixed(.4), phi = fixed(.5))),
-        n_samples = 80, chains = 2, chain_control = list(seed = 87204),
+        n_samples = if(family == "gaussian") 320 else 80,
+        chains = 2, chain_control = list(seed = 87204),
         warmup = FALSE, verbose = FALSE, collapse_iid = TRUE,
         save_process = if(process && family != "gaussian") list(start = 2, thin = 2) else NULL)
       if(family == "estimated_size")
         expect_warning(f <- do.call(stLMM, args), "weakly identified")
       else
         f <- do.call(stLMM, args)
-      if(process) f <- recover(f, sub_sample = list(start = 4, thin = 4))
+      if(process || family == "gaussian") f <- recover(f, sub_sample = list(start = 4, thin = 4))
       for(ch in f$chains){
         ss <- list(start = 4, thin = 4)
         eta <- fitted(ch, summary = FALSE, scale = "link", sub_sample = ss)
         idx <- attr(eta, "draw_index")
         expected <- ch$beta_samples[idx, , drop = FALSE] %*% t(ch$backend$X) +
-          ch$alpha_samples[idx, , drop = FALSE] %*% t(as.matrix(ch$backend$Z))
+          ch$alpha_samples[if(family == "gaussian") match(idx, ch$recover_iter) else idx, , drop = FALSE] %*% t(as.matrix(ch$backend$Z))
         expected <- sweep(expected, 2, d$off, "+")
         if(process) expected <- expected + ch$w_samples$ar1_1
         expect_equal(eta, expected, ignore_attr = TRUE)

@@ -69,6 +69,8 @@ combined_iid_membership <- function(object, block, offset){
 }
 
 combined_iid_plan <- function(object, coefficients, terms){
+  if(isTRUE(object$backend$defer_iid_recovery))
+    iid_sample_rows(object, integer(0))
   blocks <- object$term_description$random_effects$terms
   ids <- vapply(blocks, function(b) b$formula_term %||% b$name, character(1))
   available <- unique(ids)
@@ -168,6 +170,10 @@ summary_iid_combined <- function(object, probs, burn, coefficients, terms,
   reference <- chains[[1L]]
   burn <- validate_burn(burn, reference$backend$n_samples)
   plan <- combined_iid_plan(reference, coefficients, terms)
+  iteration <- if(isTRUE(reference$backend$defer_iid_recovery))
+    reference$recover_iter[sample_available_index(reference$recover_iter, burn = burn,
+                                                 what = "recovered IID draws")] else
+    seq.int(burn + 1L, reference$backend$n_samples)
   for(k in seq_along(chains)){
     ch <- chains[[k]]
     # Starting values may differ; compare the actual coefficient/group maps.
@@ -177,16 +183,19 @@ summary_iid_combined <- function(object, probs, burn, coefficients, terms,
     if(!identical(colnames(ch$beta_samples), colnames(reference$beta_samples)) ||
        !identical(colnames(ch$alpha_samples), colnames(reference$alpha_samples)) ||
        nrow(ch$beta_samples) != reference$backend$n_samples ||
-       nrow(ch$alpha_samples) != reference$backend$n_samples)
+       nrow(ch$alpha_samples) != if(isTRUE(ch$backend$defer_iid_recovery)) length(ch$recover_iter) else reference$backend$n_samples)
       stop("error: combined coefficient samples are not aligned across chains")
+    if(isTRUE(ch$backend$defer_iid_recovery) &&
+       !identical(ch$recover_iter, reference$recover_iter))
+      stop("error: combined summaries require matching recovered iterations across chains")
   }
-  iteration <- seq.int(burn + 1L, reference$backend$n_samples)
   summaries <- vector("list", nrow(plan$info))
   diags <- if(isTRUE(diagnostics)) vector("list", nrow(plan$info)) else NULL
   for(i in seq_len(nrow(plan$info))){
     draws <- vapply(chains, function(ch){
       value <- if(plan$info$fixed_effect[i]) ch$beta_samples[iteration, plan$info$coefficient[i]] else rep(0, length(iteration))
-      for(col in plan$alpha_columns[[i]]) value <- value + ch$alpha_samples[iteration, col]
+      rows <- iid_sample_rows(ch, iteration)
+      for(col in plan$alpha_columns[[i]]) value <- value + ch$alpha_samples[rows, col]
       value
     }, numeric(length(iteration)))
     draws <- matrix(draws, nrow = length(iteration), ncol = length(chains))

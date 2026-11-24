@@ -158,8 +158,10 @@ starting values.}
 \code{FALSE} keeps IID coefficients separate from the marginalized structured
 effects. IG variances and IW covariances use conjugate Gibbs updates; scalar
 variances with other priors use conditional Metropolis updates. \code{TRUE} integrates IID
-and structured coefficients together for fixed-effect and covariance updates,
-then jointly draws their coefficients. This experimental strategy uses Metropolis
+and structured coefficients together for fixed-effect and covariance updates.
+Gaussian coefficients are jointly drawn afterward by \code{recover()}; augmented
+likelihoods require joint coefficient draws within each iteration.
+This experimental strategy uses Metropolis
 updates for IID covariances and requires at least one IID term. \code{NULL}
 selects collapsing for IID-only models and separate IID updates when structured
 process terms are present. Grouped residual variances do not count as structured
@@ -333,7 +335,8 @@ stats::fitted(rec)
 predict(rec, newdata = ...)
 }
 For models without structured process terms, \code{fitted()} and
-\code{predict()} can be called directly on the fit object.
+\code{predict()} can be called directly on the fit object, except for Gaussian
+models with collapsed IID effects, which require \code{recover()} first.
 
 Prior lists use explicit prior constructors. Raw numeric vectors such as
 \code{c(2, 1)} are not accepted as priors. Common patterns are:
@@ -447,8 +450,13 @@ each parent-specific block. \code{"variance_theta"} and
 \code{"process_variance"} place all IID coordinates in their variance block;
 \code{"residual_process"} places them with process covariance parameters.
 
-Both strategies retain IID coefficients in \code{alpha_samples}. Gaussian
-process predictions still use \code{recover()}, conditional on those coefficients.
+Gaussian fits with \code{collapse_iid = TRUE} defer IID and structured coefficient
+draws to \code{recover()}. This includes IID-only fits: call \code{recover()}
+before prediction, fitted values, or combined coefficient summaries. Joint
+recovery returns \code{alpha_samples} and structured effects on the selected
+\code{recover_iter} grid; the parameter samples retain all fitting iterations.
+Separate IID sampling retains \code{alpha_samples} during fitting, and Gaussian
+structured recovery conditions on those coefficients.
 Augmented non-Gaussian models use paired in-chain IID and process draws on the
 \code{save_process} grid. Formula syntax, combined summaries, and explicit
 \code{allow_new_levels} prediction rules are the same for both strategies.

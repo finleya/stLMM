@@ -129,7 +129,7 @@ predict(rec, newdata = ...)
 \end{verbatim}
 where subsampling of posterior parameter draws can occur at the recovery and prediction steps. For augmented non-Gaussian process models, \texttt{predict(fit, ...)} can also use saved in-chain process draws directly; \texttt{recover()} is then a selection and labeling step rather than a stochastic reconstruction step.
 
-For models without structured process terms, \texttt{fitted()} and \texttt{predict()} can be called directly on the fit object. For Gaussian-likelihood models with structured process terms, \texttt{recover()} is the explicit post-fit step that samples latent process draws conditional on retained posterior parameter draws. For augmented non-Gaussian process models, including P{\'o}lya-Gamma logit/count models and Albert-Chib probit models, the sampler retains in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)} and \texttt{recover()} selects from those saved draws. Enabling \texttt{save\_process} is intentionally limited to augmented non-Gaussian models with structured process terms; Gaussian-likelihood process models remain collapsed and use post-fit recovery.
+For Gaussian-likelihood models with structured process terms or collapsed IID effects, \texttt{recover()} draws the latent coefficients conditional on retained posterior parameter draws before \texttt{fitted()} or \texttt{predict()} can be used. This includes IID-only models with \texttt{collapse\_iid = TRUE}. Models without structured process terms can otherwise use \texttt{fitted()} and \texttt{predict()} directly on the fit object. For augmented non-Gaussian process models, including P{\'o}lya-Gamma logit/count models and Albert-Chib probit models, the sampler retains in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)} and \texttt{recover()} selects from those saved draws. Enabling \texttt{save\_process} is limited to augmented non-Gaussian models with structured process terms; Gaussian models use post-fit recovery for their collapsed effects.
 
 \section{Modeling framework}
 \index{modeling framework}
@@ -188,7 +188,7 @@ and the total latent dimension is
   q_{\mathrm{lat}} = \sum_{k=1}^K q_k.
 \end{equation}
 
-The main sampler is collapsed with respect to $\bw$, i.e., structured latent process draws are integrated out during parameter updates. With \texttt{collapse\_iid = TRUE}, $\balpha$ is integrated out as well for the fixed-effect and covariance updates. For Gaussian-likelihood models with structured process terms, process draws may be recovered after fitting by \texttt{recover()}. Augmented non-Gaussian process models retain the warm-running in-chain process draws used by the augmentation step, with the default retained grid \texttt{save\_process = list(start = 1, thin = 1)}.
+The main sampler is collapsed with respect to $\bw$, i.e., structured latent process draws are integrated out during parameter updates. With \texttt{collapse\_iid = TRUE}, $\balpha$ is integrated out as well for the fixed-effect and covariance updates; Section~\ref{sec:iid-strategy} discusses this choice. For Gaussian models, \texttt{recover()} draws the collapsed effects after fitting, jointly when both $\bw$ and $\balpha$ are collapsed. Augmented non-Gaussian process models retain the warm-running in-chain process draws used by the augmentation step, with the default retained grid \texttt{save\_process = list(start = 1, thin = 1)}.
 
 This formulation is not the fastest sampler for each individual model class, but it gives one coherent implementation for point-referenced, areal, temporal, and space-time terms.
 
@@ -205,7 +205,7 @@ The user-facing functions are deliberately small:
 \item S3 methods for printing, summaries, and plots.
 \end{itemize}
 
-The \texttt{log\_lik()} calculation is conditional on the latent model expression used by fitted values. Models without structured process terms can be evaluated directly from the fit object. Gaussian-likelihood process models require recovered latent process draws, while augmented non-Gaussian process models can use the saved in-chain process draws when \texttt{save\_process} retained them. The optional \texttt{loo} package is used only when \texttt{waic()} is called.
+The \texttt{log\_lik()} calculation is conditional on the latent model expression used by fitted values and follows the same recovery requirements. Gaussian models with structured process terms or collapsed IID effects require \texttt{recover()} first, including IID-only models. Augmented non-Gaussian process models can use the saved in-chain process draws when \texttt{save\_process} retained them. The optional \texttt{loo} package is used only when \texttt{waic()} is called.
 
 Backend helpers such as graph builders, correlation registries, and nearest-neighbor index constructors are internal implementation details, not part of the API.
 
@@ -275,7 +275,7 @@ summary(fit, type = "combined", coefficients = "(Intercept)",
 
 The \texttt{terms} argument is required. Formula identifiers such as \texttt{iid\_2} select all parent blocks of a \texttt{by} term. The explicit convenience \texttt{terms = "all"} is supported for iid-only models. Combined summaries support scalar, correlated, crossed, and parent-specific iid contributions. In a model that also contains structured effects, select the iid terms explicitly. After recovery, ordinary parameter summaries with \texttt{include\_w = TRUE} report structured process coefficients separately. Without \texttt{coefficients}, all coefficient names appearing in the selected iid terms are summarized. Each output row records its actual contributing terms and whether a fixed coefficient was included.
 
-Rows correspond to represented group combinations in order of first appearance in the fitted design. There is no averaging over observations, no Cartesian expansion of unrepresented combinations, and no summary for unused levels without fitted rows. Group and parent labels remain separate. The returned \texttt{quantities} table supplies these labels, an exact coefficient-draw expression, and a representative fitted-data row. The \texttt{iteration}, \texttt{chain\_ids}, and count fields describe the retained draws. Iid combinations on recovery objects use all original fixed and iid draws after \texttt{burn}, irrespective of any thinner structured recovery subset.
+Rows correspond to represented group combinations in order of first appearance in the fitted design. There is no averaging over observations, no Cartesian expansion of unrepresented combinations, and no summary for unused levels without fitted rows. Group and parent labels remain separate. The returned \texttt{quantities} table supplies these labels, an exact coefficient-draw expression, and a representative fitted-data row. The \texttt{iteration}, \texttt{chain\_ids}, and count fields describe the retained draws. Collapsed Gaussian IID combinations require \texttt{recover()} and use the recovered coefficient grid, paired with fixed-effect draws at the original iteration indices after \texttt{burn}. Ordinary parameter summaries and diagnostics on these recovery objects use the same grid; the original fit retains every parameter draw. Separate IID and augmented-model combinations use all original fixed and IID draws after \texttt{burn}, irrespective of a thinner structured recovery subset.
 
 The computation uses the sparse design's stored group membership, including explicit zero entries for zero-valued slope covariates. It neither divides by covariates nor constructs a dense observation-by-coefficient matrix. Only one scalar quantity's iteration-by-chain draw matrix is materialized at a time; no fitting, latent recovery, or new random-number generation occurs. Diagnostics are computed on each combined draw matrix, never by combining component diagnostics. Consequently, good mixing for $\beta_0+u_g$ does not imply good mixing for $\beta_0$ and $u_g$ separately.
 
@@ -292,7 +292,7 @@ The formula language distinguishes explicit iid grouped random effects from stru
 \item \texttt{x:nngp(...)}, \texttt{x:gp(...)}, and \texttt{x:ar1(...)} create covariate-scaled process terms; the same convention applies to \texttt{x:car(...)} and \texttt{x:car\_time(...)}.
 \end{itemize}
 
-The iid terms use the explicit $\bZ\balpha$ random-effect and do not require post-fit recovery. Structured process terms are collapsed during parameter updates. Gaussian-likelihood process fits require \texttt{recover()} before process contributions are used in fitted values or prediction, while P{\'o}lya-Gamma process fits save in-chain process draws by default and \texttt{recover()} selects from those draws when a narrower retained subset is desired. The retained P{\'o}lya-Gamma process grid can be controlled with \texttt{save\_process = list(start = ..., thin = ...)} when memory is a concern.
+The IID terms contribute $\bZ\balpha$ to the predictor. Separate IID sampling retains their coefficients during fitting. Gaussian fits with \texttt{collapse\_iid = TRUE} require \texttt{recover()} to draw IID and any structured coefficients jointly, including IID-only fits. Structured process terms are collapsed during parameter updates. Gaussian-likelihood process fits require \texttt{recover()} before process contributions are used in fitted values or prediction. Augmented non-Gaussian fits retain IID coefficients and, by default, their in-chain structured draws; \texttt{recover()} selects from those structured draws when a narrower subset is desired. The retained structured grid can be controlled with \texttt{save\_process = list(start = ..., thin = ...)} when memory is a concern.
 
 The \texttt{resid(...)} term is not a latent random-effect term. It specifies the Gaussian residual variance model and is parsed separately from the fixed-effect, iid, and structured-process terms. Omitting \texttt{resid()} is equivalent to \texttt{resid(model = "tau\_sq")}, which estimates one global residual variance. Users may also write this default explicitly when it helps make a model formula self-documenting. Other \texttt{resid()} models allow fixed row-specific variances, group-specific residual variances, and direct-estimate variance models used in Fay-Herriot-style analyses. These options are described in Section~\ref{residual-models} and in the \texttt{?resid} manual page.
 
@@ -315,50 +315,23 @@ This section describes the model terms from the user-facing formula level down t
 \subsection{Choosing whether to collapse IID effects}
 \label{sec:iid-strategy}
 
-The original sampler keeps IID coefficients $\balpha$ separate while integrating
-out the structured effects $\bw$. This choice preserves simple inverse-gamma and
-inverse-Wishart covariance updates conditional on $\balpha$. It also keeps IID
-group membership out of the sparse structured system
-$\bM=\bQ_w+\bA\trans\bW\bA$. A group spanning many spatial or temporal nodes can
-connect otherwise distant parts of that system if its coefficients are included
-in the same factorization. Avoiding those connections is particularly attractive
-for large sparse process models. This was a computational design choice, not a
-requirement of the statistical model.
+The original choice to keep IID coefficients $\balpha$ separate preserves
+conjugate IG variance and IW covariance updates and keeps group membership out of
+the structured system $\bM=\bQ_w+\bA\trans\bW\bA$. Including groups in a joint
+system can connect otherwise distant process nodes. This leaves the structured
+prior precision $\bQ_w$ unchanged but can increase fill in the joint Cholesky
+factor, with costs depending on grouping patterns and the elimination ordering.
 
-There are costs to leaving IID effects separate. Fixed and grouped effects can
-trade off in the predictor, and conditional coefficient updates may explore that
-dependence slowly. The separate implementation also factors a dense conditional
-precision for the IID coefficients. Even with sparse $\bZ$, that precision can
-be dense after the structured effects are integrated out. Thus keeping the
-structured factor small does not make every other calculation small or sparse.
-With a single grouping factor and no structured effects, the conditional IID
-precision is block diagonal by group. The current separate implementation uses
-its general dense solve even in that case. Consequently, a timing advantage for
-joint collapsing can reflect both marginalization and the different linear
-algebra implementations. A specialized conditional block solve could retain
-conjugate covariance updates while reducing this cost; it is not used by the
-current separate sampler.
-
-The optional jointly collapsed strategy puts IID and structured coefficients in
-one latent vector. The fixed-effect and covariance updates integrate over that
-whole vector; a joint conditional draw then supplies the coefficients. For
-IID-only models, especially a single grouping factor with disjoint groups, this
-can exploit a simple sparse system and avoid the alternating fixed/IID
-coefficient updates. In mixed models it also handles posterior dependence between
-IID and structured coefficients in their joint draw. These are potential
-advantages in computation and mixing, rather than guarantees for every parameter.
-
-Both strategies allow IG, log-normal, gamma, half-normal, and half-$t$ scalar
-variance priors. Separate updates preserve conjugacy for IG variances and IW
-matrices, while other scalar priors use conditional Metropolis updates.
-Joint collapsing gives up conjugate IID covariance updates: all IID priors
-enter a marginal Metropolis target, so acceptance, proposal blocking, and
-adaptation matter. Shared groups and crossed terms can add Cholesky fill;
-factorizing the larger system may cost more than the separate updates. The joint
-conditional draw also has a cost, including in Gaussian fits where structured
-draws are not retained. For augmented likelihoods, augmentation can account for a
-large part of runtime regardless of the IID strategy. Faster iterations and
-more effective posterior samples per second need not favor the same choice.
+Joint collapsing integrates over both $\balpha$ and $\bw$ during fixed-effect and
+covariance updates. Its sparse calculations can be more efficient with many
+groups and few coefficients per group, especially in IID-only models. The
+current separate sampler uses a general dense IID coefficient solve, so speed
+differences reflect both marginalization and the linear algebra implementations.
+Joint collapsing may also improve mixing, but replaces conjugate IID variance
+and covariance updates with Metropolis updates. Gaussian models defer joint
+coefficient draws to selected \texttt{recover()} iterations; augmented models
+require those draws during fitting. The joint algebra is given in
+Section~\ref{sec:joint-iid-algebra}.
 
 The public control applies to all IID terms in a fit:
 \begin{itemize}
@@ -375,32 +348,12 @@ Formulas, data scales, prior choices, coefficient names, and new-group predictio
 rules are the same under both strategies. The random-number sequence changes
 when the strategy changes.
 
-Joint IID collapsing is experimental. Providing both strategies makes their
-trade-offs testable by users and developers on the same model and data. Compare
-posterior estimates under matched priors and inspect convergence for covariance
-parameters, combined coefficients, and predictors. Use effective sample sizes
-per second, including warmup and recovery costs as appropriate, alongside memory,
-\texttt{M\_nnz}, and \texttt{cholmod\_lnz}. These sparse counts describe the
-factorization structure; they are not complete memory measurements. Neither a
-shorter runtime nor an apparently better-mixed intercept alone establishes that
-one strategy is preferable for the analysis.
-The optional \texttt{tests/native/iid-benchmark.R} worker generates matched
-synthetic comparisons for scalar, independent, correlated, crossed, nested, and
-parent-specific IID effects, including NNGP combinations with spatially local
-or dispersed groups. It records fitting and recovery times, sparse counts, and
-draws for covariance, coefficient, and predictor diagnostics. Run independent
-chains sequentially with the same thread settings, and compare all retained
-chains together. The accompanying instructions distinguish these performance
-experiments from correctness tests and explain their measurement limits.
-
-The common representation also provides a basis for further exploration: a fixed
-observation mapping can combine or select latent coefficients while covariance
-parameters remain in the prior precision. This separates the statistical
-covariance specification from observation layout and sampling strategy. It is a
-useful foundation for investigating correlated structured coefficients and
-multivariate or misaligned outcomes. Those extensions require additional model,
-likelihood, and prediction work; they are not provided by the current
-\texttt{collapse\_iid} option.
+Joint IID collapsing is experimental. Both strategies fit the same model,
+allowing users to test these trade-offs under matched priors. Compare posterior
+agreement, convergence, and effective samples per second, including warmup and
+recovery costs. Examine memory use and the recorded matrix and factor nonzero
+counts, \texttt{M\_nnz} and \texttt{cholmod\_lnz}; the counts describe sparsity,
+not total memory use.
 
 \subsection{Fixed effects}
 \index{fixed effects}
@@ -415,7 +368,7 @@ Fixed effects use ordinary R formula syntax and enter the model through $\bX\bbe
 
 \texttt{iid(group)} adds an iid Gaussian random intercept over retained group levels. Without \texttt{by}, unused factor levels are retained; character or numeric groups use the levels represented in the data. \texttt{x:iid(group)} adds an iid Gaussian random slope for numeric covariate \texttt{x}. These terms enter the predictor through $\bZ\balpha$; the \texttt{collapse\_iid} control determines whether their coefficients are marginalized together with the structured effects during parameter updates.
 
-Each scalar iid term receives its own variance parameter. For example, \texttt{iid(group) + x:iid(group)} produces two iid random-effect variance controls, typically named \texttt{iid\_1} and \texttt{iid\_2}. The iid random effects are sampled directly during fitting and are returned in \texttt{alpha\_samples}; no \texttt{recover()} call is needed for these coefficients.
+Each scalar iid term receives its own variance parameter. For example, \texttt{iid(group) + x:iid(group)} produces two iid random-effect variance controls, typically named \texttt{iid\_1} and \texttt{iid\_2}. Coefficient draws are returned in \texttt{alpha\_samples}, during fitting for separate IID or augmented-likelihood sampling and after \texttt{recover()} for Gaussian joint collapsing.
 
 Correlated coefficient vectors are specified with
 \begin{verbatim}
@@ -463,7 +416,7 @@ The sparse CSC design $\bZ$ is stacked by sampler block, then group, then coeffi
 
 \texttt{alpha\_samples} holds coefficient draws. Scalar variances, including independent coefficient-formula variances, are stored in \texttt{iid\_sigma\_sq\_samples}. Unstructured covariances are in \texttt{iid\_covariance\_samples}, storing each lower triangle column by column (including diagonals), in term order. Column labels identify the term and both coefficients. The active sample list exposes the same block as \texttt{samples\$iid\_covariance}, so sample extraction and summaries include it.
 
-The computational trade-offs behind separate and jointly collapsed IID updates are discussed in Section~\ref{sec:iid-strategy}. Both strategies retain $\balpha$ during fitting, so its availability for summaries and prediction does not depend on the sampling choice.
+The computational trade-offs behind separate and jointly collapsed IID updates are discussed in Section~\ref{sec:iid-strategy}. Separate IID sampling retains $\balpha$ during fitting. Gaussian joint collapsing integrates out both coefficient blocks and follows the fit--recover--predict workflow, including for IID-only models. Augmented likelihoods retain the IID draws needed by their within-chain updates.
 
 \subsection{NNGP terms}
 \index{NNGP}
@@ -1433,17 +1386,17 @@ starting variance or whole covariance fixed, or its default when omitted, withou
 dispersing that block across chains. An explicit scalar variance or IW prior remains required. The
 \texttt{fixed()} wrapper is not supported for IID controls.
 
-After the marginal updates, draw
+The joint conditional distribution is
 \begin{equation}
  \bv\mid\widetilde\by,\bbeta,\bQ,\bW
  \sim N\left(\bM_J^{-1}\bH\trans\bW\br_J,\bM_J^{-1}\right)
 \end{equation}
-using the sparse factor and triangular solves. Retain $\balpha$ on every sampling
-iteration. In augmented likelihoods this joint draw supplies a compatible full
-predictor for the next augmentation update, and structured coefficients are saved
-on the requested \texttt{save\_process} grid. Gaussian fits retain $\balpha$ and
-use the existing post-fit conditional recovery of $\bw$ given those saved
-coefficients; the temporary joint draw of $\bw$ is not saved.
+and is sampled using the sparse factor and triangular solves. For augmented
+likelihoods, draw after each iteration's marginal updates to supply the full
+predictor for the next augmentation step. Retain $\balpha$ every iteration and
+save structured coefficients on the requested \texttt{save\_process} grid.
+Gaussian fits defer this joint draw to \texttt{recover()}, which reconstructs
+the conditional system only for the selected posterior parameter draws.
 
 \section{Adaptive covariance Metropolis blocks}
 
@@ -1580,16 +1533,21 @@ when applicable, updating the working response and precision.
 joint system in Section~\ref{sec:joint-iid-algebra}.
 \item Update active residual, structured, and IID covariance parameters through
 the selected Metropolis blocks, holding augmentation fixed.
-\item Jointly draw $(\bw,\balpha)$ from their conditional distribution with the
-updated coefficients and covariances. Retain $\balpha$ and, for augmented models,
-save $\bw$ on the requested grid. Carry the full draw into the next iteration.
+\item For augmented likelihoods, jointly draw $(\bw,\balpha)$ from their conditional
+distribution with the updated coefficients and covariances. Retain $\balpha$,
+save $\bw$ on the requested grid, and carry the full draw into the next iteration.
+For Gaussian likelihoods, omit this step: both coefficient blocks are drawn
+after fitting by \texttt{recover()} for selected posterior iterations.
 \end{enumerate}
 \end{minipage}
 \end{center}
 
 \section{Latent process recovery and fitted values}
 
-For Gaussian-likelihood models with structured process terms, recovery is a standalone post-fit step using \texttt{recover()}. For each selected posterior draw, recovery samples
+For Gaussian-likelihood models, recovery is a standalone post-fit step using
+\texttt{recover()}. With joint IID collapsing it samples both coefficient blocks,
+including when no structured terms are present. With separate IID sampling and
+structured terms, each selected posterior draw instead samples
 \begin{equation}
   \bw \mid \by,\bbeta,\balpha,\bW,\{\sigma_k^2\},\btheta
 \end{equation}
@@ -1598,7 +1556,23 @@ using the stored backend, current posterior parameter draw, sparse $\bM$ assembl
   \label{eq:M-rec}
   \bM_{\mathrm{rec}} = \bQ_w + \bA\trans \bW \bA.
 \end{equation}
-This is the structured conditional system, refactored with the covariance and residual-precision values for the selected draw. It applies under either IID strategy: even after joint IID collapsing, recovery conditions on the retained $\balpha$ and draws only $\bw$. It therefore uses $\bM_{\mathrm{rec}}$, not the enlarged joint system $\bM_J$, and does not replace the retained IID coefficients.
+This is the structured conditional system for separate IID sampling, refactored
+with the covariance and residual-precision values for the selected draw.
+With joint IID collapsing, let $\bv=(\bw\trans,\balpha\trans)\trans$ and
+$\bH=[\bA\ \bZ]$. Recovery instead uses
+\begin{align}
+  \bM_J &= \operatorname{blockdiag}(\bQ_w,\bD_{\alpha}^{-1})
+          + \bH_{\mathcal O}\trans\bW_{\mathcal O}\bH_{\mathcal O},\\
+  \bb_v &= \bH_{\mathcal O}\trans\bW_{\mathcal O}
+          (\by_{\mathcal O}-\bo_{\mathcal O}-\bX_{\mathcal O}\bbeta),\\
+  \bv\mid\cdot &\sim N(\bM_J^{-1}\bb_v,\bM_J^{-1}).
+\end{align}
+The IID variances and covariance matrices are restored from the matching
+posterior parameter draw before assembly. The design is fixed; covariance
+parameters enter the prior precision. Joint recovery preserves posterior
+dependence between IID and structured effects. IID-only recovery uses the same
+system with an empty structured block. Neither recovery path forms the large
+precision inverse.
 
 Under the observed-row likelihood layer, recovery samples latent process draws on each term's full latent support. Only observed rows contribute to the recovery conditional:
 \begin{equation}
@@ -1609,12 +1583,12 @@ and the conditional mean uses observed-row residual information only:
 \begin{equation}
   \label{eq:recover-rhs}
   \bb_w = \bA_{\mathcal{O}}\trans \bW_{\mathcal{O}}
-      \left(\by_{\mathcal{O}} - \bX_{\mathcal{O}}\bbeta
+      \left(\by_{\mathcal{O}} - \bo_{\mathcal{O}} - \bX_{\mathcal{O}}\bbeta
             - \bZ_{\mathcal{O}}\balpha\right).
 \end{equation}
 The conditional mean is obtained by solving with the recovered conditional precision; $\bQ_w^{-1}$ is never formed explicitly. Rows with missing responses do not enter $\bb_w$, but their mapped latent nodes remain in $\bw$. Thus missing-response AR1, GP, NNGP, CAR, DAGAR, CAR-time, and DAGAR-time nodes are recovered at \texttt{recover()} time whenever they are part of the fitted term support. Their posterior information comes from the prior precision and any observed neighboring or repeated nodes, not from an imputed response value.
 
-For augmented non-Gaussian process models, \texttt{stLMM()} saves the in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)}. In this case \texttt{recover()} is a selection and labeling step: it subsets the saved process draws according to \texttt{sub\_sample\$start} and \texttt{sub\_sample\$thin}, preserves the corresponding \texttt{recover\_iter} indices, and returns the usual \texttt{stLMM\_recovery} object. The main posterior parameter matrices are not physically thinned when process draws are saved; downstream methods align parameter rows to \texttt{recover\_iter}. If an augmented non-Gaussian process model was fit with process saving disabled, post-fit recovery is not available and the model should be refit with \texttt{save\_process = TRUE} or an explicit \texttt{save\_process = list(start = ..., thin = ...)}. Gaussian-likelihood fits do not expose in-chain structured-draw storage through \texttt{save\_process}. With joint IID collapsing they generate a temporary joint latent draw to obtain $\balpha$, but process output still uses the same post-fit conditional recovery.
+For augmented non-Gaussian process models, \texttt{stLMM()} saves the in-chain process draws by default as \texttt{save\_process = list(start = 1, thin = 1)}. In this case \texttt{recover()} is a selection and labeling step: it subsets the saved process draws according to \texttt{sub\_sample\$start} and \texttt{sub\_sample\$thin}, preserves the corresponding \texttt{recover\_iter} indices, and returns the usual \texttt{stLMM\_recovery} object. The main posterior parameter matrices are not physically thinned when process draws are saved; downstream methods align parameter rows to \texttt{recover\_iter}. If an augmented non-Gaussian process model was fit with process saving disabled, post-fit recovery is not available and the model should be refit with \texttt{save\_process = TRUE} or an explicit \texttt{save\_process = list(start = ..., thin = ...)}. Gaussian-likelihood fits use post-fit recovery; \texttt{save\_process} is reserved for augmented likelihoods.
 
 Stochastic recovery uses the CHOLMOD factorization of the recovered conditional precision:
 \begin{equation}
@@ -1630,7 +1604,7 @@ Here $\bP$ is the fill-reducing permutation and $\bL$ is the triangular factor. 
 \begin{enumerate}
 \item Set the posterior draw's covariance and residual-precision parameters in the backend state and assemble $\bM_{\mathrm{rec}}$ in Equation~\eqref{eq:M-rec}.
 \item Factor $\bM_{\mathrm{rec}}$ with CHOLMOD, conceptually $\bP\bM_{\mathrm{rec}}\bP\trans=\bL\bL\trans$.
-\item Form $\br=\by-\bX\bbeta-\bZ\balpha$ and $\bb_w=\bA\trans\bW\br$, using observed rows only.
+\item Form $\br=\by-\bo-\bX\bbeta-\bZ\balpha$ and $\bb_w=\bA\trans\bW\br$, using observed rows only.
 \item Compute the conditional mean $\bar{\bw}$ by solving $\bM_{\mathrm{rec}}\bar{\bw}=\bb_w$ with \texttt{M\_cholmod\_solve(CHOLMOD\_A, ...)}.
 \item Draw $\bz\sim N(0,\bI)$ and compute $\beps=\bP\trans\bL^{-\top}\bz$ with \texttt{M\_cholmod\_solve(CHOLMOD\_Lt, ...)} followed by \texttt{M\_cholmod\_solve(CHOLMOD\_Pt, ...)}.
 \item Return $\bw=\bar{\bw}+\beps$.
@@ -1638,11 +1612,21 @@ Here $\bP$ is the fill-reducing permutation and $\bL$ is the triangular factor. 
 \end{minipage}
 \end{center}
 
-These steps are implemented in \texttt{recover\_w\_draw\_collapsed()}. For augmented non-Gaussian process fits with saved in-chain process draws, \texttt{recover()} subsets and labels the saved draws instead of re-running Algorithm~2.
+For joint IID recovery, Algorithm~2 replaces $\bw$, $\bM_{\mathrm{rec}}$, and
+$\bb_w$ by $\bv$, $\bM_J$, and $\bb_v$, and uses residual $\by-\bo-\bX\bbeta$.
+Both paths share \texttt{recover\_latent\_draw\_collapsed()}, including the
+triangular solve for the stochastic term. For augmented non-Gaussian process
+fits with saved in-chain process draws, \texttt{recover()} subsets and labels
+the saved draws instead of re-running Algorithm~2.
 
 Recovered process samples are returned by term. For NNGP terms, \texttt{w\_samples} is in original support order for users, while \texttt{w\_samples\_ordered} keeps the internal graph order needed by fitted values and prediction. \texttt{recover\_iter} records the original MCMC iteration indices, and prediction/fitted methods use it to align recovered latent draws with parameter samples.
 
-\texttt{fitted.stLMM()} supports fit objects without process terms directly. For models with process terms, fitted values require a recovered object and include fixed effects, explicit grouped random effects, and recovered structured process contributions.
+Joint Gaussian recovery stores $\balpha$ and $\bw$ on the same
+\texttt{recover\_iter} grid. Parameter matrices keep all original draws.
+\texttt{fitted.stLMM()} supports separate-IID fit objects without process terms
+directly. Gaussian fits with structured terms or collapsed IID effects require
+recovery first. Fitted values then include all fixed, IID, and structured
+contributions at matching iterations.
 
 With missing responses, fitted values are full-row quantities. Observed rows report fitted values for observed data, while missing-response rows report posterior mean quantities using the retained full-row design and the recovered full-support latent process draws.
 
@@ -1755,13 +1739,13 @@ If \texttt{y\_samples = TRUE}, posterior predictive responses are generated as
 \end{equation}
 where $r$ is replaced by its corresponding posterior draw when estimated, and the second argument is the mean.
 
-For models without structured process terms, \texttt{predict.stLMM()} uses the posterior samples stored in the fit object. It rebuilds $\bX_0$ and $\bZ_0$ for \texttt{newdata} and returns
+For models without structured process terms, prediction rebuilds $\bX_0$ and $\bZ_0$ for \texttt{newdata} and returns
 \begin{equation}
   \bmu_0^{(b)} = \bo_0 + \bX_0 \bbeta^{(b)} + \bZ_0 \balpha^{(b)} .
 \end{equation}
-For \texttt{newdata = NULL}, the retained full-row design is used, including rows whose response was missing during fitting.
+Gaussian models with collapsed IID effects use recovered $\balpha$ draws paired with the corresponding fixed-effect draws; other models without structured terms use the coefficients retained during fitting. For \texttt{newdata = NULL}, the retained full-row design is used, including rows whose response was missing during fitting.
 
-For process models, \texttt{predict.stLMM\_recovery()} first maps \texttt{sub\_sample} through \texttt{recover\_iter}; this keeps $\bbeta$, $\balpha$, $\tau^2$, covariance parameters, and recovered $\bw$ aligned to the same original MCMC iterations. Existing process nodes are direct lookups from recovered \texttt{w\_samples}. Repeated prediction rows that map to the same process node share the same latent draw within a posterior sample.
+For recovered models, \texttt{predict.stLMM\_recovery()} first maps \texttt{sub\_sample} through \texttt{recover\_iter}; this keeps $\bbeta$, $\balpha$, $\tau^2$, covariance parameters, and any recovered $\bw$ aligned to the same original MCMC iterations. Existing process nodes are direct lookups from recovered \texttt{w\_samples}. Repeated prediction rows that map to the same process node share the same latent draw within a posterior sample.
 
 \paragraph{AR1 new-node prediction.}
 For a new AR1 support value under \texttt{joint = FALSE}, the prediction code uses the fitted ordered-support AR1 convention. A new value is inserted into the sorted unique support only for identifying its nearest fitted neighbors. The conditional distribution is derived from the AR1 covariance implied by that ordered support. If the new value has one fitted neighbor, the conditional mean is proportional to that neighbor's recovered draw. If it lies between two fitted neighbors, the conditional mean uses both adjacent fitted neighbors and the conditional variance is the corresponding scalar Schur complement. This is adjacency in ordered support, not a numeric time-gap power rule. Consequently, for unevenly spaced time values, $\phi$ should be read as a correlation per adjacent support position rather than as a correlation per unit of elapsed time.

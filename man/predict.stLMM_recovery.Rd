@@ -128,8 +128,11 @@ response is the posterior fitted mean count.
 }
 \details{
 Prediction always represents the model as fit. Prediction-time dropping of
-model components is not supported. New grouped random-effect levels are not
-supported.
+model components is not supported. New grouped random-effect levels require
+\code{allow_new_levels = TRUE}, subject to the parent-group rules below.
+Gaussian fits with \code{collapse_iid = TRUE} require \code{recover()} before
+prediction, including IID-only models. Recovered IID and structured effects are
+paired with parameter draws through \code{recover_iter}.
 
 By default, prediction uses the OpenMP thread count stored in the fitted or
 recovered object. Use \code{n_omp_threads} to override that value for a

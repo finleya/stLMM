@@ -26,7 +26,9 @@ process samples \code{w} are omitted because they can be high-dimensional and
 are often not needed for covariance-parameter diagnostics.
 
 For ordinary fitted objects, \code{burn} and \code{thin} select retained MCMC
-rows by row number. For recovered objects, \code{include_w = TRUE} aligns
+rows by row number. For collapsed Gaussian IID recovery objects, parameter and
+IID coefficient draws are aligned to \code{recover_iter} even when
+\code{include_w = FALSE}. For other recovered objects, \code{include_w = TRUE} aligns
 parameter samples to \code{recover_iter} before appending saved or recovered latent
 process draws. In that case, \code{burn} is interpreted on the original
 posterior iteration scale and \code{thin} is applied to the recovered draws

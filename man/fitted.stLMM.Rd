@@ -47,4 +47,7 @@ For augmented non-Gaussian process models, \code{stLMM()} saves in-chain process
 default as \code{save_process = list(start = 1, thin = 1)} and
 \code{recover()} subsets them. For Gaussian process models, call
 \code{recover()} on the fitted object to make those samples available.
+Gaussian fits with \code{collapse_iid = TRUE} also require \code{recover()},
+including IID-only models. IID and structured effects are recovered jointly and
+paired with parameter draws through \code{recover_iter}.
 }

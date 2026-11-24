@@ -92,16 +92,19 @@ samples_w_blocks <- function(w_samples, index = NULL){
   do.call(cbind, out)
 }
 
-stLMM_parameter_samples <- function(object, index = NULL){
+stLMM_parameter_blocks <- function(object, index = NULL){
 
   samples <- object$samples
   if(is.null(samples))
     stop("error: object has no posterior samples")
   samples$w <- NULL
+  if(isTRUE(object$backend$defer_iid_recovery) && !is.null(samples$alpha))
+    index <- index %||% object$recover_iter
 
   blocks <- list()
   for(nm in names(samples)){
-    block <- samples_matrix_block(samples[[nm]], nm, index = index)
+    rows <- if(nm == "alpha" && !is.null(samples[[nm]])) iid_sample_rows(object, index) else index
+    block <- samples_matrix_block(samples[[nm]], nm, index = rows)
     if(!is.null(block))
       blocks[[nm]] <- block
   }
@@ -113,8 +116,11 @@ stLMM_parameter_samples <- function(object, index = NULL){
   if(length(unique(n_row)) != 1L)
     stop("error: sample blocks do not have a common number of rows")
 
-  do.call(cbind, blocks)
+  blocks
 }
+
+stLMM_parameter_samples <- function(object, index = NULL)
+  do.call(cbind, stLMM_parameter_blocks(object, index))
 
 samples_data_frame <- function(mat,
                                iteration,

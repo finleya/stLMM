@@ -1322,10 +1322,15 @@ static SamplerIterationResult update_collapsed_iid_iteration(SamplerState *s,
 
   result.sizeAccepted = update_likelihood_iteration(s, betaCurrent, alphaCurrent,
                                                      wCurrent, pg, warmup);
-  result.wCurrentFresh = 1;
+  result.wCurrentFresh = 0;
   update_beta_draw_collapsed(s, alphaCurrent, betaCurrent);
   update_mean_without_alpha(s, betaCurrent, resid);
   result.covAccepted = update_covariance_iteration(s, resid, warmup);
+
+  /* Gaussian coefficients are drawn jointly after fitting by recover().
+     Augmentation needs a compatible realization for the next iteration. */
+  if(!is_augmented_likelihood(s))
+    return result;
 
   latent = (double*)R_alloc(s->qLatSystem, sizeof(double));
   recover_latent_draw_collapsed(s, resid, latent);
@@ -1333,6 +1338,7 @@ static SamplerIterationResult update_collapsed_iid_iteration(SamplerState *s,
     s->alpha[i] = alphaCurrent[i] = latent[s->qLatTotal + i];
   for(i = 0; i < s->qLatTotal; i++)
     wCurrent[i] = latent[i];
+  result.wCurrentFresh = 1;
   return result;
 }
 
@@ -2055,7 +2061,7 @@ extern "C" {
     double *betaCurrent, *alphaCurrent, *resid, *wSamples, *wCurrent;
     int *recoverIter;
     int i, j, iter, iter1, b, thetaOffset, describeTerms, nReport, reportLen, tauAcceptReport, doVerbose;
-    int recoverIdx, covColumn, covDim, covCol, covRow;
+    int recoverIdx, covColumn, covDim, covCol, covRow, nAlphaSamples;
     size_t z;
     const void *vmax_iter;
     BayesLogit_rpg_hybrid_t pg = BayesLogit_rpg_hybrid();
@@ -2063,6 +2069,7 @@ extern "C" {
     SEXP collapse_r = getListElement(backend_r, "collapse_iid");
     init_sampler_state(&s, backend_r, collapse_r == R_NilValue ? 0 :
                         as_flag_scalar(collapse_r, "backend$collapse_iid"));
+    nAlphaSamples = s.collapseIid && !is_augmented_likelihood(&s) ? 0 : s.nSamples;
     
     for(i = 0; i < s.nTerms; i++){
       GraphState *g = s.graphs + s.terms[i].graphIndex;
@@ -2105,7 +2112,7 @@ extern "C" {
     sizeSamples = s.nbSizeEstimate ? (double*)R_alloc(s.nSamples, sizeof(double)) : NULL;
     iidCovSamples = (double*)R_alloc((size_t)s.nSamples * s.nRECovElements, sizeof(double));
     betaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.p > 0 ? s.p : 1), sizeof(double));
-    alphaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.q > 0 ? s.q : 1), sizeof(double));
+    alphaSamples = (double*)R_alloc((size_t)nAlphaSamples * s.q, sizeof(double));
     sigmaSqRESamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.nRE > 0 ? s.nRE : 1), sizeof(double));
     thetaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.nThetaTotal > 0 ? s.nThetaTotal : 1), sizeof(double));
     processSigmaSamples = (double*)R_alloc((s.nSamples > 0 ? s.nSamples : 1) * (s.nTerms > 0 ? s.nTerms : 1), sizeof(double));
@@ -2122,7 +2129,7 @@ extern "C" {
     recoverIter = (int*)R_alloc(s.nRecover > 0 ? s.nRecover : 1, sizeof(int));
     
     for(i = 0; i < (s.nSamples > 0 ? s.nSamples : 1) * (s.p > 0 ? s.p : 1); i++) betaSamples[i] = 0.0;
-    for(i = 0; i < (s.nSamples > 0 ? s.nSamples : 1) * (s.q > 0 ? s.q : 1); i++) alphaSamples[i] = 0.0;
+    for(i = 0; i < nAlphaSamples * s.q; i++) alphaSamples[i] = 0.0;
     for(i = 0; i < (s.nSamples > 0 ? s.nSamples : 1) * (s.nRE > 0 ? s.nRE : 1); i++) sigmaSqRESamples[i] = 0.0;
     for(i = 0; i < (s.nSamples > 0 ? s.nSamples : 1) * (s.nThetaTotal > 0 ? s.nThetaTotal : 1); i++) thetaSamples[i] = 0.0;
     for(i = 0; i < (s.nSamples > 0 ? s.nSamples : 1) * (s.nTerms > 0 ? s.nTerms : 1); i++) processSigmaSamples[i] = 0.0;
@@ -2191,7 +2198,7 @@ extern "C" {
       
       for(i = 0; i < s.p; i++)
 	betaSamples[iter + s.nSamples * i] = betaCurrent[i];
-      for(i = 0; i < s.q; i++)
+      for(i = 0; nAlphaSamples > 0 && i < s.q; i++)
 	alphaSamples[iter + s.nSamples * i] = alphaCurrent[i];
       for(b = 0; b < s.nRE; b++)
 	sigmaSqRESamples[iter + s.nSamples * b] = s.sigmaSqRE[b];
@@ -2255,7 +2262,7 @@ extern "C" {
     for(z = 0; z < (size_t)s.nSamples * s.nRECovElements; z++)
       REAL(iid_cov_samples_r)[z] = iidCovSamples[z];
     PROTECT(beta_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.p > 0 ? s.p : 0));
-    PROTECT(alpha_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.q > 0 ? s.q : 0));
+    PROTECT(alpha_samples_r = Rf_allocMatrix(REALSXP, nAlphaSamples, s.q));
     PROTECT(sigma_re_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nRE > 0 ? s.nRE : 0));
     PROTECT(theta_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nThetaTotal > 0 ? s.nThetaTotal : 0));
     PROTECT(process_sigma_samples_r = Rf_allocMatrix(REALSXP, s.nSamples, s.nTerms > 0 ? s.nTerms : 0));
@@ -2278,7 +2285,7 @@ extern "C" {
     Rf_namesgets(phase_seconds_r, phase_names_r);
     
     for(i = 0; i < s.nSamples * s.p; i++) REAL(beta_samples_r)[i] = betaSamples[i];
-    for(i = 0; i < s.nSamples * s.q; i++) REAL(alpha_samples_r)[i] = alphaSamples[i];
+    for(i = 0; i < nAlphaSamples * s.q; i++) REAL(alpha_samples_r)[i] = alphaSamples[i];
     for(i = 0; i < s.nSamples * s.nRE; i++) REAL(sigma_re_samples_r)[i] = sigmaSqRESamples[i];
     for(i = 0; i < s.nSamples * s.nThetaTotal; i++) REAL(theta_samples_r)[i] = thetaSamples[i];
     for(i = 0; i < s.nSamples * s.nTerms; i++) REAL(process_sigma_samples_r)[i] = processSigmaSamples[i];

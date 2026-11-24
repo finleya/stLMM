@@ -27,6 +27,9 @@ process draws are available when they were saved during fitting or added by
 
 For recovery objects, parameter samples are aligned to
 \code{object$recover_iter} before saved or recovered latent process draws are appended.
+For collapsed Gaussian IID fits, \code{alpha_samples} become available after
+\code{recover()} and are included on that same selected grid. The original fit
+contains parameter draws without IID coefficient draws.
 This ensures parameter columns and \code{w_} columns describe the same retained
 posterior iterations.
 

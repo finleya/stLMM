@@ -102,11 +102,13 @@ for every parent. Only parent-child pairs represented by data rows enter
 these blocks, including rows with missing responses. Unused factor levels
 do not create additional parents or parent-child pairs for a \code{by} term.
 
-IID coefficients enter the predictor through \code{Z alpha} and are retained
-during fitting.
+IID coefficients enter the predictor through \code{Z alpha}.
 The \code{collapse_iid} argument to \code{\link{stLMM}} selects separate or
 jointly collapsed updates for all IID terms without changing their formula or
-prior interpretation. They do not require \code{\link{recover}}. Prediction uses fitted coefficient
+prior interpretation. Gaussian fits with \code{collapse_iid = TRUE} require
+\code{\link{recover}} to draw IID and any structured coefficients jointly,
+including IID-only fits. Separate IID sampling and augmented non-Gaussian fits
+retain IID coefficients during fitting. Prediction uses fitted coefficient
 draws for existing grouping levels. New levels error unless
 \code{allow_new_levels = TRUE}, which samples their coefficients from each
 posterior variance or covariance draw. Repeated rows in the same new group

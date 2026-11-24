@@ -62,7 +62,7 @@ test_that("independent coefficient formulas share the scalar sampler and predict
         expect_true(all(vapply(new$term_description$random_effects$terms,
           function(term) identical(term$formula_term, "iid_1") && identical(term$cov_model, "independent"), logical(1))))
       }
-      if(process != "none"){
+      if(process != "none" || (collapse_iid && family == "gaussian")){
         set.seed(85104); a$fit <- recover(a$fit, sub_sample = list(start = 2, thin = 2)); rng <- .Random.seed
         set.seed(85104); b$fit <- recover(b$fit, sub_sample = list(start = 2, thin = 2))
         expect_identical(.Random.seed, rng)

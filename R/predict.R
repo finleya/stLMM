@@ -320,7 +320,9 @@ predict.stLMM <- function(object,
   if(!is.list(object) || is.null(object$backend))
     stop("error: object must be an stLMM fit")
   n_omp_threads <- resolve_n_omp_threads(object, n_omp_threads)
-  if(length(object$backend$process_terms) > 0L){
+  if(isTRUE(object$backend$defer_iid_recovery))
+    iid_sample_rows(object, integer(0))
+  if(length(object$backend$process_terms) > 0L || isTRUE(object$backend$defer_iid_recovery)){
     if(!is.null(object$recover_iter) && length(object$recover_iter) > 0L &&
        !is.null(object$w_samples))
       return(predict.stLMM_recovery(
@@ -399,7 +401,7 @@ predict.stLMM <- function(object,
 
   if(!is.null(object$alpha_samples) && ncol(object$alpha_samples) > 0L){
     stlmm_progress(verbose, "predict: adding grouped random effects")
-    alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
+    alpha_draws <- object$alpha_samples[iid_sample_rows(object, draw_index), , drop = FALSE]
     mu <- mu + as.matrix(alpha_draws %*% Matrix::t(Z0))
   }
   if(!is.null(newdata) && allow_new_levels)
@@ -617,7 +619,7 @@ predict.stLMM_recovery <- function(object,
     stlmm_progress(verbose, "predict: adding grouped random effects")
     if(predict_timing)
       t0 <- proc.time()[["elapsed"]]
-    alpha_draws <- object$alpha_samples[draw_index, , drop = FALSE]
+    alpha_draws <- object$alpha_samples[iid_sample_rows(object, draw_index), , drop = FALSE]
     mu <- mu + as.matrix(alpha_draws %*% Matrix::t(Z0))
     if(predict_timing)
       message("predict timing: random-effect assembly = ", round(proc.time()[["elapsed"]] - t0, 3), " sec")

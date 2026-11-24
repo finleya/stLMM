@@ -1,3 +1,24 @@
+# stLMM (development version)
+
+- Gaussian fits with `collapse_iid = TRUE` now defer IID and structured effect
+  draws to `recover()`, including IID-only fits. Recovery samples both blocks
+  jointly for the requested iterations. Call it before prediction, fitted
+  values, or combined coefficient summaries. This avoids latent draws and IID
+  sample storage during fitting; recovery costs depend on the selected draws.
+- Recovered IID coefficients, predictions, sample extraction, and diagnostics
+  align with the original parameter iterations through `recover_iter`.
+  Separate IID sampling and augmented non-Gaussian updates are unchanged;
+  recovery of previously saved fits with in-chain IID samples remains supported.
+- Recovery releases native resources on errors and interrupts. Recovered
+  summaries report the draw count actually used, and IID-only recovery plots
+  apply `burnin` to recovered rows. Gaussian multi-chain recovery objects can
+  be recovered again on a different iteration grid.
+- Streamlined the grouped-effects comparison with lme4, with consistent
+  posterior intervals, a Gaussian combined-coefficient diagnostic example,
+  and optional detailed comparisons. Standard-deviation summaries transform
+  individual variance draws before averaging. The getting-started vignette
+  now explains recovery for collapsed Gaussian IID effects.
+
 # stLMM 0.0.7
 
 ## New features
