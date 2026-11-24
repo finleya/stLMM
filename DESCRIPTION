@@ -52,6 +52,8 @@ Config/Needs/website:
     nimble,
     patchwork,
     RhpcBLASctl,
+    sae,
     spdep,
+    survey,
     tidyr,
     tidyverse

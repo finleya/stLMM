@@ -23,4 +23,6 @@ The package website at <https://finleya.github.io/stLMM/> provides the broader a
 
 The [getting-started vignette](v01-getting-started.html#grouped-random-effects) introduces independent and correlated IID coefficients, parent-specific child effects, prediction for new groups, and combined coefficient summaries. The [lme4 comparison](a14-lme4-validation.html) gives runnable grouped-effect examples and parameter diagnostics. The [negative-binomial article](a09-negative-binomial-counts.html) covers both fixed and estimated size, and the [sampler article](a10-metropolis-blocking-diagnostics.html) explains covariance blocking and the separate size update.
 
+The [small-area estimation comparison](a16-small-area-estimation.html) translates examples from `sae` and `survey` into area-level and unit-level stLMM models, with comparisons of area estimates and finite-population prediction.
+
 For real analyses, use the website articles as templates rather than as final settings. Longer chains, multiple-chain diagnostics, prior sensitivity checks, posterior predictive checks, and application-specific validation remain part of the user's analysis workflow.

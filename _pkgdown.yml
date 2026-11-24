@@ -54,5 +54,6 @@ articles:
   - colville-stlmm-vignette
 - title: "Additional articles"
   contents:
+  - a16-small-area-estimation
   - a14-lme4-validation
   - a13-scottish-lip-cancer-nimble-comparison

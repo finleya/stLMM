@@ -1,0 +1,459 @@
+---
+title: "Small-area estimation with stLMM, sae, and survey"
+subtitle: "Area estimates, population prediction, and uncertainty"
+author: "Andrew O. Finley"
+bibliography: references.bib
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    code-overflow: wrap
+    html-math-method: katex
+    css: stlmm-vignette.css
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+if(requireNamespace("RhpcBLASctl", quietly = TRUE))
+  RhpcBLASctl::blas_set_num_threads(1)
+source(file.path(dirname(knitr::current_input(dir = TRUE)), "utils.R"))
+```
+
+## From familiar models to stLMM
+
+Small-area estimation combines information across areas when individual area
+samples are sparse. These examples use datasets from `sae` and `survey` to show
+how familiar models translate into `stLMM` [@MolinaMarhuenda2015sae;
+@Lumley2004survey]. Milk expenditure and poverty use **area-level** responses:
+direct estimates with supplied sampling variances. Corn production and school
+achievement use **unit-level** responses, followed by population prediction.
+
+The `sae` comparisons fit the same Gaussian response and random-effect models
+by REML and report empirical best linear unbiased predictors (EBLUPs).
+`stLMM` averages over posterior parameter uncertainty under explicit priors.
+Point estimates can be close without uncertainty measures being identical:
+posterior credible intervals and frequentist mean squared errors (MSEs) have
+different interpretations. `survey` handles sampling weights and design-based
+estimation; an IID effect in `stLMM` does not substitute for a survey design.
+
+```{r packages}
+library(stLMM)
+library(sae)
+library(survey)
+library(ggplot2)
+
+n_samples <- 12000L
+burn <- 2000L
+keep <- list(start = burn + 1L, thin = 10L)
+theme_set(theme_bw(base_size = 12))
+```
+
+All fits use three chains and explicitly select `collapse_iid = TRUE`.
+For these Gaussian models, `recover()` draws the IID effects after fitting.
+We recover every tenth post-burn iteration to limit prediction storage;
+parameter diagnostics use all post-burn iterations. The default separate IID
+strategy is described in the
+[grouped-effects article](a14-lme4-validation.html#iid-sampling-strategies).
+Fixed coefficients have the default flat prior. The half-$t$ priors below
+are on standard deviations in the supplied response units; covariates are not
+automatically scaled. The models assume independent area effects and residual
+errors, with the two collections also independent of one another.
+
+```{r display-helpers}
+#| code-summary: "Show plotting and summary helpers"
+prediction_draws <- function(x) as.matrix(as_samples(x, metadata = FALSE))
+area_intervals <- function(x){
+  data.frame(mean = colMeans(x), lower = apply(x, 2, quantile, 0.025),
+             upper = apply(x, 2, quantile, 0.975))
+}
+compare_areas <- function(tab, unit){
+  ggplot(tab, aes(reference, mean)) +
+    geom_abline(slope = 1, intercept = 0, color = "grey45") +
+    geom_errorbar(aes(ymin = lower, ymax = upper), width = 0,
+                  color = stlmm_color("primary"), alpha = 0.45) +
+    geom_point(color = stlmm_color("primary"), size = 1.6) +
+    labs(x = paste0("sae EBLUP (", unit, ")"),
+         y = paste0("stLMM posterior mean (", unit, ")"))
+}
+parameter_comparison <- function(fit, reference, example){
+  p <- summary(fit, parameters = names(reference), burn = burn)$parameters
+  labels <- names(reference)
+  labels[labels == "iid_1_sigma_sq"] <- "Area variance"
+  labels[labels == "tau_sq"] <- "Residual variance"
+  data.frame(Example = example, Parameter = labels,
+    stLMM = sprintf("%.3f [%.3f, %.3f]", p[, "mean"],
+                    p[, "q2.5"], p[, "q97.5"]),
+    REML = round(unname(reference), 3))
+}
+```
+
+## Milk expenditure: an area-level model
+
+The `sae::milk` data contain 43 direct estimates of mean expenditure, their
+standard errors, and a four-level major-area classification. Following the
+[`sae` Fay–Herriot example](https://cran.r-project.org/web/packages/sae/sae.pdf),
+write
+
+$$
+\begin{aligned}
+\widehat\theta_d &= \theta_d + e_d,\qquad
+\theta_d = \beta_0 + \boldsymbol{x}_d^\top\boldsymbol\beta + u_d,\\
+u_d&\sim N(0,\sigma_u^2),\qquad e_d\sim N(0,v_d).
+\end{aligned}
+$$
+
+Here $\boldsymbol{x}_d$ contains major-area indicators and $v_d=\mathrm{SD}_d^2$
+is treated as known. The independent $u_d$ allow each small area's mean to
+depart from its major-area regression mean. Noisier direct estimates receive
+more smoothing [@FayHerriot1979].
+
+```{r milk-data}
+data(milk, package = "sae")
+milk$MajorArea <- factor(milk$MajorArea)
+milk$SmallArea <- factor(milk$SmallArea)
+milk$vhat <- milk$SD^2
+milk_sae <- sae::mseFH(yi ~ MajorArea, vardir = vhat, data = milk)
+```
+
+```{r milk-fit}
+#| code-fold: false
+milk_fit <- stLMM(
+  yi ~ MajorArea + iid(SmallArea) + resid(model = "fixed", variance = vhat),
+  data = milk, priors = list(iid_1 = list(sigma_sq = half_t(3, 0.25))),
+  collapse_iid = TRUE, n_samples = n_samples, chains = 3,
+  chain_control = list(seed = 201), verbose = FALSE
+)
+set.seed(1201)
+milk_rec <- recover(milk_fit, sub_sample = keep)
+milk_draws <- prediction_draws(predict(milk_rec))
+```
+
+These are draws of the latent area means $\theta_d$. We leave `y_samples = FALSE`:
+adding sampling-error draws would instead predict another direct survey estimate.
+
+```{r milk-comparison, fig.width=6, fig.height=4}
+milk_tab <- cbind(area_intervals(milk_draws), reference = milk_sae$est$eblup)
+compare_areas(milk_tab, "expenditure units")
+```
+
+Each point is an area; vertical bars are central 95% posterior credible intervals.
+The diagonal denotes equal point estimates. The mean absolute difference is
+`r signif(mean(abs(milk_tab$mean - milk_tab$reference)), 3)` expenditure units.
+The median posterior SD is `r round(median(apply(milk_draws, 2, sd)), 3)`,
+while the median square root of the `sae` MSE is
+`r round(median(sqrt(milk_sae$mse)), 3)`. Neither is a direct estimate's sampling SE.
+
+## Spanish poverty: survey estimates into an area model
+
+The [survey SAE vignette](https://cran.r-project.org/web/packages/survey/vignettes/survey-sae.html)
+uses synthetic income data for 52 Spanish provinces. Define poverty using its
+threshold, 60% of the sample median income. With known province sizes $N_d$,
+the weighted direct estimate is
+$\widehat p_d=N_d^{-1}\sum_{i\in s_d}w_i\,\mathbf{1}(y_i<z)$.
+The basic smoothing model is
+
+$$
+\begin{aligned}
+\widehat p_d &= p_d + e_d,\qquad p_d=\beta_0+u_d,\\
+u_d&\sim N(0,\sigma_u^2),\qquad e_d\sim N(0,v_d).
+\end{aligned}
+$$
+
+This is a Gaussian working model for a survey estimate, rather than a binomial
+model for the individual records. Both smoothers receive exactly the same
+direct estimates and variances. We use survey's with-replacement variance
+approximation from the supplied weights; full sampling-design information is
+not supplied with these synthetic records.
+
+```{r poverty-data}
+data(incomedata, package = "sae")
+data(sizeprov, package = "sae")
+incomedata$poor <- as.integer(incomedata$income < 0.6 * median(incomedata$income))
+income_design <- svydesign(ids = ~1, weights = ~weight, data = incomedata)
+direct <- svyby(~poor, ~provlab, income_design, svytotal)
+N <- sizeprov$Nd[match(direct$provlab, sizeprov$provlab)]
+poverty <- data.frame(provlab = direct$provlab,
+  estimate = coef(direct) / N, vhat = SE(direct)^2 / N^2)
+poverty_sae <- sae::mseFH(estimate ~ 1, vardir = vhat, data = poverty)
+```
+
+```{r poverty-fit}
+#| code-fold: false
+poverty_fit <- stLMM(
+  estimate ~ 1 + iid(provlab) + resid(model = "fixed", variance = vhat),
+  data = poverty, priors = list(iid_1 = list(sigma_sq = half_t(3, 0.1))),
+  collapse_iid = TRUE, n_samples = n_samples, chains = 3,
+  chain_control = list(seed = 202), verbose = FALSE
+)
+set.seed(1202)
+poverty_rec <- recover(poverty_fit, sub_sample = keep)
+poverty_draws <- prediction_draws(predict(poverty_rec))
+```
+
+```{r poverty-comparison, fig.width=6, fig.height=4}
+poverty_tab <- cbind(area_intervals(poverty_draws), reference = poverty_sae$est$eblup)
+compare_areas(100 * poverty_tab, "percent")
+```
+
+The mean absolute difference is
+`r signif(100 * mean(abs(poverty_tab$mean - poverty_tab$reference)), 3)` percentage
+points. The Gaussian model does not constrain probabilities to $[0,1]$; its
+central intervals here lie within that range. Near the boundaries, a suitable
+transformation and transformed sampling variances would need consideration.
+
+`survey::svysmoothArea()` also offers Bayesian smoothing through SUMMER/INLA,
+with PC priors. Here we use `survey` for direct estimation and `sae` for the
+REML reference; this is not an INLA–MCMC comparison under matching priors.
+The supplied sampling variances are treated as fixed in both fits.
+
+## Iowa corn: a unit-level model and a population mean
+
+The `cornsoybean` data contain 37 sampled land segments in 12 counties. The
+companion data supply county sizes and population means of satellite pixel
+counts. We reproduce the corn model used by `sae::eblupBHF()`:
+
+$$
+\begin{aligned}
+y_{di}&=\beta_0+\beta_c\,\mathrm{CornPix}_{di}
++\beta_s\,\mathrm{SoyBeansPix}_{di}+u_d+\epsilon_{di},\\
+u_d&\sim N(0,\sigma_u^2),\qquad\epsilon_{di}\sim N(0,\tau^2).
+\end{aligned}
+$$
+
+The response is corn hectares per segment. A county intercept is shared by
+its segments; residual errors are independent across segments. This BHF
+model assumes sampling is ignorable conditional on the modeled information
+[@BatteseHarterFuller1988]. Corn and soybean pixel counts are predictors of
+one response, so this is a univariate model.
+
+```{r corn-data}
+data(cornsoybean, package = "sae")
+data(cornsoybeanmeans, package = "sae")
+cornsoybean$County <- factor(cornsoybean$County)
+corn_sae <- sae::eblupBHF(CornHec ~ CornPix + SoyBeansPix, dom = County,
+  meanxpop = cornsoybeanmeans[, c("CountyIndex", "MeanCornPixPerSeg", "MeanSoyBeansPixPerSeg")],
+  popnsize = cornsoybeanmeans[, c("CountyIndex", "PopnSegments")], data = cornsoybean)
+```
+
+```{r corn-fit}
+#| code-fold: false
+corn_fit <- stLMM(
+  CornHec ~ CornPix + SoyBeansPix + iid(County), data = cornsoybean,
+  priors = list(iid_1 = list(sigma_sq = half_t(3, 50)), tau_sq = half_t(3, 50)),
+  collapse_iid = TRUE, n_samples = n_samples, chains = 3,
+  chain_control = list(seed = 203), verbose = FALSE
+)
+set.seed(1203)
+corn_rec <- recover(corn_fit, sub_sample = keep)
+```
+
+The target is the finite-population county mean:
+
+$$
+\begin{aligned}
+\bar Y_d&=\frac{\sum_{i\in s_d}y_{di}+(N_d-n_d)\bar Y_{d,r}}{N_d},\\
+\bar Y_{d,r}\mid\beta,u_d,\tau^2&\sim
+N\!\left(\bar{\boldsymbol{x}}_{d,r}^{\top}\beta+u_d,
+\frac{\tau^2}{N_d-n_d}\right).
+\end{aligned}
+$$
+
+Observed responses stay fixed. Population covariate means and sample sums
+give the nonsampled covariate means. We predict those means and add the
+appropriate residual uncertainty; no individual nonsampled records are needed.
+
+```{r corn-population}
+#| code-summary: "Show finite-population prediction"
+sums <- aggregate(cbind(CornHec, CornPix, SoyBeansPix) ~ County, cornsoybean, sum)
+sums <- sums[match(cornsoybeanmeans$CountyIndex, sums$County), ]
+N <- cornsoybeanmeans$PopnSegments
+n <- cornsoybeanmeans$SampSegments
+nonsample <- data.frame(County = cornsoybeanmeans$CountyIndex,
+  CornPix = (N * cornsoybeanmeans$MeanCornPixPerSeg - sums$CornPix) / (N - n),
+  SoyBeansPix = (N * cornsoybeanmeans$MeanSoyBeansPixPerSeg - sums$SoyBeansPix) / (N - n))
+mu <- prediction_draws(predict(corn_rec, newdata = nonsample))
+tau_sq <- as_samples(corn_fit, burn = burn, thin = keep$thin)$tau_sq
+set.seed(2203)
+noise <- matrix(rnorm(length(mu)), nrow(mu)) * sqrt(tau_sq)
+corn_draws <- sweep(mu, 2, N - n, "*") + sweep(noise, 2, sqrt(N - n), "*")
+corn_draws <- sweep(sweep(corn_draws, 2, sums$CornHec, "+"), 2, N, "/")
+```
+
+The residual variances come from the original fit on the iteration grid used
+by `recover()`, preserving their pairing with the predicted county means.
+
+```{r corn-comparison, fig.width=6, fig.height=4}
+corn_tab <- cbind(area_intervals(corn_draws), reference = corn_sae$eblup$eblup)
+compare_areas(corn_tab, "hectares per segment")
+```
+
+The mean absolute difference is
+`r round(mean(abs(corn_tab$mean - corn_tab$reference)), 2)` hectares per segment.
+With only 12 counties, uncertainty about the county variance remains substantial;
+close county estimates do not imply equally precise variance estimates.
+
+## California schools: sampled and unsampled counties
+
+The [`survey` API data](https://r-survey.r-forge.r-project.org/pkgdown/docs/reference/api.html)
+include a population of 6,194 schools and a 200-school sample stratified by
+school type. We extend that example to county means, using the previous
+year's score as auxiliary information:
+
+$$
+\begin{aligned}
+\mathrm{API00}_{di}&=\beta_0+\beta_a\,\mathrm{API99}_{di}
++\boldsymbol{x}_{di}^{\top}\boldsymbol\beta_t+u_d+\epsilon_{di},\\
+u_d&\sim N(0,\sigma_u^2),\qquad\epsilon_{di}\sim N(0,\tau^2).
+\end{aligned}
+$$
+
+The indicators $\boldsymbol{x}_{di}$ represent school type, the sampling strata.
+The outcome model treats selection as ignorable conditional on these covariates.
+The design-based comparison uses supplied weights, strata, and finite-population
+corrections. Both target a mean across schools, not a student-weighted mean.
+
+```{r school-data}
+data(api, package = "survey")
+school_design <- svydesign(ids = ~1, strata = ~stype, weights = ~pw,
+                           fpc = ~fpc, data = apistrat)
+school_direct <- svyby(~api00, ~cnum, school_design, svymean)
+```
+
+```{r school-fit}
+#| code-fold: false
+school_fit <- stLMM(
+  api00 ~ api99 + stype + iid(cnum), data = apistrat,
+  priors = list(iid_1 = list(sigma_sq = half_t(3, 100)), tau_sq = half_t(3, 100)),
+  collapse_iid = TRUE, n_samples = n_samples, chains = 3,
+  chain_control = list(seed = 204), verbose = FALSE
+)
+set.seed(1204)
+school_rec <- recover(school_fit, sub_sample = keep)
+```
+
+The sample represents 40 of the 57 counties. Prediction for the other 17
+requires `allow_new_levels = TRUE`. Their county effects are drawn from the
+posterior population distribution, including that uncertainty in predictions.
+We use the observed-plus-nonsampled calculation above. Because the model is
+Gaussian and linear, nonsampled schools can be summarized by county and
+school type without changing the distribution of their total. API scores for
+2000 outside the sample are used only to evaluate the result.
+
+```{r school-population}
+#| code-summary: "Show prediction and county aggregation"
+nonsample <- apipop[!apipop$snum %in% apistrat$snum, c("cnum", "stype", "api99")]
+nonsample$n <- 1
+cells <- aggregate(cbind(api99, n) ~ cnum + stype, nonsample, sum)
+cells$api99 <- cells$api99 / cells$n
+pred <- predict(school_rec, newdata = cells, allow_new_levels = TRUE)
+mu <- prediction_draws(pred)
+tau_sq <- as_samples(school_fit, burn = burn, thin = keep$thin)$tau_sq
+set.seed(2204)
+noise <- matrix(rnorm(length(mu)), nrow(mu)) * sqrt(tau_sq)
+cell_totals <- sweep(mu, 2, cells$n, "*") + sweep(noise, 2, sqrt(cells$n), "*")
+county_totals <- t(rowsum(t(cell_totals), cells$cnum))
+county <- colnames(county_totals)
+observed <- tapply(apistrat$api00, apistrat$cnum, sum)[county]
+observed[is.na(observed)] <- 0
+N <- as.numeric(table(apipop$cnum)[county])
+school_draws <- sweep(sweep(county_totals, 2, observed, "+"), 2, N, "/")
+```
+
+Both estimators below are compared with known population means. Survey direct
+estimates exist only for sampled counties. These are different methods:
+stLMM additionally uses previous-year scores and pooling across counties.
+
+```{r school-comparison, fig.width=7, fig.height=4.5}
+school_tab <- cbind(area_intervals(school_draws),
+  truth = tapply(apipop$api00, apipop$cnum, mean)[county],
+  direct = coef(school_direct)[match(county, school_direct$cnum)])
+school_tab$sample <- ifelse(county %in% apistrat$cnum, "Sampled counties", "Unsampled counties")
+ggplot(school_tab, aes(truth)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey45") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0,
+                color = stlmm_color("primary"), alpha = 0.45) +
+  geom_point(aes(y = mean, color = "stLMM"), size = 1.6) +
+  geom_point(aes(y = direct, color = "Survey direct"), shape = 4, size = 1.8, na.rm = TRUE) +
+  facet_wrap(~ sample) +
+  scale_color_manual(values = c(stLMM = stlmm_color("primary"),
+                                "Survey direct" = stlmm_color("secondary"))) +
+  labs(x = "Known population county mean", y = "Estimated county mean", color = "Estimate") +
+  theme(legend.position = "bottom")
+```
+
+```{r school-error}
+sampled <- school_tab$sample == "Sampled counties"
+rmse <- function(estimate, truth) sqrt(mean((estimate - truth)^2))
+knitr::kable(data.frame(
+  Counties = c("Sampled (40)", "Sampled (40)", "Unsampled (17)"),
+  Estimate = c("Survey direct", "stLMM", "stLMM"),
+  RMSE = round(c(rmse(school_tab$direct[sampled], school_tab$truth[sampled]),
+                 rmse(school_tab$mean[sampled], school_tab$truth[sampled]),
+                 rmse(school_tab$mean[!sampled], school_tab$truth[!sampled])), 2)
+), caption = "County-mean errors for this sample, in API score points", row.names = FALSE)
+```
+
+These errors describe this particular sample. Repeated sampling would be needed
+to assess design-based bias or interval coverage. The population outcomes are
+known here; the latent means in the other examples are not known truths.
+
+## Checking the comparison
+
+The first three examples compare the same models and area targets under REML
+and Bayesian estimation. The fourth shows a model-based extension of a survey
+example. Check the target, supplied variances, priors, and diagnostics before
+interpreting agreement. A close scatterplot alone does not validate an estimator
+for other data or designs.
+
+```{r diagnostics}
+fits <- list(Milk = milk_fit, Poverty = poverty_fit, Corn = corn_fit, Schools = school_fit)
+diagnostics <- do.call(rbind, lapply(names(fits), function(example){
+  d <- summary(fits[[example]], burn = burn, diagnostic_method = "rank")$diagnostics
+  data.frame(Example = example, Rhat = round(max(d$rhat), 3),
+    bulk_ESS = round(min(d$ess_bulk)), tail_ESS = round(min(d$ess_tail)))
+}))
+knitr::kable(diagnostics, row.names = FALSE,
+  caption = "Maximum rank R-hat and minimum bulk/tail ESS across model parameters")
+```
+
+Diagnostics use the rank-normalized methods of @Vehtari2021Rhat. The plotted
+intervals use the recovered iteration grid. The
+[combined-summary examples](a14-lme4-validation.html#combined-coefficients)
+explain how to diagnose fixed-plus-group quantities directly.
+
+<details>
+<summary>Regression coefficients and variance components</summary>
+
+Posterior means and central 95% credible intervals are shown beside REML estimates.
+The small number of Iowa counties makes its variance comparison less precise
+than its area-mean comparison. Variance parameters below are on the variance
+scale, even though their priors were specified on standard deviations.
+
+```{r parameter-table}
+milk_reference <- c(setNames(milk_sae$est$fit$estcoef$beta,
+                             c("(Intercept)", "MajorArea2", "MajorArea3", "MajorArea4")),
+                     iid_1_sigma_sq = milk_sae$est$fit$refvar)
+poverty_reference <- c("(Intercept)" = poverty_sae$est$fit$estcoef$beta,
+                        iid_1_sigma_sq = poverty_sae$est$fit$refvar)
+corn_reference <- c(setNames(corn_sae$fit$fixed, c("(Intercept)", "CornPix", "SoyBeansPix")),
+                     tau_sq = corn_sae$fit$errorvar, iid_1_sigma_sq = corn_sae$fit$refvar)
+knitr::kable(rbind(parameter_comparison(milk_fit, milk_reference, "Milk"),
+                   parameter_comparison(poverty_fit, poverty_reference, "Poverty"),
+                   parameter_comparison(corn_fit, corn_reference, "Corn")), row.names = FALSE)
+```
+
+</details>
+
+```{r package-versions}
+#| echo: false
+cat("Package versions: ", paste(vapply(c("stLMM", "sae", "survey"), function(p)
+  paste(p, packageVersion(p)), character(1)), collapse = "; "), ".", sep = "")
+```

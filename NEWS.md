@@ -1,5 +1,9 @@
 # stLMM (development version)
 
+- Added an Additional Article comparing small-area estimates with `sae` and
+  `survey`, covering Fay–Herriot models, unit-level population prediction,
+  and prediction for unsampled counties.
+
 - Gaussian fits with `collapse_iid = TRUE` now defer IID and structured effect
   draws to `recover()`, including IID-only fits. Recovery samples both blocks
   jointly for the requested iterations. Call it before prediction, fitted
