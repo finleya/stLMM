@@ -58,8 +58,8 @@ theme_set(theme_bw(base_size = 12))
 
 All fits use three chains and explicitly select `collapse_iid = TRUE`.
 For these Gaussian models, `recover()` draws the IID effects after fitting.
-We recover every tenth post-burn iteration to limit prediction storage;
-parameter diagnostics use all post-burn iterations. The default separate IID
+We recover every tenth post-burn iteration to limit prediction storage.
+The default separate IID
 strategy is described in the
 [grouped-effects article](a14-lme4-validation.html#iid-sampling-strategies).
 Fixed coefficients have the default flat prior. The half-$t$ priors below
@@ -74,12 +74,23 @@ area_intervals <- function(x){
   data.frame(mean = colMeans(x), lower = apply(x, 2, quantile, 0.025),
              upper = apply(x, 2, quantile, 0.975))
 }
-compare_areas <- function(tab, unit){
-  ggplot(tab, aes(reference, mean)) +
-    geom_abline(slope = 1, intercept = 0, color = "grey45") +
+compare_areas <- function(tab, unit, mse = NULL){
+  p <- ggplot(tab, aes(reference, mean)) +
+    geom_abline(slope = 1, intercept = 0, color = "grey45")
+  if(!is.null(mse)){
+    tab$reference_lower <- tab$reference - qnorm(0.975) * sqrt(mse)
+    tab$reference_upper <- tab$reference + qnorm(0.975) * sqrt(mse)
+    p <- p + geom_errorbar(data = tab,
+      aes(xmin = reference_lower, xmax = reference_upper),
+      orientation = "y", width = 0, color = "grey55", alpha = 0.5)
+  }
+  limits <- range(tab$reference, tab$mean, tab$lower, tab$upper,
+                  tab$reference_lower, tab$reference_upper)
+  p +
     geom_errorbar(aes(ymin = lower, ymax = upper), width = 0,
                   color = stlmm_color("primary"), alpha = 0.45) +
     geom_point(color = stlmm_color("primary"), size = 1.6) +
+    coord_equal(xlim = limits, ylim = limits) +
     labs(x = paste0("sae EBLUP (", unit, ")"),
          y = paste0("stLMM posterior mean (", unit, ")"))
 }
@@ -105,12 +116,12 @@ write
 $$
 \begin{aligned}
 \widehat\theta_d &= \theta_d + e_d,\qquad
-\theta_d = \beta_0 + \boldsymbol{x}_d^\top\boldsymbol\beta + u_d,\\
+\theta_d = \beta_0 + \mathbf{x}_d^\top\mathbf{\beta} + u_d,\\
 u_d&\sim N(0,\sigma_u^2),\qquad e_d\sim N(0,v_d).
 \end{aligned}
 $$
 
-Here $\boldsymbol{x}_d$ contains major-area indicators and $v_d=\mathrm{SD}_d^2$
+Here $\mathbf{x}_d$ contains major-area indicators and $v_d=\mathrm{SD}_d^2$
 is treated as known. The independent $u_d$ allow each small area's mean to
 depart from its major-area regression mean. Noisier direct estimates receive
 more smoothing [@FayHerriot1979].
@@ -139,13 +150,19 @@ milk_draws <- prediction_draws(predict(milk_rec))
 These are draws of the latent area means $\theta_d$. We leave `y_samples = FALSE`:
 adding sampling-error draws would instead predict another direct survey estimate.
 
-```{r milk-comparison, fig.width=6, fig.height=4}
+```{r milk-comparison, fig.width=5.5, fig.height=5}
 milk_tab <- cbind(area_intervals(milk_draws), reference = milk_sae$est$eblup)
-compare_areas(milk_tab, "expenditure units")
+compare_areas(milk_tab, "expenditure units", mse = milk_sae$mse)
 ```
 
 Each point is an area; vertical bars are central 95% posterior credible intervals.
-The diagonal denotes equal point estimates. The mean absolute difference is
+Horizontal bars are approximate 95% frequentist intervals for the same area
+means, calculated as EBLUP $\pm 1.96\sqrt{\widehat{\mathrm{MSE}}}$ using
+`mseFH()` [@MolinaMarhuenda2015sae]. Their coverage relies on a normal
+approximation; they are not posterior probability statements. Both estimates
+use the same data, so bar overlap is not a test of agreement.
+All scatterplots use matching axis limits and equal units on both axes;
+the 45-degree diagonal denotes equal point estimates. The mean absolute difference is
 `r signif(mean(abs(milk_tab$mean - milk_tab$reference)), 3)` expenditure units.
 The median posterior SD is `r round(median(apply(milk_draws, 2, sd)), 3)`,
 while the median square root of the `sae` MSE is
@@ -198,11 +215,12 @@ poverty_rec <- recover(poverty_fit, sub_sample = keep)
 poverty_draws <- prediction_draws(predict(poverty_rec))
 ```
 
-```{r poverty-comparison, fig.width=6, fig.height=4}
+```{r poverty-comparison, fig.width=5.5, fig.height=5}
 poverty_tab <- cbind(area_intervals(poverty_draws), reference = poverty_sae$est$eblup)
-compare_areas(100 * poverty_tab, "percent")
+compare_areas(100 * poverty_tab, "percent", mse = 100^2 * poverty_sae$mse)
 ```
 
+Horizontal and vertical bars follow the milk comparison's conventions.
 The mean absolute difference is
 `r signif(100 * mean(abs(poverty_tab$mean - poverty_tab$reference)), 3)` percentage
 points. The Gaussian model does not constrain probabilities to $[0,1]$; its
@@ -260,8 +278,8 @@ The target is the finite-population county mean:
 $$
 \begin{aligned}
 \bar Y_d&=\frac{\sum_{i\in s_d}y_{di}+(N_d-n_d)\bar Y_{d,r}}{N_d},\\
-\bar Y_{d,r}\mid\beta,u_d,\tau^2&\sim
-N\!\left(\bar{\boldsymbol{x}}_{d,r}^{\top}\beta+u_d,
+\bar Y_{d,r}\mid\mathbf{\beta},u_d,\tau^2&\sim
+N\!\left(\bar{\mathbf{x}}_{d,r}^{\top}\mathbf{\beta}+u_d,
 \frac{\tau^2}{N_d-n_d}\right).
 \end{aligned}
 $$
@@ -290,13 +308,15 @@ corn_draws <- sweep(sweep(corn_draws, 2, sums$CornHec, "+"), 2, N, "/")
 The residual variances come from the original fit on the iteration grid used
 by `recover()`, preserving their pairing with the predicted county means.
 
-```{r corn-comparison, fig.width=6, fig.height=4}
+```{r corn-comparison, fig.width=5.5, fig.height=5}
 corn_tab <- cbind(area_intervals(corn_draws), reference = corn_sae$eblup$eblup)
 compare_areas(corn_tab, "hectares per segment")
 ```
 
 The mean absolute difference is
 `r round(mean(abs(corn_tab$mean - corn_tab$reference)), 2)` hectares per segment.
+Only posterior intervals are shown: `eblupBHF()` returns point estimates;
+EBLUP MSE estimation would require a separate calculation, such as `pbmseBHF()`.
 With only 12 counties, uncertainty about the county variance remains substantial;
 close county estimates do not imply equally precise variance estimates.
 
@@ -310,12 +330,12 @@ year's score as auxiliary information:
 $$
 \begin{aligned}
 \mathrm{API00}_{di}&=\beta_0+\beta_a\,\mathrm{API99}_{di}
-+\boldsymbol{x}_{di}^{\top}\boldsymbol\beta_t+u_d+\epsilon_{di},\\
++\mathbf{x}_{di}^{\top}\mathbf{\beta}_t+u_d+\epsilon_{di},\\
 u_d&\sim N(0,\sigma_u^2),\qquad\epsilon_{di}\sim N(0,\tau^2).
 \end{aligned}
 $$
 
-The indicators $\boldsymbol{x}_{di}$ represent school type, the sampling strata.
+The indicators $\mathbf{x}_{di}$ represent school type, the sampling strata.
 The outcome model treats selection as ignorable conditional on these covariates.
 The design-based comparison uses supplied weights, strata, and finite-population
 corrections. Both target a mean across schools, not a student-weighted mean.
@@ -376,6 +396,7 @@ school_tab <- cbind(area_intervals(school_draws),
   truth = tapply(apipop$api00, apipop$cnum, mean)[county],
   direct = coef(school_direct)[match(county, school_direct$cnum)])
 school_tab$sample <- ifelse(county %in% apistrat$cnum, "Sampled counties", "Unsampled counties")
+limits <- range(school_tab[, c("truth", "mean", "direct", "lower", "upper")], na.rm = TRUE)
 ggplot(school_tab, aes(truth)) +
   geom_abline(slope = 1, intercept = 0, color = "grey45") +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0,
@@ -383,6 +404,7 @@ ggplot(school_tab, aes(truth)) +
   geom_point(aes(y = mean, color = "stLMM"), size = 1.6) +
   geom_point(aes(y = direct, color = "Survey direct"), shape = 4, size = 1.8, na.rm = TRUE) +
   facet_wrap(~ sample) +
+  coord_equal(xlim = limits, ylim = limits) +
   scale_color_manual(values = c(stLMM = stlmm_color("primary"),
                                 "Survey direct" = stlmm_color("secondary"))) +
   labs(x = "Known population county mean", y = "Estimated county mean", color = "Estimate") +
@@ -409,25 +431,9 @@ known here; the latent means in the other examples are not known truths.
 
 The first three examples compare the same models and area targets under REML
 and Bayesian estimation. The fourth shows a model-based extension of a survey
-example. Check the target, supplied variances, priors, and diagnostics before
+example. Check the target, supplied variances, and priors before
 interpreting agreement. A close scatterplot alone does not validate an estimator
 for other data or designs.
-
-```{r diagnostics}
-fits <- list(Milk = milk_fit, Poverty = poverty_fit, Corn = corn_fit, Schools = school_fit)
-diagnostics <- do.call(rbind, lapply(names(fits), function(example){
-  d <- summary(fits[[example]], burn = burn, diagnostic_method = "rank")$diagnostics
-  data.frame(Example = example, Rhat = round(max(d$rhat), 3),
-    bulk_ESS = round(min(d$ess_bulk)), tail_ESS = round(min(d$ess_tail)))
-}))
-knitr::kable(diagnostics, row.names = FALSE,
-  caption = "Maximum rank R-hat and minimum bulk/tail ESS across model parameters")
-```
-
-Diagnostics use the rank-normalized methods of @Vehtari2021Rhat. The plotted
-intervals use the recovered iteration grid. The
-[combined-summary examples](a14-lme4-validation.html#combined-coefficients)
-explain how to diagnose fixed-plus-group quantities directly.
 
 <details>
 <summary>Regression coefficients and variance components</summary>
